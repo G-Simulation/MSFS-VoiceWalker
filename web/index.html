@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MSFSVoiceWalker</title>
+  <link rel="icon" type="image/png" href="/logo.png">
+
+  <!-- Tailwind v4 via jsDelivr (CSP-konform) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
+  <style type="text/tailwindcss">
+    @theme {
+      --color-bg-deep: #070b16;
+      --color-bg-soft: #0f1729;
+      --color-card: rgba(21, 33, 58, 0.55);
+      --color-border: rgba(106, 165, 255, 0.15);
+      --color-ring: rgba(106, 165, 255, 0.28);
+      --color-fg: #eaf0ff;
+      --color-muted: #8696b8;
+      --color-accent: #6aa5ff;
+      --color-good: #3fdc8a;
+      --color-warn: #ffc857;
+      --color-bad: #ff6b6b;
+      --color-speaking: #ffe066;
+    }
+
+    html, body {
+      background-color: var(--color-bg-deep);
+      color: var(--color-fg);
+      font-feature-settings: "cv11", "ss01";
+    }
+    body {
+      background-image:
+        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(106,165,255,0.20), transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 110%, rgba(63,220,138,0.10), transparent 60%),
+        radial-gradient(ellipse 60% 40% at 10% 90%, rgba(255,107,61,0.05), transparent 60%);
+      background-attachment: fixed;
+    }
+
+    /* Glasscard */
+    .glass {
+      background: var(--color-card);
+      border: 1px solid var(--color-border);
+      backdrop-filter: blur(16px) saturate(140%);
+      -webkit-backdrop-filter: blur(16px) saturate(140%);
+      box-shadow:
+        0 1px 0 rgba(255,255,255,0.04) inset,
+        0 20px 40px -20px rgba(0,0,0,0.5);
+    }
+
+    /* Status-Dot-Animationen */
+    @keyframes pulseGood {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(63,220,138,0.7); }
+      50%      { box-shadow: 0 0 0 6px rgba(63,220,138,0); }
+    }
+    .dot-good { animation: pulseGood 2s infinite; }
+
+    /* Speaking-Animation fuer Leiste */
+    @keyframes slideDown {
+      from { transform: translateY(-100%); opacity: 0; }
+      to   { transform: translateY(0);     opacity: 1; }
+    }
+
+    /* Speaking-Leiste */
+    #speakingBar {
+      position: fixed; top: 0; left: 0; right: 0;
+      display: flex; gap: 8px; padding: 10px 16px;
+      justify-content: center; flex-wrap: wrap;
+      z-index: 50; pointer-events: none;
+      background: linear-gradient(180deg, rgba(7,11,22,0.85), transparent);
+      transform: translateY(-100%);
+      transition: transform 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+    }
+    #speakingBar.visible { transform: translateY(0); }
+    #speakingBar .sp {
+      background: rgba(255,224,102,0.16);
+      border: 1px solid rgba(255,224,102,0.6);
+      color: var(--color-speaking);
+      border-radius: 999px; padding: 5px 14px;
+      font-size: 12px; font-weight: 600; letter-spacing: 0.01em;
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      box-shadow: 0 8px 20px -8px rgba(255,224,102,0.3);
+    }
+
+    /* PTT */
+    .ptt-btn {
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      width: 100%; padding: 16px;
+      border-radius: 12px; font-weight: 650; font-size: 14px;
+      color: var(--color-fg); cursor: pointer; user-select: none;
+      background: linear-gradient(180deg, rgba(106,165,255,0.08), rgba(106,165,255,0.02));
+      border: 1px solid var(--color-border);
+      transition: all 0.12s;
+    }
+    .ptt-btn:hover { background: linear-gradient(180deg, rgba(106,165,255,0.16), rgba(106,165,255,0.08)); }
+    .ptt-btn.live {
+      background: linear-gradient(180deg, #4ae095, #2ecc78);
+      border-color: rgba(63,220,138,0.5);
+      color: #06210f;
+      box-shadow: 0 0 0 3px rgba(63,220,138,0.18), 0 10px 40px -10px rgba(63,220,138,0.6);
+    }
+
+    /* Peer-Rows */
+    .peer-row {
+      display: grid; grid-template-columns: 22px 1fr auto; gap: 12px;
+      align-items: center; padding: 10px 2px;
+      border-bottom: 1px solid var(--color-border);
+      transition: background 0.15s;
+    }
+    .peer-row:hover { background: rgba(106,165,255,0.04); }
+    .peer-row:last-child { border-bottom: none; }
+    .peer-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--color-muted); flex-shrink: 0;
+      transition: box-shadow 0.2s;
+    }
+    .peer-row.in-range .peer-dot  { background: var(--color-good); }
+    .peer-row.far      .peer-dot  { background: var(--color-muted); opacity: 0.45; }
+    .peer-row.speaking .peer-dot  { background: var(--color-speaking);
+      box-shadow: 0 0 0 4px rgba(255,224,102,0.2), 0 0 12px var(--color-speaking);
+      animation: pulseSpeak 1.2s ease-in-out infinite;
+    }
+    @keyframes pulseSpeak {
+      0%, 100% { box-shadow: 0 0 0 4px rgba(255,224,102,0.2), 0 0 12px var(--color-speaking); }
+      50%      { box-shadow: 0 0 0 8px rgba(255,224,102,0.0), 0 0 18px var(--color-speaking); }
+    }
+
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 6px;
+      font-size: 10px; font-weight: 600; letter-spacing: 0.03em;
+      background: rgba(106,165,255,0.12); color: var(--color-muted);
+      margin-left: 4px; vertical-align: 1px;
+    }
+    .badge.walker   { background: rgba(255,200,87,0.18);  color: var(--color-warn); }
+    .badge.cockpit  { background: rgba(106,165,255,0.18); color: var(--color-accent); }
+    .badge.external { background: rgba(192,149,230,0.18); color: #c095e6; }
+
+    /* Volume-Bar */
+    .vol-bar {
+      width: 90px; height: 5px;
+      background: rgba(255,255,255,0.04);
+      border-radius: 999px; overflow: hidden;
+    }
+    .vol-bar > div {
+      height: 100%; border-radius: 999px;
+      background: linear-gradient(90deg, var(--color-accent), var(--color-good));
+      transition: width 0.25s;
+    }
+
+    /* Radar */
+    .radar-wrap {
+      position: relative;
+      padding: 8px 0 4px;
+    }
+    .radar-wrap::before {
+      content: ''; position: absolute; inset: 0;
+      background: radial-gradient(circle at center, rgba(106,165,255,0.07), transparent 60%);
+      pointer-events: none; border-radius: 999px;
+    }
+    .radar-wrap canvas {
+      display: block; margin: 0 auto;
+      filter: drop-shadow(0 12px 28px rgba(47,92,255,0.22));
+    }
+
+    /* Details-Toggle */
+    details > summary::-webkit-details-marker { display: none; }
+    details > summary::before {
+      content: "▸"; display: inline-block; margin-right: 6px;
+      transition: transform 0.15s; color: var(--color-accent);
+    }
+    details[open] > summary::before { transform: rotate(90deg); }
+
+    /* Selection */
+    ::selection { background: rgba(106,165,255,0.3); color: #fff; }
+  </style>
+</head>
+<body class="min-h-screen font-sans antialiased">
+
+  <div id="speakingBar"><!-- speakers injected here --></div>
+
+  <div id="updateBanner" class="hidden fixed top-3 right-3 z-[60] max-w-sm glass rounded-xl p-3 shadow-2xl">
+    <div class="flex items-start gap-3">
+      <div class="w-2 h-2 rounded-full mt-1.5 bg-[color:var(--color-good)] shrink-0 dot-good"></div>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-semibold">Update verfügbar</div>
+        <div id="updateBannerText" class="text-xs text-[color:var(--color-muted)] mt-0.5"></div>
+        <div class="flex gap-2 mt-2">
+          <button id="updateInstallBtn"
+                  class="px-2.5 py-1 rounded-md bg-[color:var(--color-good)] text-[#06210f] font-semibold text-xs hover:brightness-110 transition">
+            Jetzt installieren
+          </button>
+          <a id="updateNotesLink" href="#" target="_blank"
+             class="px-2.5 py-1 rounded-md border border-[color:var(--color-border)] text-[color:var(--color-muted)] text-xs hover:bg-white/5 transition">
+            Details
+          </a>
+          <button id="updateDismissBtn"
+                  class="px-2 py-1 rounded-md text-[color:var(--color-muted)] text-xs hover:bg-white/5 transition"
+                  aria-label="Schließen">✕</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mx-auto max-w-5xl px-5 py-6 md:py-10">
+
+    <!-- ================= HEADER ================= -->
+    <header class="flex items-center gap-4 mb-8">
+      <div class="w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden ring-1 ring-white/10 shadow-lg shadow-blue-500/20"
+           style="background: linear-gradient(135deg, #6aa5ff, #2f5cff);">
+        <!-- Inline-SVG-Fallback: Radar mit Mikro. Wenn spaeter eine logo.png
+             in /web liegt, erscheint sie als <img> davor; das <svg> wird dann
+             ueberdeckt. -->
+        <img src="/logo.png" alt="" class="w-full h-full object-contain absolute"
+             onerror="this.remove()">
+        <svg viewBox="0 0 24 24" class="w-7 h-7 text-white relative" fill="none">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="0.8" opacity="0.45" fill="none"/>
+          <circle cx="12" cy="12" r="6.5" stroke="currentColor" stroke-width="0.8" opacity="0.6" fill="none"/>
+          <circle cx="16.5" cy="8" r="0.9" fill="#3fdc8a"/>
+          <rect x="10" y="7.5" width="4" height="6.5" rx="2" fill="currentColor"/>
+          <path d="M8.5 12.2 a3.5 3.5 0 0 0 7 0" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+          <line x1="12" y1="15.5" x2="12" y2="17.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="flex-1 min-w-0">
+        <h1 class="text-lg md:text-xl font-bold tracking-tight">MSFSVoiceWalker</h1>
+        <p class="text-xs text-[color:var(--color-muted)]">
+          Proximity-Voice für MSFS 2020 & 2024 · P2P · kein Server
+        </p>
+      </div>
+      <div class="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full glass text-xs text-[color:var(--color-muted)]">
+        <span class="w-2 h-2 rounded-full bg-[color:var(--color-good)] dot-good"></span>
+        v0.1.0 · online
+      </div>
+    </header>
+
+    <!-- ================= STATUS STRIP ================= -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+      <div class="glass rounded-xl px-4 py-3 flex items-center gap-3">
+        <div id="simDot" class="w-2.5 h-2.5 rounded-full bg-[color:var(--color-muted)] shrink-0"></div>
+        <div>
+          <div class="text-[10px] uppercase tracking-wider text-[color:var(--color-muted)]">Sim</div>
+          <div id="simStatus" class="text-sm font-semibold">verbinde…</div>
+        </div>
+      </div>
+      <div class="glass rounded-xl px-4 py-3 flex items-center gap-3">
+        <div id="micDot" class="w-2.5 h-2.5 rounded-full bg-[color:var(--color-muted)] shrink-0"></div>
+        <div>
+          <div class="text-[10px] uppercase tracking-wider text-[color:var(--color-muted)]">Mikrofon</div>
+          <div id="micStatus" class="text-sm font-semibold">initialisiere…</div>
+        </div>
+      </div>
+      <div class="glass rounded-xl px-4 py-3 flex items-center gap-3">
+        <div id="meshDot" class="w-2.5 h-2.5 rounded-full bg-[color:var(--color-muted)] shrink-0"></div>
+        <div>
+          <div class="text-[10px] uppercase tracking-wider text-[color:var(--color-muted)]">Mesh</div>
+          <div id="meshStatus" class="text-sm font-semibold">0 Peers</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= RADAR (fullwidth) ================= -->
+    <div class="glass rounded-2xl p-5 md:p-6 mb-6">
+      <div class="flex items-baseline justify-between mb-2">
+        <h2 class="text-[11px] font-bold tracking-widest uppercase text-[color:var(--color-muted)]">
+          Radar · 1.25 km · Heading Up
+        </h2>
+        <span class="text-[10px] text-[color:var(--color-muted)]">Kopfhörer für echten Richtungs-Sound</span>
+      </div>
+      <div class="radar-wrap">
+        <canvas id="radar" width="340" height="340"></canvas>
+      </div>
+      <div class="flex flex-wrap justify-center gap-x-5 gap-y-2 mt-4 text-xs">
+        <span class="flex items-center gap-2 text-[color:var(--color-muted)]">
+          <span class="w-2 h-2 rounded-full bg-[color:var(--color-good)]"></span>
+          beidseitig hörbar
+        </span>
+        <span class="flex items-center gap-2 text-[color:var(--color-muted)]">
+          <span class="w-2 h-2 rounded-full bg-[color:var(--color-accent)]"></span>
+          nur du hörst ihn
+        </span>
+        <span class="flex items-center gap-2 text-[color:var(--color-muted)]">
+          <span class="w-2 h-2 rounded-full bg-[color:var(--color-warn)]"></span>
+          nur er hört dich
+        </span>
+        <span class="flex items-center gap-2 text-[color:var(--color-muted)]">
+          <span class="w-2 h-2 rounded-full bg-[#6b7896]"></span>
+          außer Reichweite
+        </span>
+        <span class="flex items-center gap-2 text-[color:var(--color-muted)]">
+          <span class="w-2 h-2 rounded-full bg-[color:var(--color-speaking)] shadow-[0_0_8px_var(--color-speaking)]"></span>
+          spricht gerade
+        </span>
+      </div>
+    </div>
+
+    <!-- ================= SELF + PEERS ================= -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
+
+      <!-- SELF / PTT -->
+      <div class="glass rounded-2xl p-5">
+        <h2 class="text-[11px] font-bold tracking-widest uppercase text-[color:var(--color-muted)] mb-3">Du</h2>
+
+        <dl class="space-y-2 text-sm">
+          <div class="flex justify-between">
+            <dt class="text-[color:var(--color-muted)] text-xs">Position</dt>
+            <dd id="pos" class="tabular-nums text-xs">—</dd>
+          </div>
+          <div class="flex justify-between">
+            <dt class="text-[color:var(--color-muted)] text-xs">Höhe über Grund</dt>
+            <dd id="agl" class="tabular-nums text-xs">—</dd>
+          </div>
+          <div class="flex justify-between">
+            <dt class="text-[color:var(--color-muted)] text-xs">Ansicht</dt>
+            <dd id="mode" class="text-xs">—</dd>
+          </div>
+          <div class="flex justify-between">
+            <dt class="text-[color:var(--color-muted)] text-xs">Mesh-Zelle</dt>
+            <dd id="cell" class="tabular-nums text-xs">—</dd>
+          </div>
+        </dl>
+
+        <button id="pttBtn" class="ptt-btn mt-4">
+          <svg viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4">
+            <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zm5 9a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/>
+          </svg>
+          <span id="pttLabel">Leertaste halten zum Sprechen</span>
+        </button>
+
+        <div class="mt-4 flex items-center gap-3">
+          <label for="callsign" class="text-xs text-[color:var(--color-muted)] shrink-0">Callsign</label>
+          <input id="callsign" maxlength="16" value="PILOT"
+                 class="flex-1 min-w-0 bg-[color:var(--color-bg-soft)] border border-[color:var(--color-border)] rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--color-ring)] transition">
+          <label class="text-xs text-[color:var(--color-muted)] inline-flex items-center gap-1.5 cursor-pointer">
+            <input id="voxToggle" type="checkbox" class="accent-[color:var(--color-accent)]">
+            VOX
+          </label>
+        </div>
+
+        <details id="pttDetails" class="mt-4 text-xs">
+          <summary class="cursor-pointer text-[color:var(--color-muted)] select-none py-1">
+            USB-PTT zuweisen (optional)
+          </summary>
+          <div class="mt-3 space-y-2">
+            <div class="flex justify-between">
+              <span class="text-[color:var(--color-muted)]">Aktuelle Bindung</span>
+              <span id="pttBindingText" class="tabular-nums">keine</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-[color:var(--color-muted)]">Erkannte Geräte</span>
+              <span id="pttDevices" class="text-right max-w-[60%] truncate">—</span>
+            </div>
+            <div class="flex gap-2 mt-3">
+              <button id="pttBindBtn"
+                      class="px-3 py-1.5 rounded-lg bg-[color:var(--color-accent)] text-[#0b1220] font-semibold hover:bg-blue-300 transition">
+                Taste zuweisen
+              </button>
+              <button id="pttCancelBtn" style="display:none"
+                      class="px-3 py-1.5 rounded-lg border border-[color:var(--color-border)] text-[color:var(--color-muted)] hover:bg-white/5 transition">
+                Abbrechen
+              </button>
+              <button id="pttClearBtn"
+                      class="px-3 py-1.5 rounded-lg border border-[color:var(--color-border)] text-[color:var(--color-muted)] hover:bg-white/5 transition">
+                Zurücksetzen
+              </button>
+            </div>
+            <p class="text-[10px] text-[color:var(--color-muted)] leading-relaxed mt-2">
+              Auf "Taste zuweisen" klicken, dann auf deinem Joystick / HOTAS / Yoke /
+              Button-Box einen Knopf drücken. Funktioniert anschließend auch, wenn
+              MSFS im Vordergrund ist.
+            </p>
+          </div>
+        </details>
+      </div>
+
+      <!-- PEERS -->
+      <div class="glass rounded-2xl p-5">
+        <div class="flex items-baseline justify-between mb-3">
+          <h2 class="text-[11px] font-bold tracking-widest uppercase text-[color:var(--color-muted)]">
+            Piloten im Mesh
+          </h2>
+          <label class="text-[11px] text-[color:var(--color-muted)] inline-flex items-center gap-1.5 cursor-pointer">
+            <input id="showFar" type="checkbox" checked class="accent-[color:var(--color-accent)]">
+            auch außer Reichweite
+          </label>
+        </div>
+        <div id="peers">
+          <p class="text-center text-xs text-[color:var(--color-muted)] py-4">
+            Warte auf andere Piloten in deiner Nähe…
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= FOOTER ================= -->
+    <footer class="text-center text-[11px] text-[color:var(--color-muted)]">
+      P2P via öffentliche WebTorrent-Tracker · 1 km Hörweite · keine Registrierung ·
+      <a href="/overlay.html" target="_blank" class="hover:text-[color:var(--color-accent)] transition">Mini-Overlay öffnen</a>
+    </footer>
+
+  </div>
+
+  <script type="module" src="/app.js"></script>
+  <script type="module" src="/debug.js"></script>
+</body>
+</html>

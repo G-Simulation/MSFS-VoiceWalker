@@ -1,0 +1,6 @@
+C:\MSFSVoiceWalker\installer\obj\x64\Debug\MSFSVoiceWalker.Installer.wixproj.CoreCompileInputs.cache
+C:\MSFSVoiceWalker\installer\bin\x64\Debug\MSFSVoiceWalker-Setup.msi
+C:\MSFSVoiceWalker\installer\bin\x64\Debug\MSFSVoiceWalker-Setup.wixpdb
+C:\MSFSVoiceWalker\installer\obj\x64\Debug\MSFSVoiceWalker-Setup.msi
+C:\MSFSVoiceWalker\installer\obj\x64\Debug\MSFSVoiceWalker-Setup.wixpdb
+C:\MSFSVoiceWalker\installer\obj\x64\Debug\MSFSVoiceWalker.Installer.wixproj.BindTracking-neutral.txt

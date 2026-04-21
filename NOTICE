@@ -1,0 +1,61 @@
+MSFSVoiceWalker
+Copyright (c) 2026 G-Simulation. All rights reserved.
+
+This product is governed by the proprietary license in LICENSE. It integrates
+the following third-party components, each of which remains subject to its
+own license. Nothing in MSFSVoiceWalker's LICENSE overrides those upstream
+licenses — they continue to apply to the corresponding components.
+
+===============================================================================
+
+Trystero
+    https://github.com/dmotz/trystero
+    License: MIT
+    Used for: peer discovery via public WebTorrent trackers (loaded at
+    runtime from jsDelivr CDN, not vendored).
+
+Python-SimConnect
+    https://github.com/odwdinc/Python-SimConnect
+    License: BSD-like (see upstream repository)
+    Used for: reading live aircraft/player state from MSFS.
+
+websockets (Python library)
+    https://github.com/python-websockets/websockets
+    License: BSD-3-Clause
+    Used for: HTTP + WebSocket server within the Python process.
+
+pygame
+    https://github.com/pygame/pygame
+    License: LGPL-2.1
+    Used for: USB joystick / HOTAS / button-box polling.
+    Note: pygame is dynamically linked via pip-installed wheels; we do not
+    modify or redistribute pygame's source.
+
+PyInstaller
+    https://github.com/pyinstaller/pyinstaller
+    License: GPL-2.0 with bootloader exception
+    Used at build time only to produce the distributable .exe. The
+    bootloader exception specifically permits bundled-application
+    distribution under non-GPL licenses.
+
+WebTorrent / BitTorrent trackers (public, network-only)
+    Various operators. Tracker protocol only; no code linked into this
+    product. Used for peer matchmaking via `wss://` connections. No audio
+    data transits these trackers.
+
+Google STUN servers (stun.l.google.com:19302)
+    Network service only; used by WebRTC for NAT traversal. No code
+    linked into this product, no data stored on Google's side.
+
+===============================================================================
+
+Trademark notice
+----------------
+"Microsoft Flight Simulator" is a trademark of Microsoft Corporation.
+MSFSVoiceWalker is an independent third-party tool and is not affiliated
+with, endorsed by, or sponsored by Microsoft.
+
+"SimConnect" is part of the Microsoft Flight Simulator SDK and is used
+under the terms of that SDK.
+
+All other trademarks are the property of their respective owners.

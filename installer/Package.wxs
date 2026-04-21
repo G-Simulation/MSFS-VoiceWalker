@@ -1,0 +1,227 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MSFSVoiceWalker — WiX-v7-Installer-Definition.
+
+  Baut eine MSI, die:
+    - MSFSVoiceWalker.exe nach %LOCALAPPDATA%\MSFSVoiceWalker\ installiert
+    - den Python-MSFS-Integrator (MSFSVoiceWalker-Setup.exe) mitliefert
+    - das Community-Folder-Addon mitliefert (fuer manuellen Copy oder via Integrator)
+    - Start-Menu- und Desktop-Verknuepfung anlegt (Desktop optional)
+    - sich im Add/Remove-Programs registriert
+    - optional beim Ende den Integrator fuer MSFS-Integration startet
+
+  Bitte die UpgradeCode-GUID NICHT aendern — sie identifiziert das Produkt
+  ueber alle Versionen hinweg und macht saubere Upgrades moeglich.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Package
+      Name="MSFSVoiceWalker"
+      Manufacturer="G-Simulation"
+      Version="0.1.0.0"
+      UpgradeCode="F9E8D7C6-B5A4-4392-8170-6F5E4D3C2B1A"
+      Scope="perUser"
+      Compressed="yes">
+
+    <SummaryInformation Description="MSFSVoiceWalker — Proximity-Voice für MSFS 2020/2024" />
+
+    <!-- Saubere Upgrades: vorherige Version wird automatisch entfernt -->
+    <MajorUpgrade
+        DowngradeErrorMessage="Eine neuere Version von [ProductName] ist bereits installiert." />
+
+    <!-- Alles in eine eingebettete CAB packen, damit die MSI eine einzelne Datei ist -->
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Icon, das in Add/Remove Programs erscheint -->
+    <Icon Id="AppIcon.exe" SourceFile="..\dist\MSFSVoiceWalker.exe" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.exe" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/G-Simulation/MSFSVoiceWalker" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/G-Simulation/MSFSVoiceWalker" />
+
+    <!-- ========================================================
+         Verzeichnis-Struktur
+         Per-User-Install in %LOCALAPPDATA%\MSFSVoiceWalker
+         ======================================================== -->
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="INSTALLFOLDER" Name="MSFSVoiceWalker">
+        <Directory Id="AddonDir" Name="msfs-addon" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="MSFSVoiceWalker" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder" />
+
+    <!-- ========================================================
+         Features
+         ======================================================== -->
+    <Feature Id="MainFeature" Title="Anwendung" Level="1"
+             Description="MSFSVoiceWalker selbst. Erforderlich.">
+      <ComponentGroupRef Id="AppComponents" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <!-- RemoveInstallFolder ist Teil von AppComponents; ebenso
+           RemoveAddonDir in AddonComponents, das ans MsfsAddon-Feature
+           gehaengt ist — keine weiteren ComponentRefs noetig. -->
+    </Feature>
+
+    <Feature Id="DesktopShortcut" Title="Desktop-Verknüpfung" Level="1"
+             Description="Legt ein Icon auf dem Desktop ab.">
+      <ComponentRef Id="DesktopShortcutComp" />
+    </Feature>
+
+    <Feature Id="MsfsAddon" Title="MSFS-Toolbar-Addon mitliefern" Level="1"
+             Description="Kopiert das Community-Folder-Paket in den Installer-Ordner. Die eigentliche MSFS-Integration (Community-Folder + exe.xml) wird am Ende vom Integrator erledigt.">
+      <ComponentGroupRef Id="AddonComponents" />
+    </Feature>
+
+    <!-- ========================================================
+         Komponenten: die eigentlichen Dateien.
+         Per-User-Install: File darf nicht KeyPath sein (ICE38), stattdessen
+         ein HKCU-Registry-Eintrag pro Komponente.
+         ======================================================== -->
+    <!--
+      GUIDs: stabil ueber alle Versionen. "*" kann WiX nicht auto-generieren,
+      wenn eine Komponente sowohl Datei als auch Registry-KeyPath enthaelt.
+      Nur reine Registry-Komponenten (RemoveFolder-Dummys) duerfen "*" haben.
+    -->
+    <ComponentGroup Id="AppComponents" Directory="INSTALLFOLDER">
+
+      <Component Id="MainExe" Guid="A1B2C301-0001-4000-8000-000000000001">
+        <File Id="MSFSVoiceWalkerExe" Source="..\dist\MSFSVoiceWalker.exe" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\G-Simulation\MSFSVoiceWalker\Components"
+                       Name="MainExe" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+
+      <Component Id="IntegratorExe" Guid="A1B2C301-0001-4000-8000-000000000002">
+        <File Id="IntegratorExeFile"
+              Source="..\dist\MSFSVoiceWalker-Setup.exe"
+              Name="MSFSVoiceWalker-Integrator.exe" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\G-Simulation\MSFSVoiceWalker\Components"
+                       Name="Integrator" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+
+      <Component Id="LicenseFile" Guid="A1B2C301-0001-4000-8000-000000000003">
+        <File Source="..\LICENSE" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\G-Simulation\MSFSVoiceWalker\Components"
+                       Name="License" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+
+      <Component Id="NoticeFile" Guid="A1B2C301-0001-4000-8000-000000000004">
+        <File Source="..\NOTICE" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\G-Simulation\MSFSVoiceWalker\Components"
+                       Name="Notice" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+
+      <Component Id="ReadmeFile" Guid="A1B2C301-0001-4000-8000-000000000005">
+        <File Source="..\README.md" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\G-Simulation\MSFSVoiceWalker\Components"
+                       Name="Readme" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+
+      <!-- Reine Registry-Komponente, darf * haben -->
+      <Component Id="RemoveInstallFolder" Guid="*">
+        <RemoveFolder Id="RemoveInstallFolder"
+                      Directory="INSTALLFOLDER" On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\G-Simulation\MSFSVoiceWalker\Components"
+                       Name="RemoveInstallFolder" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+
+    </ComponentGroup>
+
+    <!-- MSFS-Addon-Ordner mitverpackt; Python-Integrator kann ihn von dort abholen -->
+    <ComponentGroup Id="AddonComponents" Directory="AddonDir">
+      <Component Id="AddonManifest" Guid="A1B2C301-0001-4000-8000-000000000006">
+        <File Source="..\msfs-addon\msfsvoicewalker\manifest.json" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\G-Simulation\MSFSVoiceWalker\Components"
+                       Name="AddonManifest" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+      <Component Id="AddonLayout" Guid="A1B2C301-0001-4000-8000-000000000007">
+        <File Source="..\msfs-addon\msfsvoicewalker\layout.json" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\G-Simulation\MSFSVoiceWalker\Components"
+                       Name="AddonLayout" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+      <Component Id="RemoveAddonDir" Guid="*">
+        <RemoveFolder Id="RemoveAddonDir"
+                      Directory="AddonDir" On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\G-Simulation\MSFSVoiceWalker\Components"
+                       Name="RemoveAddonDir" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Start-Menu-Verknuepfung (immer mitinstalliert) -->
+    <Component Id="StartMenuShortcut" Directory="ApplicationProgramsFolder" Guid="*">
+      <Shortcut Id="AppStartMenuShortcut"
+                Name="MSFSVoiceWalker"
+                Description="Proximity-Voice für MSFS 2020 und 2024"
+                Target="[INSTALLFOLDER]MSFSVoiceWalker.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="AppIcon.exe" IconIndex="0" />
+      <RemoveFolder Id="RemoveStartMenuFolder" On="uninstall" />
+      <RegistryValue Root="HKCU"
+                     Key="Software\G-Simulation\MSFSVoiceWalker"
+                     Name="StartMenuShortcut"
+                     Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <!-- Desktop-Verknuepfung (optionales Feature) -->
+    <Component Id="DesktopShortcutComp" Directory="DesktopFolder" Guid="*">
+      <Shortcut Id="AppDesktopShortcut"
+                Name="MSFSVoiceWalker"
+                Description="Proximity-Voice für MSFS 2020 und 2024"
+                Target="[INSTALLFOLDER]MSFSVoiceWalker.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="AppIcon.exe" IconIndex="0" />
+      <RegistryValue Root="HKCU"
+                     Key="Software\G-Simulation\MSFSVoiceWalker"
+                     Name="DesktopShortcut"
+                     Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <!-- ========================================================
+         Custom Action: MSFS-Integrator am Ende ausfuehren
+         (registriert Community-Folder + exe.xml)
+         ======================================================== -->
+    <CustomAction Id="RunIntegrator"
+                  FileRef="IntegratorExeFile"
+                  ExeCommand=""
+                  Execute="deferred"
+                  Impersonate="yes"
+                  Return="ignore" />
+
+    <CustomAction Id="RunIntegratorUninstall"
+                  FileRef="IntegratorExeFile"
+                  ExeCommand="uninstall"
+                  Execute="deferred"
+                  Impersonate="yes"
+                  Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="RunIntegrator"
+              After="InstallFiles"
+              Condition="NOT Installed" />
+      <Custom Action="RunIntegratorUninstall"
+              Before="RemoveFiles"
+              Condition="REMOVE=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+
+    <!-- ========================================================
+         UI: Standard-Dialogfolge mit Lizenz-Seite
+         ======================================================== -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+
+  </Package>
+</Wix>

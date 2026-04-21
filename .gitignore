@@ -1,0 +1,45 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+.eggs/
+
+# --- PyInstaller ---
+build/
+dist/
+*.spec
+*.manifest
+
+# --- Runtime data ---
+ptt_config.json
+*.log
+
+# --- IDEs ---
+.vscode/
+.idea/
+.vs/
+*.vsidx
+*.user
+*.suo
+*.swp
+*.swo
+*~
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Node (nur falls jemand lokal bastelt) ---
+node_modules/
+package-lock.json
+
+# --- Sonstiges ---
+*.bak
+*.tmp
+.env
+.env.local

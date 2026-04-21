@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 620" fill="none">
+
+  <!-- ========================================================
+       LANDSCHAFT — vier Polygon-Panels, leicht überlappend
+       ======================================================== -->
+  <!-- Blaues Panel (Wasser / Himmel-Triangle, oben links) -->
+  <path d="M 90 380 L 220 380 L 165 295 Z" fill="#7ac6dd"/>
+
+  <!-- Hellgrüner zentraler Hügel -->
+  <path d="M 140 380 L 325 380 L 232 225 Z" fill="#b8d936"/>
+
+  <!-- Großer grüner Hügel rechts -->
+  <path d="M 235 380 L 425 380 L 322 238 Z" fill="#76bf3a"/>
+
+  <!-- Kleiner hellgrüner Streifen unten rechts (gibt Tiefe) -->
+  <path d="M 300 380 L 430 380 L 410 355 L 335 355 Z" fill="#b8d936"/>
+
+  <!-- Kleiner dunkler Streifen am Boden (Schatten/Basis) -->
+  <rect x="90" y="378" width="340" height="5" fill="#5da02d" opacity="0.35"/>
+
+  <!-- ========================================================
+       MIKROFON — weißer Halo hinter dem Mikro (löst das Mikro
+       vom Hügel-Hintergrund ab wie im Original)
+       ======================================================== -->
+  <g fill="#ffffff">
+    <rect x="180" y="68" width="140" height="204" rx="70"/>
+    <path d="M 156 188
+             Q 156 306 250 306
+             Q 344 306 344 188
+             L 344 212
+             Q 344 288 250 288
+             Q 156 288 156 212 Z"/>
+    <rect x="234" y="298" width="32" height="58"/>
+    <rect x="208" y="342" width="84" height="26" rx="6"/>
+  </g>
+
+  <!-- Dunkle Mikro-Formen (Navy) -->
+  <g fill="#1e3b73">
+    <rect x="190" y="78" width="120" height="184" rx="60"/>
+    <path d="M 168 192
+             Q 168 296 250 296
+             Q 332 296 332 192
+             L 316 192
+             Q 316 280 250 280
+             Q 184 280 184 192 Z"/>
+    <rect x="242" y="290" width="16" height="54"/>
+    <rect x="214" y="340" width="72" height="22" rx="5"/>
+  </g>
+
+  <!-- Grill-Linien in der Kapsel (Weiß) -->
+  <g stroke="#ffffff" stroke-width="5" stroke-linecap="round">
+    <line x1="212" y1="118" x2="212" y2="222"/>
+    <line x1="224" y1="108" x2="224" y2="232"/>
+    <line x1="236" y1="100" x2="236" y2="240"/>
+    <line x1="248" y1="96"  x2="248" y2="244"/>
+    <line x1="260" y1="96"  x2="260" y2="244"/>
+    <line x1="272" y1="100" x2="272" y2="240"/>
+    <line x1="284" y1="108" x2="284" y2="232"/>
+    <line x1="296" y1="118" x2="296" y2="222"/>
+  </g>
+
+  <path d="M 232 88 Q 250 82 268 88"
+        stroke="#ffffff" stroke-width="3" fill="none" stroke-linecap="round"/>
+
+  <!-- TEXT -->
+  <text x="250" y="478"
+        font-family="'Arial Black', Impact, 'Helvetica Neue', Helvetica, sans-serif"
+        font-size="74" font-weight="900"
+        text-anchor="middle" fill="#3a3a3a" letter-spacing="-1">VOICEWALKER</text>
+
+  <text x="250" y="524"
+        font-family="Arial, 'Helvetica Neue', Helvetica, sans-serif"
+        font-size="22" font-weight="400"
+        text-anchor="middle" fill="#555555" letter-spacing="4">Audio Map Experience</text>
+</svg>

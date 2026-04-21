@@ -1,0 +1,162 @@
+<Project Sdk="WixToolset.Sdk/6.0.2">
+
+  <!-- ===========================================================
+       MSFSVoiceWalker — WiX-Installer-Projekt (MSBuild, SDK-style).
+
+       Build-Pipeline (ein Rechtsklick "Erstellen" im Solution Explorer
+       triggert alles nacheinander):
+
+         1)  EnsurePythonToolchain
+             prüft, dass `python` und `pyinstaller` verfügbar sind;
+             installiert pyinstaller per pip falls nötig.
+
+         2)  BuildPythonExes   (incremental über Inputs/Outputs)
+             läuft PyInstaller zweimal:
+               -> dist\MSFSVoiceWalker.exe       (die App)
+               -> dist\MSFSVoiceWalker-Setup.exe (der Python-MSFS-Integrator)
+
+         3)  GenerateLicenseRtf
+             konvertiert LICENSE (plain text) nach installer\License.rtf
+             für die Installer-UI-Lizenzseite.
+
+         4)  WiX Link
+             baut daraus MSFSVoiceWalker-Setup.msi.
+       =========================================================== -->
+
+  <PropertyGroup>
+    <OutputName>MSFSVoiceWalker-Setup</OutputName>
+    <OutputType>Package</OutputType>
+
+    <Platforms>x64</Platforms>
+    <Platform Condition=" '$(Platform)' == '' ">x64</Platform>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+
+    <!-- Pfade ins Projekt-Root, relativ zu diesem .wixproj -->
+    <RepoRoot>$(MSBuildProjectDirectory)\..</RepoRoot>
+    <DistDir>$(RepoRoot)\dist</DistDir>
+    <AppExe>$(DistDir)\MSFSVoiceWalker.exe</AppExe>
+    <SetupHelperExe>$(DistDir)\MSFSVoiceWalker-Setup.exe</SetupHelperExe>
+
+    <!-- Unterdrueckte ICE-Validator-Warnungen:
+         ICE61: Majorupgrades sind gewollt.
+         ICE91: per-user-Directory variiert nicht nach ALLUSERS — bei
+                Per-User-Install gewollt, nicht sinnvoll behebbar. -->
+    <SuppressIces>ICE61;ICE91</SuppressIces>
+  </PropertyGroup>
+
+  <!-- Package.wxs wird vom WiX-SDK automatisch entdeckt (glob **/*.wxs);
+       deshalb KEIN expliziter <Compile Include>-Eintrag — sonst doppelt. -->
+
+  <!-- WiX-Erweiterungen: Standard-UI-Dialoge + util-Actions -->
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="6.0.2" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="6.0.2" />
+  </ItemGroup>
+
+
+  <!-- ===========================================================
+       TARGET 1: Toolchain-Check
+       =========================================================== -->
+  <Target Name="EnsurePythonToolchain" BeforeTargets="BeforeBuild">
+
+    <!-- Pruefe Python -->
+    <Exec Command="python --version" ConsoleToMSBuild="true" ContinueOnError="true">
+      <Output TaskParameter="ExitCode" PropertyName="PythonCheckExitCode" />
+    </Exec>
+    <Error Condition=" '$(PythonCheckExitCode)' != '0' "
+           Text="Python wurde nicht im PATH gefunden. Bitte Python 3.10+ installieren und die Installer-Build erneut starten." />
+
+    <!-- Stelle sicher, dass pyinstaller installiert ist -->
+    <Exec Command="python -c &quot;import PyInstaller&quot;"
+          ConsoleToMSBuild="true" ContinueOnError="true">
+      <Output TaskParameter="ExitCode" PropertyName="PyInstallerCheckExitCode" />
+    </Exec>
+    <Exec Condition=" '$(PyInstallerCheckExitCode)' != '0' "
+          Command="python -m pip install --upgrade pyinstaller"
+          WorkingDirectory="$(RepoRoot)" />
+
+    <!-- Projekt-Abhaengigkeiten sicherstellen (SimConnect, pygame, websockets) -->
+    <Exec Command="python -m pip install -r &quot;$(RepoRoot)\requirements.txt&quot;"
+          WorkingDirectory="$(RepoRoot)" />
+  </Target>
+
+
+  <!-- ===========================================================
+       TARGET 2: PyInstaller-Build (inkrementell)
+
+       MSBuild ueberspringt diesen Target, wenn alle Outputs neuer als
+       alle Inputs sind — d.h. wenn sich keine Python-Source geaendert
+       hat, wird PyInstaller nicht neu ausgefuehrt.
+       =========================================================== -->
+  <Target Name="BuildPythonExes"
+          BeforeTargets="BeforeBuild"
+          DependsOnTargets="EnsurePythonToolchain"
+          Inputs="$(RepoRoot)\main.py;$(RepoRoot)\debug.py;$(RepoRoot)\ptt_backend.py;$(RepoRoot)\installer.py;$(RepoRoot)\requirements.txt"
+          Outputs="$(AppExe);$(SetupHelperExe)">
+
+    <Message Text="==&gt; Baue Python-EXEs mit PyInstaller..." Importance="high" />
+
+    <!-- EXE 1: Die eigentliche App.
+         collect-all zieht Module + deren DLLs/Daten mit (SimConnect.dll,
+         SDL2.dll etc.) — noetig damit die EXE auf fremden Rechnern laeuft. -->
+    <Exec Command="python -m PyInstaller --noconfirm --clean --name MSFSVoiceWalker --onefile --console --add-data &quot;web;web&quot; --collect-all SimConnect --collect-all pygame --collect-all websockets --hidden-import ptt_backend --hidden-import debug main.py"
+          WorkingDirectory="$(RepoRoot)" />
+
+    <Error Condition="!Exists('$(AppExe)')"
+           Text="PyInstaller hat $(AppExe) nicht erzeugt. Build wird abgebrochen." />
+
+    <!-- EXE 2: Der Python-MSFS-Integrator (wird vom MSI eingebunden) -->
+    <Exec Command="python -m PyInstaller --noconfirm --clean --name MSFSVoiceWalker-Setup --onefile --console --add-data &quot;dist\MSFSVoiceWalker.exe;.&quot; --add-data &quot;msfs-addon\msfsvoicewalker;msfsvoicewalker&quot; installer.py"
+          WorkingDirectory="$(RepoRoot)" />
+
+    <Error Condition="!Exists('$(SetupHelperExe)')"
+           Text="PyInstaller hat $(SetupHelperExe) nicht erzeugt. Build wird abgebrochen." />
+
+    <Message Text="==&gt; Python-EXEs fertig: $(AppExe), $(SetupHelperExe)" Importance="high" />
+  </Target>
+
+
+  <!-- ===========================================================
+       TARGET 2b: MSFS-Addon-Layout.json aktualisieren
+
+       Ohne valide Dateigroessen + Timestamps in layout.json lehnt MSFS das
+       Community-Paket still ab — das Addon erscheint nicht in der Toolbar.
+       Der Python-Helper scannt den Addon-Ordner und schreibt eine korrekte
+       layout.json + total_package_size ins manifest.json.
+       =========================================================== -->
+  <Target Name="BuildMsfsAddon"
+          BeforeTargets="BeforeBuild"
+          DependsOnTargets="EnsurePythonToolchain">
+    <Message Text="==&gt; Generiere MSFS-Addon layout.json..." Importance="high" />
+    <Exec Command="python &quot;$(RepoRoot)\tools\build-addon.py&quot;"
+          WorkingDirectory="$(RepoRoot)" />
+  </Target>
+
+
+  <!-- ===========================================================
+       TARGET 3: License-RTF-Generierung
+       =========================================================== -->
+  <Target Name="GenerateLicenseRtf"
+          BeforeTargets="BeforeBuild"
+          DependsOnTargets="EnsurePythonToolchain"
+          Inputs="$(RepoRoot)\LICENSE;$(MSBuildProjectDirectory)\gen-license-rtf.py"
+          Outputs="$(MSBuildProjectDirectory)\License.rtf">
+    <Message Text="==&gt; Generiere License.rtf aus LICENSE..." Importance="high" />
+    <Exec Command="python &quot;$(MSBuildProjectDirectory)\gen-license-rtf.py&quot;"
+          WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+
+
+  <!-- ===========================================================
+       TARGET 4: Clean — entfernt auch die PyInstaller-Artefakte
+       =========================================================== -->
+  <Target Name="CleanPythonArtifacts" AfterTargets="Clean">
+    <Message Text="==&gt; Raeume PyInstaller-Artefakte auf..." Importance="high" />
+    <RemoveDir Directories="$(RepoRoot)\build" ContinueOnError="true" />
+    <RemoveDir Directories="$(RepoRoot)\dist" ContinueOnError="true" />
+    <Delete Files="$(RepoRoot)\MSFSVoiceWalker.spec" ContinueOnError="true" />
+    <Delete Files="$(RepoRoot)\MSFSVoiceWalker-Setup.spec" ContinueOnError="true" />
+    <Delete Files="$(MSBuildProjectDirectory)\License.rtf" ContinueOnError="true" />
+  </Target>
+
+</Project>

@@ -1,0 +1,17 @@
+BuiltPdbOutput	C:\MSFSVoiceWalker\installer\obj\x64\Debug\MSFSVoiceWalker-Setup.wixpdb
+BuiltTargetOutput	C:\MSFSVoiceWalker\installer\obj\x64\Debug\MSFSVoiceWalker-Setup.msi
+Input	..\dist\MSFSVoiceWalker-Setup.exe
+Input	..\dist\MSFSVoiceWalker.exe
+Input	..\LICENSE
+Input	..\msfs-addon\msfsvoicewalker\layout.json
+Input	..\msfs-addon\msfsvoicewalker\manifest.json
+Input	..\NOTICE
+Input	..\README.md
+Input	C:\Users\patri.MOSES\.nuget\packages\wixtoolset.ui.wixext\6.0.2\wixext6\WixToolset.UI.wixext.dll
+Intermediate	C:\MSFSVoiceWalker\installer\obj\x64\Debug\#cab1.cab
+Intermediate	C:\MSFSVoiceWalker\installer\obj\x64\Debug\WixToolset.UI.wixext_jbYgt44hCfSAazMo7Y4LZ2XvN8U\wix-ir\bannrbmp.bmp
+Intermediate	C:\MSFSVoiceWalker\installer\obj\x64\Debug\WixToolset.UI.wixext_jbYgt44hCfSAazMo7Y4LZ2XvN8U\wix-ir\dlgbmp.bmp
+Intermediate	C:\MSFSVoiceWalker\installer\obj\x64\Debug\WixToolset.UI.wixext_jbYgt44hCfSAazMo7Y4LZ2XvN8U\wix-ir\exclamic.ico
+Intermediate	C:\MSFSVoiceWalker\installer\obj\x64\Debug\WixToolset.UI.wixext_jbYgt44hCfSAazMo7Y4LZ2XvN8U\wix-ir\info.ico
+Intermediate	C:\MSFSVoiceWalker\installer\obj\x64\Debug\WixToolset.UI.wixext_jbYgt44hCfSAazMo7Y4LZ2XvN8U\wix-ir\new.ico
+Intermediate	C:\MSFSVoiceWalker\installer\obj\x64\Debug\WixToolset.UI.wixext_jbYgt44hCfSAazMo7Y4LZ2XvN8U\wix-ir\up.ico
