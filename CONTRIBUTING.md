@@ -1,60 +1,73 @@
 # Mitarbeit an MSFSVoiceWalker
 
-MSFSVoiceWalker ist **kein klassisches Open-Source-Projekt**. Der Quellcode
-liegt öffentlich zugänglich in diesem Repository, damit er geprüft werden
-kann (Sicherheit, Transparenz), aber die [LICENSE](LICENSE) schränkt
-Weiterverwendung, Weiterverbreitung und Modifikation stark ein.
+Danke für dein Interesse. MSFSVoiceWalker ist unter der
+[Apache License 2.0](LICENSE) freigegeben — Beiträge sind
+ausdrücklich willkommen und unkompliziert.
 
-## Bug-Reports und Security-Hinweise
+## Bugs und Sicherheitslücken
 
-Beides ist willkommen und ausdrücklich erwünscht:
-
-- **Bugs / Fehlverhalten**: bitte als GitHub-Issue im Repository öffnen.
-  Nützlich: Betriebssystem-Version, MSFS-Version (2020/2024, Store/Steam),
-  Schritte zur Reproduktion, relevante Log-Ausgaben.
-- **Sicherheitslücken**: bitte **nicht** als öffentliches Issue — stattdessen
-  privat an den Org-Besitzer von [G-Simulation](https://github.com/G-Simulation)
-  wenden.
+- **Bugs / Fehlverhalten**: gern als
+  [GitHub-Issue](https://github.com/G-Simulation/MSFS-VoiceWalker/issues).
+  Hilfreich: Windows-Version, MSFS-Version (2020/2024, Store oder Steam),
+  Schritte zur Reproduktion, und wenn möglich das Debug-Bundle:
+  Strg+Shift+D im Browser-UI → Export.
+- **Sicherheitslücken**: bitte **nicht** als öffentliches Issue.
+  Meldeweg steht in [SECURITY.md](SECURITY.md).
 
 ## Code-Contributions
 
-Pull Requests werden **nur mit vorher unterzeichnetem Contributor License
-Agreement (CLA)** angenommen. Grund: wir behalten uns vor, das Projekt
-weiter unter proprietärer Lizenz zu halten, zu lizenzieren oder kommerziell
-zu verwerten. Ohne klare Rechte an eingereichten Beiträgen geht das nicht.
+Pull Requests werden sehr gerne angenommen.
 
-Wenn du etwas beitragen willst:
+**Kein CLA nötig.** Nach Apache-2.0-Standard (Section 5) gilt
+"inbound = outbound": dein Beitrag wird automatisch unter derselben
+Apache-2.0-Lizenz wie das Projekt eingebracht. Kein Papierkram, kein
+Unterschreiben.
 
-1. Öffne vorher ein Issue oder Diskussion und beschreibe dein Vorhaben.
-2. Warte auf Freigabe — wir geben ehrliches Feedback, ob es in das Projekt
-   passt, bevor du Zeit investierst.
-3. Nach Freigabe wird dir das CLA zugeschickt; bei Privatpersonen typischer
-   Umfang 1 Seite.
+### Workflow
 
-Spontane PRs ohne vorherige Abstimmung werden **nicht gemerged**, selbst
-wenn sie technisch einwandfrei sind.
+1. Repo forken, Branch anlegen (`feature/xyz` oder `fix/xyz`).
+2. Änderung machen, am besten mit kurzer Commit-Message ("Was" und "Warum").
+3. PR aufmachen. Bitte im PR-Text kurz erklären, was die Änderung tut
+   und wie sie getestet wurde.
+4. Bei größeren Refactorings vorher ein Issue oder Draft-PR —
+   damit wir uns nicht in die Quere kommen.
+
+### Code-Stil
+
+- Python: PEP-8, vernünftige Zeilenlänge (< 100). Type-Hints wo sinnvoll.
+  Kein Formatter-Zwang, aber einigermaßen lesbar.
+- JavaScript: 2 Spaces, keine inline-`<script>`-Tags (CSP), keine
+  externen Libraries außer denen die schon im Projekt sind.
+- Web-UI: Tailwind-Utility-Klassen wo möglich, custom CSS nur wenn Tailwind
+  nicht reicht.
+
+## Was wir besonders gut gebrauchen können
+
+- Test-Berichte aus echten Setups (MSFS 2020 vs 2024, verschiedene HOTAS,
+  verschiedene Router/NAT-Varianten)
+- Übersetzungen (aktuell ist die UI zu 90 % auf Deutsch — Englisch und
+  weitere Sprachen wären ein Plus)
+- Radio-/Funk-Sound-Effekt für die Stimme (steht auf der offenen TODO-Liste)
+- Testen auf anderen Browsern (aktuell primär Chrome/Edge getestet)
 
 ## Was wir nicht annehmen
 
-- Forks dieses Projekts, die eigenständig weiterentwickelt und veröffentlicht
-  werden sollen (das wäre ein Lizenzverstoß, siehe [LICENSE](LICENSE)).
-- Vorschläge, das Projekt unter einer freien Open-Source-Lizenz (MIT, GPL,
-  Apache …) neu zu veröffentlichen. Das Lizenzmodell ist bewusst gewählt.
-- Beiträge, die urheberrechtlich geschützten Code Dritter enthalten, ohne
-  dass dessen Lizenz vorab geprüft und freigegeben wurde.
+- Beiträge, die urheberrechtlich geschützten Code Dritter ohne kompatible
+  Lizenz einbringen.
+- PRs, die das Projekt unter eine inkompatible Lizenz (z. B. GPL) stellen
+  möchten.
+- Werbung, Telemetrie oder Tracking-Code — das Projekt soll bewusst
+  keine Nutzerdaten sammeln.
 
 ## Entwicklung lokal
 
-Siehe [README.md](README.md) und [SECURITY.md](SECURITY.md). Kurzform:
+Siehe [README.md](README.md) und [SECURITY.md](SECURITY.md) für den Überblick.
+Kurzform:
 
 ```bat
-install.bat    REM einmalig: Python-Abhängigkeiten installieren
-start.bat      REM lokalen Dev-Modus starten (ohne EXE-Build)
-build.bat      REM dist\MSFSVoiceWalker.exe + dist\MSFSVoiceWalker-Setup.exe bauen
+install.bat          REM einmalig: Python-Abhaengigkeiten installieren
+python main.py --debug   REM App im Debug-Modus starten
+build.bat            REM EXEs bauen (PyInstaller)
 ```
 
-## Kontakt
-
-- Issues: über das GitHub-Repository
-- Sicherheitshinweise: privat an den Org-Besitzer
-- Kommerzielle Lizenzierung: direkt anfragen
+Oder einfach in Visual Studio: `MSFSVoiceWalker.sln` öffnen, F5 drücken.

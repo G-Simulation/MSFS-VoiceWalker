@@ -4,9 +4,12 @@
 
 # MSFSVoiceWalker
 
-© 2026 [G-Simulation](https://github.com/G-Simulation). Alle Rechte vorbehalten.
-Nutzungsbedingungen siehe [LICENSE](LICENSE) — dies ist **keine** Open-Source-Software,
-der Quellcode liegt öffentlich zu Zwecken der Transparenz und Sicherheitsprüfung.
+Copyright 2026 [G-Simulation](https://github.com/G-Simulation).
+Lizenziert unter der [Apache License 2.0](LICENSE) — freie, offene Software.
+Benutzen, forken, weiterentwickeln, verteilen: alles erlaubt, solange
+Copyright-Hinweis und LICENSE mitkopiert werden. Der Name "MSFSVoiceWalker"
+und "G-Simulation" sind über die Apache-2.0-Markenklausel (§6) geschützt —
+Forks dürfen diese Namen nicht führen.
 
 ---
 
@@ -413,34 +416,76 @@ d.h. selbst wenn etwas schiefgeht, kannst du manuell zurückrollen.
 
 ---
 
-## Offene TODOs
+## Status — was ist wann gekommen
 
-- **TURN-Relay** für Spieler hinter Symmetric NAT (aktuell nur Google-STUN)
-- **Code-Signing-Zertifikat** für EXE/MSI — derzeit warnt Windows SmartScreen
-  vor "unbekanntem Herausgeber". Lösung: EV-Cert (~300–400 €/Jahr) kaufen und
-  signieren lassen.
-- **Radio-Sound-Effekt** (aktuell ist die Stimme "clean" — ohne
-  Funkgeräusche)
-- **Weitere Hotkey-Bindings** (z. B. Tastatur-Taste als Alternative zur
-  Leertaste, wenn Browser-Tab nicht den Fokus hat)
-- **Finales Toolbar-Icon** (das SVG ist ein Platzhalter)
-- **MSFS-2024-Walker-SimVars verifizieren** — die `CAMERA_POS_*`-Variablen
-  sind Fallback-Lösung; sobald Asobo die offiziellen Walker-SimVars
-  dokumentiert, dort umstellen.
+**Erledigt (v0.1.0 Alpha):**
+
+- [x] **TURN-Relay-Unterstützung** — konfigurierbar via
+  Umgebungsvariablen `VOICEWALKER_TURN_URL`, `VOICEWALKER_TURN_USER`,
+  `VOICEWALKER_TURN_PASS`. App reicht den TURN-Server an WebRTC
+  weiter. Nötig fürs Laufen durch Symmetric NAT. Eigenen TURN betreiben
+  (coturn auf VPS) oder Dritt-Anbieter-Credentials reingeben.
+- [x] **Konfigurierbare Keyboard-PTT-Taste** — Standard Leertaste,
+  User kann auf jede andere Taste umbinden (persistiert via localStorage).
+- [x] **Finales Toolbar-Icon** — `MSFSVoiceWalker.png` im Toolbar-Asset-Pfad
+  registriert; Build-Script regeneriert `layout.json` automatisch.
+- [x] **MSFS-2024-Walker-Fallback** — `CAMERA_POS_*` mit Fallback auf
+  `PLANE_LATITUDE/LONGITUDE`. Funktional, nicht in allen Edge-Cases
+  verifiziert. Sobald Asobo offizielle Walker-SimVars dokumentiert, dort
+  umstellen.
+
+**Bleibt offen:**
+
+- [ ] **Code-Signing-Zertifikat** — derzeit warnt Windows SmartScreen vor
+  "unbekanntem Herausgeber". Kostenlose Optionen zum Evaluieren:
+  - [SignPath Foundation](https://signpath.org/) — für Open-Source,
+    OV-Cert + HSM, automatischer CI-Flow
+  - [Certum Open-Source Code Signing](https://certum.store/open-source-code-signing-code.html)
+    — polnische CA, von Microsoft anerkannt
+  - Microsoft Store-Veröffentlichung — signiert automatisch
+- [ ] **Radio-Sound-Effekt** (Funkgeräusche, Squelch-Rauschen) — aktuell
+  ist die Stimme "clean". Wäre der Sahnehäubchen-Effekt für Aviation-Feeling.
 
 ---
 
-## Mitmachen und Sicherheitshinweise
+## Mitmachen
 
-Bugs und Sicherheitslücken bitte melden — siehe [CONTRIBUTING.md](CONTRIBUTING.md).
-Code-Contributions nur mit unterzeichnetem CLA.
+Pull Requests sind willkommen. Beiträge gelten unter Apache-2.0-"inbound=outbound"
+automatisch als unter derselben Lizenz eingebracht — kein CLA, kein Papierkram.
+Details in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Bugs und Sicherheitslücken bitte melden: siehe
+[SECURITY.md](SECURITY.md) für sensible Themen (privater Meldeweg),
+[GitHub Issues](https://github.com/G-Simulation/MSFS-VoiceWalker/issues)
+für alles andere.
+
+## Unterstützen
+
+Die Entwicklung ist ein ehrenamtlicher Freizeit-Einsatz. Wenn dir das Tool
+etwas wert ist, freue ich mich über eine Spende. Das ist zu keinem Zeitpunkt
+Voraussetzung für die Nutzung — die App bleibt unter Apache 2.0 dauerhaft
+kostenlos und frei.
+
+☕ **[Via PayPal spenden](https://www.paypal.com/donate/?hosted_button_id=F2GPDVV6BUSAQ)**
+
+Weitere Spenden-Kanäle (GitHub Sponsors, Ko-fi etc.) kommen ggf. später.
 
 ## Drittanbieter-Komponenten
 
 Siehe [NOTICE](NOTICE) für eine vollständige Liste integrierter
-Drittanbieter-Bibliotheken (Trystero, SimConnect, pygame, WiX, …) und deren Lizenzen.
+Drittanbieter-Bibliotheken (Trystero, SimConnect, pygame, WiX, Tailwind, …)
+und deren Lizenzen. Alle verwendeten APIs und Bibliotheken sind in ihrer
+Lizenz Apache-2.0-kompatibel; keine proprietäre oder lizenzrechtlich
+kritische Komponente ist eingebunden.
 
 ## Lizenz
 
-Proprietär, source-available, siehe [LICENSE](LICENSE). Kurzfassung: anschauen
-und privat nutzen ist erlaubt, kopieren / verbreiten / weiterentwickeln nicht.
+**Apache License 2.0** — siehe [LICENSE](LICENSE).
+
+- Du darfst den Code kostenfrei nutzen, modifizieren, weiterverteilen
+  und kommerziell einsetzen.
+- Copyright-Hinweise und der Lizenztext müssen in Derivaten mitgegeben
+  werden; modifizierte Dateien müssen entsprechend gekennzeichnet sein.
+- Die Namen "MSFSVoiceWalker" und "G-Simulation" sind über Apache 2.0 §6
+  (Trademarks) geschützt — Forks dürfen sich nicht so nennen.
+- Keine Haftung, keine Gewährleistung.

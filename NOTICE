@@ -1,23 +1,34 @@
 MSFSVoiceWalker
-Copyright (c) 2026 G-Simulation. All rights reserved.
+Copyright 2026 G-Simulation
 
-This product is governed by the proprietary license in LICENSE. It integrates
-the following third-party components, each of which remains subject to its
-own license. Nothing in MSFSVoiceWalker's LICENSE overrides those upstream
-licenses — they continue to apply to the corresponding components.
+This product includes software developed by G-Simulation and is
+licensed under the Apache License, Version 2.0 (the "License").
+You may obtain a copy of the License in the LICENSE file at the
+root of this repository, or at:
 
-===============================================================================
+    http://www.apache.org/licenses/LICENSE-2.0
+
+==============================================================================
+
+Third-party components
+----------------------
+
+This product integrates the following third-party components. Each component
+remains under its own license; their licenses are fully compatible with
+Apache 2.0 redistribution. None of these components are modified; we use them
+as libraries via published package interfaces.
 
 Trystero
     https://github.com/dmotz/trystero
     License: MIT
-    Used for: peer discovery via public WebTorrent trackers (loaded at
-    runtime from jsDelivr CDN, not vendored).
+    Used for: peer discovery via public WebTorrent trackers.
+    Loaded at runtime from jsDelivr CDN; not vendored.
 
 Python-SimConnect
     https://github.com/odwdinc/Python-SimConnect
-    License: BSD-like (see upstream repository)
-    Used for: reading live aircraft/player state from MSFS.
+    License: MIT-compatible (see upstream repository)
+    Used for: reading live aircraft / avatar state from MSFS via Microsoft's
+    public SimConnect interface.
 
 websockets (Python library)
     https://github.com/python-websockets/websockets
@@ -28,34 +39,63 @@ pygame
     https://github.com/pygame/pygame
     License: LGPL-2.1
     Used for: USB joystick / HOTAS / button-box polling.
-    Note: pygame is dynamically linked via pip-installed wheels; we do not
-    modify or redistribute pygame's source.
+    Note: pygame is used as a dynamically-linked library only (via official
+    pip wheels); we do not modify pygame's source or statically link against
+    it, which satisfies the LGPL's requirements for use in non-LGPL programs.
 
 PyInstaller
     https://github.com/pyinstaller/pyinstaller
     License: GPL-2.0 with bootloader exception
-    Used at build time only to produce the distributable .exe. The
-    bootloader exception specifically permits bundled-application
-    distribution under non-GPL licenses.
+    Used at build time only to produce distributable Windows executables.
+    The PyInstaller bootloader exception explicitly permits distributing the
+    bundled application under a non-GPL license (Apache 2.0 in our case).
 
-WebTorrent / BitTorrent trackers (public, network-only)
-    Various operators. Tracker protocol only; no code linked into this
-    product. Used for peer matchmaking via `wss://` connections. No audio
-    data transits these trackers.
+WiX Toolset (v6)
+    https://github.com/wixtoolset/wix
+    License: MS-RL (Microsoft Reciprocal License) — open source
+    Used for: building the MSI installer.
 
-Google STUN servers (stun.l.google.com:19302)
-    Network service only; used by WebRTC for NAT traversal. No code
-    linked into this product, no data stored on Google's side.
+Tailwind CSS (browser build)
+    https://tailwindcss.com
+    License: MIT
+    Loaded at runtime from jsDelivr CDN; not vendored.
 
-===============================================================================
+Public WebTorrent trackers (network service, not code)
+    Operators: openwebtorrent.com and similar community trackers.
+    Usage: tracker protocol only, for peer matchmaking via wss://.
+    No audio data transits these trackers — only short SDP signaling
+    exchanges that establish direct WebRTC connections between peers.
 
-Trademark notice
-----------------
+Google Public STUN
+    stun.l.google.com:19302 (and equivalents).
+    Usage: Session Traversal Utilities for NAT — a free public service
+    operated by Google, designed for exactly this kind of WebRTC usage.
+    No code from Google is linked into this product; we only send STUN
+    binding requests to discover our public-side network address.
+
+==============================================================================
+
+Microsoft Flight Simulator
+--------------------------
+
 "Microsoft Flight Simulator" is a trademark of Microsoft Corporation.
 MSFSVoiceWalker is an independent third-party tool and is not affiliated
 with, endorsed by, or sponsored by Microsoft.
 
-"SimConnect" is part of the Microsoft Flight Simulator SDK and is used
-under the terms of that SDK.
+SimConnect is part of the Microsoft Flight Simulator SDK and is used
+in accordance with that SDK's terms, which permit third-party add-ons.
+Our Community-Folder package and toolbar panel integration use only
+publicly documented MSFS extension points (html_ui/InGamePanels,
+manifest.json, layout.json, exe.xml).
 
 All other trademarks are the property of their respective owners.
+
+==============================================================================
+
+Donations
+---------
+
+MSFSVoiceWalker is free software. Development is a volunteer effort;
+donations are welcome but never required. Donating grants no additional
+rights beyond those in the Apache License 2.0. Links to current donation
+channels (if any) can be found in the project README.

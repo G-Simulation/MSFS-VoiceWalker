@@ -239,6 +239,7 @@ CSP = (
     "img-src 'self' data:; "
     "media-src 'self' blob:; "
     "connect-src 'self' ws://127.0.0.1:* wss://*; "
+    "form-action 'self' https://www.paypal.com; "
     "frame-ancestors 'none'; "
     "base-uri 'self'"
 )
