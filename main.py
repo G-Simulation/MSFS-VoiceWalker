@@ -59,6 +59,7 @@ except ImportError:
 
 from ptt_backend import PTTBackend
 import updater
+import license_client
 
 
 # -----------------------------------------------------------------------------
@@ -196,6 +197,14 @@ class AppState:
     # wenn True; bei False wird STATE.wasm_pos geloescht + an alle UIs der
     # "tracking_off"-Hinweis broadcastet.
     tracking_enabled: bool = True
+    # Pro-License-State (Monetarisierung). Wird beim Start aus config.json +
+    # license_cache.json ermittelt, spaeter via WS-Message "set_license_key"
+    # aktualisiert. Broadcast als "license_state" an UI.
+    is_pro: bool = False
+    license_key: str = ""
+    license_reason: str = "no key"
+    license_expires_at: float = 0.0
+    license_mode: str = "none"
 
 STATE = AppState()
 
@@ -988,7 +997,30 @@ ALLOWED_INBOUND = {
     "overlay_state",
     # Tracking an/aus (persistiert in config.json)
     "set_tracking",
+    # Pro-License-Key vom UI setzen/validieren (persistiert in config.json).
+    # Payload: {"type": "set_license_key", "key": "DEV-PRO-..."}
+    "set_license_key",
 }
+
+
+def _license_state_msg() -> dict:
+    return {
+        "type":       "license_state",
+        "is_pro":     bool(STATE.is_pro),
+        "key":        STATE.license_key,
+        "reason":     STATE.license_reason,
+        "expires_at": STATE.license_expires_at,
+        "mode":       STATE.license_mode,
+    }
+
+
+def _apply_license_result(result: dict) -> None:
+    """Uebernimmt ein license_client.validate()-Dict in STATE."""
+    STATE.is_pro             = bool(result.get("is_pro"))
+    STATE.license_key        = str(result.get("key", ""))
+    STATE.license_reason     = str(result.get("reason", ""))
+    STATE.license_expires_at = float(result.get("expires_at") or 0.0)
+    STATE.license_mode       = str(result.get("mode", "none"))
 
 
 async def broadcast(obj: dict) -> None:
@@ -1035,6 +1067,9 @@ async def ws_handler(ws):
             "type": "tracking_state",
             "enabled": STATE.tracking_enabled,
         }))
+        # License-State sofort mitsenden, damit UI weiss ob Pro freigeschaltet
+        # ist (z.B. fuer Private-Rooms-Button-Sichtbarkeit).
+        await ws.send(json.dumps(_license_state_msg()))
         # Cache-Replay: wenn der Haupt-Client schon overlay_state gesendet hat,
         # kriegt der neue Client (z.B. MSFS-Panel-iframe) den sofort — so muss
         # das Panel nicht bis zum naechsten 250ms-Tick warten um Peers zu sehen.
@@ -1101,6 +1136,22 @@ async def ws_handler(ws):
                             # Panel-Overlay: leere Peer-Liste + Tracking-off-Hinweis
                             STATE.overlay_cache = None
                             asyncio.create_task(broadcast({"type": "tracking_off"}))
+                elif t == "set_license_key":
+                    new_key = str(m.get("key", "")).strip()
+                    # Validate kann HTTP machen → in Thread auslagern, damit
+                    # Event-Loop nicht blockiert.
+                    async def _do_license(k: str):
+                        result = await asyncio.to_thread(
+                            license_client.validate, k, data_dir()
+                        )
+                        _apply_license_result(result)
+                        cfg = load_config()
+                        cfg["license_key"] = STATE.license_key
+                        save_config(cfg)
+                        log.info("license: is_pro=%s mode=%s reason=%s",
+                                 STATE.is_pro, STATE.license_mode, STATE.license_reason)
+                        await broadcast(_license_state_msg())
+                    asyncio.create_task(_do_license(new_key))
             except Exception as e:
                 record_error(f"ws_handler.{t}", e)
     except websockets.ConnectionClosed:
@@ -1230,6 +1281,25 @@ async def main():
     _cfg = load_config()
     STATE.tracking_enabled = bool(_cfg.get("tracking_enabled", True))
     log.info("config loaded: tracking_enabled=%s", STATE.tracking_enabled)
+
+    # License-State bestimmen: zuerst Cache pruefen (damit offline-Start
+    # funktioniert), danach falls Key gesetzt neu validieren im Hintergrund.
+    _lk = str(_cfg.get("license_key", "")).strip()
+    if _lk:
+        cached = license_client.load_cache(data_dir())
+        if cached and cached.get("key") == _lk and cached.get("expires_at", 0) > time.time():
+            _apply_license_result(cached)
+            log.info("license (cache): is_pro=%s mode=%s", STATE.is_pro, STATE.license_mode)
+        else:
+            # Synchroner Call beim Start ist ok (haeuft sich nur einmal auf),
+            # fuer Dev-Mode ist's instant, fuer Backend max ~6s HTTP-Timeout.
+            try:
+                res = license_client.validate(_lk, data_dir())
+                _apply_license_result(res)
+                log.info("license: is_pro=%s mode=%s reason=%s",
+                         STATE.is_pro, STATE.license_mode, STATE.license_reason)
+            except Exception as e:
+                log.warning("license validate failed at startup: %s", e)
 
     reader = SimReader()
     PTT = PTTBackend(on_ptt_event)

@@ -367,6 +367,15 @@
           <label for="callsign" class="text-xs text-[color:var(--color-muted)] shrink-0">Callsign</label>
           <input id="callsign" maxlength="16" value="PILOT"
                  class="flex-1 min-w-0 bg-[color:var(--color-bg-soft)] border border-[color:var(--color-border)] rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--color-ring)] transition">
+          <!-- Pro-Supporter-Badge — nur sichtbar wenn state.isPro -->
+          <span id="proBadge" style="display:none"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full
+                       text-[10px] font-bold uppercase tracking-widest
+                       bg-gradient-to-r from-[color:var(--color-accent)] to-[color:var(--color-good)]
+                       text-[#0b1220]"
+                title="Pro-Supporter — danke!">
+            ★ PRO
+          </span>
           <label class="text-xs text-[color:var(--color-muted)] inline-flex items-center gap-1.5 cursor-pointer">
             <input id="voxToggle" type="checkbox" class="accent-[color:var(--color-accent)]">
             VOX
@@ -440,6 +449,62 @@
                     class="text-[10px] text-[color:var(--color-muted)] hover:text-[color:var(--color-accent)] underline decoration-dotted">
               Auf Standardwerte zurücksetzen
             </button>
+          </div>
+        </details>
+
+        <!-- Pro freischalten -->
+        <details id="licenseDetails" class="mt-4 text-xs">
+          <summary class="cursor-pointer text-[color:var(--color-muted)] select-none py-1">
+            Pro freischalten
+          </summary>
+          <div class="mt-3 space-y-2">
+            <p id="licenseStatus" class="text-xs text-[color:var(--color-muted)]">
+              Free-Version — Pro-Key eingeben zum Freischalten
+            </p>
+            <div class="flex gap-2 items-center">
+              <input id="licenseKeyInput" type="text" maxlength="80"
+                     placeholder="z. B. DEV-PRO-TESTER oder LMFWC-Key"
+                     class="flex-1 min-w-0 bg-[color:var(--color-bg-soft)] border border-[color:var(--color-border)] rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[color:var(--color-ring)] transition">
+              <button id="licenseValidateBtn" type="button"
+                      class="px-3 py-1.5 rounded-lg bg-[color:var(--color-accent)] text-[#0b1220] font-semibold hover:bg-blue-300 transition">
+                Aktivieren
+              </button>
+            </div>
+            <p class="text-[10px] text-[color:var(--color-muted)] leading-relaxed">
+              Noch kein Key? Pro (7,99 € einmalig) gibt es auf
+              <a href="https://gsimulations.com/msfsvoicewalker" target="_blank" rel="noopener"
+                 class="underline decoration-dotted">gsimulations.com/msfsvoicewalker</a>.
+              Unlimitierte Peers, Private Rooms, Supporter-Badge.
+            </p>
+          </div>
+        </details>
+
+        <!-- Private Rooms (nur Pro) -->
+        <details id="privateRoomsDetails" class="mt-4 text-xs" style="display:none">
+          <summary class="cursor-pointer text-[color:var(--color-muted)] select-none py-1">
+            Privater Raum
+          </summary>
+          <div class="mt-3 space-y-2">
+            <p class="text-[10px] text-[color:var(--color-muted)] leading-relaxed">
+              Passphrase eingeben — alle mit derselben Passphrase landen im
+              gleichen privaten Mesh (kein Geohash, weltweit verbunden). Ideal
+              für Fly-Ins und geschlossene Gruppen.
+            </p>
+            <p id="privateRoomJoined" style="display:none"
+               class="text-xs text-[color:var(--color-good)]"></p>
+            <div class="flex gap-2 items-center">
+              <input id="privateRoomPass" type="text" maxlength="80"
+                     placeholder="Passphrase (mind. 6 Zeichen)"
+                     class="flex-1 min-w-0 bg-[color:var(--color-bg-soft)] border border-[color:var(--color-border)] rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[color:var(--color-ring)] transition">
+              <button id="privateRoomJoinBtn" type="button"
+                      class="px-3 py-1.5 rounded-lg bg-[color:var(--color-accent)] text-[#0b1220] font-semibold hover:bg-blue-300 transition">
+                Betreten
+              </button>
+              <button id="privateRoomLeaveBtn" type="button" style="display:none"
+                      class="px-3 py-1.5 rounded-lg border border-[color:var(--color-border)] text-[color:var(--color-muted)] hover:bg-white/5 transition">
+                Verlassen
+              </button>
+            </div>
           </div>
         </details>
 

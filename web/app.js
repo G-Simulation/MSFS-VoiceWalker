@@ -255,8 +255,16 @@ function saveAudioConfig() {
 loadAudioConfig();
 
 // --- Security / hardening ----------------------------------------------------
-const MAX_PEERS             = 50;
+// Freemium-Peer-Limits (siehe ROADMAP §1). Der Hard-Cap wird vom currentMaxPeers()-
+// Getter zur Laufzeit auf Basis von state.isPro ermittelt.
+const MAX_PEERS_FREE        = 20;
+const MAX_PEERS_PRO         = 200;
+const MAX_PEERS             = MAX_PEERS_PRO;  // legacy-alias (safety default)
 const MAX_POS_MSGS_PER_SEC  = 15;
+
+// Private-Rooms-Salt (siehe ROADMAP §4). MUSS identisch in allen Client-Builds
+// bleiben — sonst sehen sich Teilnehmer gegenseitig nicht.
+const PRIVATE_ROOM_SALT = 'msfsvoicewalker-private-v1';
 const SANE = {
   lat:    [-90,   90],
   lon:    [-180, 180],
@@ -308,7 +316,21 @@ const state = {
   // Tracking-Enabled: wird vom Backend geliefert (persistiert in config.json).
   // Bei false → alle Rooms verlassen, keine Pos an Mesh senden, UI zeigt "verborgen".
   trackingEnabled: true,
+  // Pro-License (siehe ROADMAP §4). Kommt via "license_state" WS-Message vom
+  // Backend; gate'd Peer-Limit, Private-Rooms, Badge.
+  isPro:          false,
+  licenseKey:     '',
+  licenseReason:  'no key',
+  licenseMode:    'none',
+  licenseExpires: 0,
+  // Privater Room (Pro). Wenn gesetzt: Geohash-Rooms werden NICHT gejoined;
+  // stattdessen joinen wir nur den privaten Room (Trystero-Key = sha256(passphrase+salt)).
+  privateRoom:    null,   // { passphrase, key } | null
 };
+
+function currentMaxPeers() {
+  return state.isPro ? MAX_PEERS_PRO : MAX_PEERS_FREE;
+}
 
 // --- Tracking an/aus -------------------------------------------------------
 function applyTrackingState(enabled) {
@@ -343,6 +365,185 @@ function applyTrackingState(enabled) {
 
 function requestTrackingToggle() {
   sendBackend({ type: 'set_tracking', enabled: !state.trackingEnabled });
+}
+
+// --- License / Pro -----------------------------------------------------------
+function applyLicenseState(m) {
+  const wasPro = state.isPro;
+  state.isPro          = !!m.is_pro;
+  state.licenseKey     = String(m.key || '');
+  state.licenseReason  = String(m.reason || '');
+  state.licenseMode    = String(m.mode || 'none');
+  state.licenseExpires = +m.expires_at || 0;
+  renderProUi();
+  // Bei is_pro-Wechsel ggf. Peer-Cap neu durchsetzen und Private-Rooms-UI
+  // ein-/ausblenden.
+  if (!state.isPro && state.privateRoom) {
+    // Pro abgelaufen/entzogen → privaten Room verlassen, zurueck zu Geohash.
+    leavePrivateRoom();
+  }
+  if (wasPro !== state.isPro) {
+    console.info('[license] is_pro =', state.isPro, 'mode=', state.licenseMode);
+  }
+}
+
+function renderProUi() {
+  // Callsign-Badge
+  const badge = document.getElementById('proBadge');
+  if (badge) {
+    badge.style.display = state.isPro ? 'inline-flex' : 'none';
+  }
+  // Pro-Card Status-Text + Input-Wert
+  const statusEl = document.getElementById('licenseStatus');
+  const input    = document.getElementById('licenseKeyInput');
+  if (statusEl) {
+    if (state.isPro) {
+      const until = state.licenseExpires ? new Date(state.licenseExpires * 1000).toLocaleDateString() : '—';
+      statusEl.textContent = `Pro aktiv (${state.licenseMode}), gültig bis ${until}`;
+      statusEl.className = 'text-xs text-[color:var(--color-good)]';
+    } else if (state.licenseKey) {
+      statusEl.textContent = `Kein Pro: ${state.licenseReason}`;
+      statusEl.className = 'text-xs text-[color:var(--color-warn)]';
+    } else {
+      statusEl.textContent = 'Free-Version — Pro-Key eingeben zum Freischalten';
+      statusEl.className = 'text-xs text-[color:var(--color-muted)]';
+    }
+  }
+  if (input && document.activeElement !== input) {
+    input.value = state.licenseKey || '';
+  }
+  // Private-Rooms-Card: nur fuer Pro sichtbar
+  const priv = document.getElementById('privateRoomsDetails');
+  if (priv) priv.style.display = state.isPro ? '' : 'none';
+  // Mesh-Chip refresh (zeigt ggf. neues Cap)
+  renderMeshChip();
+}
+
+function requestValidateLicense() {
+  const input = document.getElementById('licenseKeyInput');
+  const key = (input?.value || '').trim();
+  sendBackend({ type: 'set_license_key', key });
+  const statusEl = document.getElementById('licenseStatus');
+  if (statusEl) {
+    statusEl.textContent = 'Prüfe Key…';
+    statusEl.className = 'text-xs text-[color:var(--color-muted)]';
+  }
+}
+
+// --- Private Rooms (Pro-Feature) --------------------------------------------
+async function sha256Hex(text) {
+  const buf = new TextEncoder().encode(text);
+  const hash = await crypto.subtle.digest('SHA-256', buf);
+  return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function joinPrivateRoom(passphrase) {
+  const pass = (passphrase || '').trim();
+  if (!pass) return;
+  if (!state.isPro) {
+    showUpgradeModal('Private Rooms sind ein Pro-Feature.');
+    return;
+  }
+  const hash = await sha256Hex(pass + PRIVATE_ROOM_SALT);
+  const key = 'priv-' + hash.slice(0, 32);   // 128 bit genuegt als Namespace
+  // Alle bestehenden Rooms verlassen (Geohash-Rooms oder alter Private-Room)
+  for (const [cell, entry] of state.rooms) {
+    if (entry.posTimer) clearInterval(entry.posTimer);
+    try { entry.room.leave(); } catch {}
+    state.rooms.delete(cell);
+  }
+  state.privateRoom = { passphrase: pass, key };
+  // Direkt den privaten Room joinen; updateRooms() respektiert privateRoom.
+  joinCellRoom(key);
+  renderPrivateRoomUi();
+  renderPeers();
+  renderMeshChip();
+  console.info('[private-room] joined', key);
+}
+
+function leavePrivateRoom() {
+  if (!state.privateRoom) return;
+  const key = state.privateRoom.key;
+  const entry = state.rooms.get(key);
+  if (entry) {
+    if (entry.posTimer) clearInterval(entry.posTimer);
+    try { entry.room.leave(); } catch {}
+    state.rooms.delete(key);
+  }
+  state.privateRoom = null;
+  renderPrivateRoomUi();
+  // Geohash-Rooms werden beim naechsten updateRooms() automatisch gejoined.
+  if (state.mySim) updateRooms();
+  renderPeers();
+  renderMeshChip();
+}
+
+function renderPrivateRoomUi() {
+  const joinedEl  = document.getElementById('privateRoomJoined');
+  const passInput = document.getElementById('privateRoomPass');
+  const joinBtn   = document.getElementById('privateRoomJoinBtn');
+  const leaveBtn  = document.getElementById('privateRoomLeaveBtn');
+  if (state.privateRoom) {
+    if (joinedEl) {
+      joinedEl.textContent = `Verbunden: "${state.privateRoom.passphrase}" (${state.privateRoom.key.slice(0, 14)}…)`;
+      joinedEl.style.display = '';
+    }
+    if (passInput) passInput.disabled = true;
+    if (joinBtn) joinBtn.style.display = 'none';
+    if (leaveBtn) leaveBtn.style.display = '';
+  } else {
+    if (joinedEl) joinedEl.style.display = 'none';
+    if (passInput) passInput.disabled = false;
+    if (joinBtn) joinBtn.style.display = '';
+    if (leaveBtn) leaveBtn.style.display = 'none';
+  }
+}
+
+let _upgradeModalTimer = null;
+function showUpgradeModal(message) {
+  let modal = document.getElementById('upgradeModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'upgradeModal';
+    modal.style.cssText = `
+      position: fixed; inset: 0; z-index: 9999;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(11, 18, 32, 0.85); backdrop-filter: blur(6px);
+      font-family: "Segoe UI", system-ui, sans-serif; color: #e9eefc;
+    `;
+    modal.innerHTML = `
+      <div style="max-width:380px; padding:28px; text-align:center;
+                  border:1px solid #233457; border-radius:12px; background:#0b1220;">
+        <div style="font-size:32px; margin-bottom:10px;">⚡</div>
+        <h2 style="margin:0 0 10px 0; font-size:17px;">Pro-Feature</h2>
+        <p id="upgradeModalText" style="color:#8696b8; font-size:13px; line-height:1.5; margin:0 0 16px 0;"></p>
+        <p style="color:#8696b8; font-size:12px; line-height:1.5; margin:0 0 18px 0;">
+          Upgrade auf MSFSVoiceWalker Pro: 7,99 € einmalig — unlimitierte Peers,
+          Private Rooms, Supporter-Badge.
+        </p>
+        <div style="display:flex; gap:8px; justify-content:center;">
+          <a href="https://gsimulations.com/msfsvoicewalker" target="_blank" rel="noopener"
+             style="padding:8px 16px; border-radius:8px; background:#6aa5ff; color:#0b1220;
+                    font-weight:600; text-decoration:none; font-size:13px;">
+            Pro holen
+          </a>
+          <button id="upgradeModalClose" type="button"
+                  style="padding:8px 16px; border-radius:8px; border:1px solid #233457;
+                         background:transparent; color:#8696b8; cursor:pointer; font-size:13px;">
+            Zu
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    modal.querySelector('#upgradeModalClose').onclick = () => {
+      modal.style.display = 'none';
+    };
+    modal.onclick = e => { if (e.target === modal) modal.style.display = 'none'; };
+  }
+  modal.querySelector('#upgradeModalText').textContent = message || 'Das ist ein Pro-Feature.';
+  modal.style.display = 'flex';
+  clearTimeout(_upgradeModalTimer);
 }
 
 function currentPeerCount() {
@@ -474,6 +675,8 @@ function connectBackendWs() {
       showUpdateBanner(m);
     } else if (m.type === 'tracking_state') {
       applyTrackingState(!!m.enabled);
+    } else if (m.type === 'license_state') {
+      applyLicenseState(m);
     }
   };
   backendWs.onclose = () => {
@@ -657,6 +860,29 @@ document.addEventListener('DOMContentLoaded', () => {
   const trackBtn = document.getElementById('trackingToggle');
   trackBtn?.addEventListener('click', requestTrackingToggle);
 
+  // Pro-License-UI
+  const licBtn = document.getElementById('licenseValidateBtn');
+  licBtn?.addEventListener('click', requestValidateLicense);
+  const licInput = document.getElementById('licenseKeyInput');
+  licInput?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') requestValidateLicense();
+  });
+  renderProUi();
+
+  // Private-Rooms (Pro)
+  const privJoinBtn = document.getElementById('privateRoomJoinBtn');
+  privJoinBtn?.addEventListener('click', () => {
+    const passEl = document.getElementById('privateRoomPass');
+    joinPrivateRoom(passEl?.value || '');
+  });
+  const privLeaveBtn = document.getElementById('privateRoomLeaveBtn');
+  privLeaveBtn?.addEventListener('click', leavePrivateRoom);
+  const privPassEl = document.getElementById('privateRoomPass');
+  privPassEl?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') joinPrivateRoom(privPassEl.value);
+  });
+  renderPrivateRoomUi();
+
   // Audio-Reichweite Slider
   setupRangeSliders();
 
@@ -754,6 +980,21 @@ function updateRooms() {
   // Wenn MSFS im Hauptmenue: kein Mesh-Join, keine Audio-Uebertragung.
   // renderSelf() hat bestehende Rooms bei in_menu bereits verlassen.
   if (state.mySim.in_menu) return;
+  // Privater Room (Pro) ueberschreibt Geohash: wir joinen NUR den Private Room.
+  if (state.privateRoom) {
+    if (!state.rooms.has(state.privateRoom.key)) {
+      joinCellRoom(state.privateRoom.key);
+    }
+    // Alle anderen Rooms verlassen (nicht __-Prefix)
+    for (const [cell, entry] of [...state.rooms]) {
+      if (cell !== state.privateRoom.key && !cell.startsWith('__')) {
+        if (entry.posTimer) clearInterval(entry.posTimer);
+        try { entry.room.leave(); } catch {}
+        state.rooms.delete(cell);
+      }
+    }
+    return;
+  }
   const cells = geohashNeighbors(geohashEncode(state.mySim.lat, state.mySim.lon));
   state.currentCell = cells[0];
   setText('cell', state.currentCell);
@@ -780,8 +1021,12 @@ function joinCellRoom(cell) {
   const [sendPos, getPos] = room.makeAction('pos');
 
   room.onPeerJoin(peerId => {
-    if (currentPeerCount() >= MAX_PEERS) {
-      console.warn('[mesh] peer cap reached; ignoring', peerId);
+    const cap = currentMaxPeers();
+    if (currentPeerCount() >= cap) {
+      console.warn('[mesh] peer cap reached; ignoring', peerId, 'cap=', cap, 'isPro=', state.isPro);
+      if (!state.isPro) {
+        showUpgradeModal(`Peer-Limit erreicht (${MAX_PEERS_FREE} Piloten in der Free-Version).`);
+      }
       return;
     }
     entry.peers.set(peerId, newPeerEntry(cell));

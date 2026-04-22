@@ -1,67 +1,41 @@
 # MSFSVoiceWalker — Roadmap zur Monetarisierung (Freemium)
 
-Stand: 22. April 2026. Basis: G-Simulation existiert bereits als Firma/Marke
+Stand: 23. April 2026. Basis: G-Simulation existiert bereits als Firma/Marke
 (gsimulations.com, Piaquest, Gott3D), USt-ID vorhanden, WordPress-Server
 läuft. Kein externer Payment-Provider nötig → 100 % Einnahmen bleiben in
 der eigenen Infrastruktur.
 
 ---
 
-## 0. Aktueller Stand & offene Punkte (22.04.2026)
+## 0. Aktueller Stand (23.04.2026)
 
 ### Was läuft
 * ✅ **WASM-Bridge** `msfsvoicewalkerbridge.wasm` publiziert Avatar-State
   (Lat/Lon, Cam-Mode) via SimConnect ClientData an die Python-App.
-  Bestätigt im MSFS-Log: `SetClientData hr=0x0`, Avatar-Position
-  (48.769151 / 8.078192) wird zyklisch gesendet, probe #540+.
-* ✅ **Python-App** (main.py / Ports 7801–7810) serviert `overlay.html`
-  sauber — im normalen Browser funktioniert das Overlay einwandfrei.
+* ✅ **Python-App** (main.py / Ports 7801–7810) serviert `overlay.html`.
 * ✅ **3D-HRTF-Positional-Audio**, WebTorrent-Mesh, Geohash-Rooms —
-  Core-Features stabil in der Browser-Version.
-* ✅ **SimConnect-ClientData-Pipeline** (WASM → Python) ersetzt die alte
-  Walker-Position-HTTP-Probe. Robust und niedrige Latenz.
+  Core-Features stabil.
+* ✅ **SimConnect-ClientData-Pipeline** (WASM → Python) robust, niedrige
+  Latenz.
+* ✅ **MSFS-Toolbar-Panel** zeigt Overlay vollständig (ehemaliger Blocker
+  gelöst).
+* ✅ **License-Client mit Dev-Mode-Keys** eingebaut (Backend-Validation
+  stubbed bis WordPress-LMFWC live ist).
+* ✅ **Private Rooms** via `sha256(passphrase + app_salt)` als
+  Trystero-Room-Key.
+* ✅ **Pro-Feature-Gates**: Peer-Limit 20 (Free) vs. unlimited (Pro),
+  Private-Room-UI nur für Pro, Supporter-Badge.
 
-### ⚠️ BLOCKER — MSFS Toolbar-Panel zeigt schwarzen iframe
+### Offene Punkte
 
-Das `<ingame-ui>`-Panel in MSFS 2024 lädt den Fallback-Spinner offenbar
-nicht, zeigt aber auch das Overlay nicht an → komplett schwarze Fläche.
-`overlay.html` im Standard-Browser funktioniert.
-
-**Status 22.04.:** Diagnostik-Logging in
-`msfs-project/.../InGamePanels/MSFSVoiceWalker/panel.js` eingebaut:
-* `probeOnce` loggt URL, Status, Latenz, Fetch-Fehlertyp
-* `probe()` loggt Zähler, verbundener Port, Rescan-Ursache
-* `setConnectionState` loggt Übergang + iframe-Rect/Display/Visibility
-* `handleIframeLoad` inspiziert iframe.contentDocument (readyState,
-  body.children.length, body.text[0:120]) — um zu sehen **ob** overlay.html
-  drin ist oder ob der iframe leer lädt
-* `handleIframeError` loggt Event-Details
-* `init()` loggt UA, location, DOM-Lookup-Ergebnisse
-
-**Nächster Schritt:** Community-Folder neu bauen, in MSFS starten,
-MSFS-Dev-Console (Strg+8 / Umsch+F11) öffnen und die Logs einsehen.
-Erst dann wissen wir, welcher der folgenden Fälle zutrifft:
-
-| Hypothese | Log-Signatur |
-|---|---|
-| Coherent-GT-Fetch auf `localhost` blockiert | `probeOnce ... FETCH-ERROR` bei allen Ports |
-| Probe ok, aber iframe.src wird nicht geladen | kein `iframe LOAD event` trotz `setze iframe.src -> http://...` |
-| iframe lädt, aber overlay.html-body leer | `body.children=0` oder `body.text[0:120]=''` |
-| Cross-Origin-Block beim contentDocument | `iframe contentDocument nicht zugreifbar` |
-| Fallback-CSS defekt (Panel sieht schwarz aus, obwohl Fallback aktiv) | `setConnectionState: false -> false` + `fallback rect=WxH` mit vernünftiger Größe |
-
-### Offene Punkte (gesamt)
-
-1. **[BLOCKER]** Panel-Diagnostik durchführen → Root Cause identifizieren → echten Fix bauen
-2. **[WICHTIG]** Aufräumen: der Cache-Buster `?v=${Date.now()}` wurde spekulativ eingebaut — nach Diagnose prüfen, ob er wirklich nötig ist oder entfernt werden kann
-3. **[FREE-RELEASE]** Free-Version muss **≥2 Wochen stabil** laufen bevor Pro-Launch sinnvoll ist → Phase 1 der Monetarisierung (License-Backend) erst danach
-4. **[INFRA]** LMFWC + WooCommerce-Produkt auf gsimulations.com (noch nicht angelegt)
-5. **[CODE]** Python `license_client.py` (noch nicht implementiert)
-6. **[CODE]** Browser-Settings-UI für Pro-Key-Eingabe (noch nicht implementiert)
-7. **[CODE]** Feature-Gates (Peer-Limit 20, Private-Rooms, Badge) — Code noch nicht geschrieben
-8. **[CODE]** Private-Rooms via `sha256(passphrase + app_salt)` als Trystero-Room-Key — noch offen
-9. **[PRODUKT]** Event-Plattform (The Events Calendar + PDF-Briefing-Hook) — noch offen
-10. **[MARKETING]** Press-Kit (Video, Screenshots), Landing-Page `gsimulations.com/msfsvoicewalker` — noch offen
+1. **[INFRA]** LMFWC + WooCommerce-Produkt auf gsimulations.com anlegen
+   (API-Keys generieren). Bis dahin Dev-Mode-Keys nutzbar.
+2. **[BACKEND]** `license_client.py` auf echten LMFWC-Endpoint umschalten
+   sobald WordPress steht (Stub → `LICENSE_API_URL` env-var setzen).
+3. **[PRODUKT]** Event-Plattform (The Events Calendar + PDF-Briefing-Hook)
+   — noch offen.
+4. **[MARKETING]** Press-Kit (Video, Screenshots), Landing-Page
+   `gsimulations.com/msfsvoicewalker` — noch offen.
 
 ---
 
@@ -79,7 +53,7 @@ Erst dann wissen wir, welcher der folgenden Fälle zutrifft:
 
 ### Pro (7,99 € einmalig — finaler Preis TBD)
 
-* **Unlimited Peers**
+* **Unlimited Peers** (Hard-Cap 200 aus Safety-Gründen)
 * **Private Rooms mit Passphrase** (Event-Szenarios, geschlossene Gruppen)
 * **Eigener TURN-Server** für schwierige NAT-Konfigurationen
   (nur bei Bedarf hosten — Hetzner-VPS + coturn, ~4 €/Monat)
@@ -100,7 +74,29 @@ Realistisches Ziel: 5–10 Events/Monat = 150–500 €/Monat wiederkehrend.
 
 ---
 
-## 2. Technische Infrastruktur (bereits vorhanden)
+## 2. Dev-Mode (aktuell aktiv, bis WordPress live)
+
+Solange `LICENSE_API_URL` nicht gesetzt ist, akzeptiert `license_client.py`
+folgende Keys **ohne** Backend-Call:
+
+| Key-Muster | Ergebnis |
+|---|---|
+| `DEV-PRO-*` (z. B. `DEV-PRO-TESTER`) | sofort is_pro=True, 30 Tage gültig |
+| `DEV-FREE` | is_pro=False, Free-Modus erzwungen |
+| Alles andere | invalid |
+
+Eingabe im UI: Settings-Card "Pro freischalten" → Key-Feld → "Aktivieren".
+Key wird in `config.json` (`license_key`) persistiert, `STATE.is_pro`
+entsprechend gesetzt und an alle WS-Clients gebroadcastet.
+
+**Umschalten auf echten Backend:** `LICENSE_API_URL=https://gsimulations.com/wp-json/lmfwc/v2/licenses/validate`
++ `LICENSE_API_CONSUMER_KEY` + `LICENSE_API_CONSUMER_SECRET` in env setzen,
+Dev-Keys fliegen dann raus (bzw. werden als Fallback behalten für interne
+Tests).
+
+---
+
+## 3. Technische Infrastruktur (bereits vorhanden)
 
 * Domain `gsimulations.com` + WordPress-Installation
 * Server-Hosting
@@ -120,40 +116,37 @@ Realistisches Ziel: 5–10 Events/Monat = 150–500 €/Monat wiederkehrend.
 
 ---
 
-## 3. App-Seitige Anpassungen
+## 4. App-Seitig (Stand 23.04.2026 — alles implementiert)
 
-### Neu in `main.py` (Python)
+### Python (`main.py` + `license_client.py`)
 
-* Config-Feld `license_key`
-* Beim Start: `GET https://gsimulations.com/wp-json/lmfwc/v2/licenses/validate/<key>`
-  → Response signiert (JWT oder HMAC)
-* Cache-Datei mit Ablaufdatum (7 Tage offline Grace-Period)
-* `STATE.is_pro: bool` + an UI broadcasten
+* ✅ Config-Feld `license_key` in `config.json`
+* ✅ Beim Start: `license_client.validate(key)` → Dev-Mode oder HTTP
+* ✅ Cache-Datei `license_cache.json` mit `expires_at` (7 Tage offline Grace)
+* ✅ `STATE.is_pro: bool` + `set_license_key` WS-Message + broadcast
+  `license_state` an UI
 
-### Neu in `app.js` (Browser)
+### Browser (`app.js` + `index.html`)
 
-* Settings-Panel: Eingabefeld "Pro-Key" + "Validate"-Button
-* `state.isPro` global
-* Feature-Gates:
-  - `currentPeerCount() >= 20 && !state.isPro` → Upgrade-Modal
-  - Private-Room-UI sichtbar nur wenn `isPro`
-  - Supporter-Badge `<span class="badge pro">PRO</span>` im Callsign-Bereich
-
-### Neu — UI-Komponenten
-
-* Upgrade-Modal: "Du hast Peer-Limit erreicht. Unlock Pro für 7,99 €"
-  + Link auf `gsimulations.com/msfsvoicewalker`
-* Private-Rooms-Tab: Passphrase + "Join" / "Create"-Buttons
+* ✅ Settings-Card "Pro freischalten": Key-Input + "Aktivieren"-Button
+* ✅ `state.isPro` global, `state.licenseReason` für UI-Fehlermeldungen
+* ✅ Feature-Gates:
+  - `currentPeerCount() >= MAX_PEERS_FREE && !state.isPro` → Upgrade-Modal,
+    neue Peers werden ignoriert
+  - Private-Room-Controls nur sichtbar wenn `state.isPro`
+  - Supporter-Badge `<span class="badge pro">PRO</span>` neben Callsign
+* ✅ Private-Rooms-UI (Passphrase-Eingabe + Join/Leave)
+* ✅ Private-Room-Radar zeigt nur Peers aus demselben Private Room
 
 ### Private-Rooms-Implementierung
 
-* Statt Geohash als Trystero-Room-Key → `sha256(passphrase + app_salt)`
-* Separater "Room-Namespace" damit keine Kollision mit öffentlichem Mesh
-* Radar zeigt nur Peers aus demselben Private Room (kein Leak)
+* Trystero-Room-Key = `priv-` + hex(sha256(passphrase + APP_SALT))
+* Im Private-Mode werden Geohash-Rooms nicht mehr gejoined
+* Radar zeigt nur Peers aus dem einen Private Room (kein Leak)
 
 ---
 
-## 4. Rechtliches (schon durch G-Simulation vorhanden)
+## 5. Rechtliches (schon durch G-Simulation vorhanden)
 
 * Impressum ✓ (über gsimulations.com)
 * AGB ✓ (für Kneeboard eh schon)
@@ -173,44 +166,33 @@ Bereits implementiert in `index.html`:
 
 ---
 
-## 5. Umsetzungs-Reihenfolge
+## 6. Nächste Schritte (was noch fehlt vor Launch)
 
-### Phase 1 — Backend-Setup (WordPress, ~2 Tage)
+### Infrastruktur-Aufgaben (User macht im WordPress-Admin)
 
 1. LMFWC installieren + konfigurieren (Keys, REST-API-Auth)
 2. WooCommerce-Produkt "MSFSVoiceWalker Pro" anlegen, 7,99 €
 3. Test-Bestellung durchlaufen — Key kommt per Mail
 4. REST-API testen: `curl -u consumer_key:secret https://.../licenses/validate/<key>`
+5. Env-Vars setzen: `LICENSE_API_URL`, `LICENSE_API_CONSUMER_KEY`,
+   `LICENSE_API_CONSUMER_SECRET`
 
-### Phase 2 — App-Code License-Client (~3 Tage)
+### Event-Plattform (~3 Tage)
 
-5. Python: `license_client.py` mit Validate + Cache + Grace
-6. `STATE.is_pro` + Broadcast
-7. Browser: Settings-UI für Key-Eingabe
-8. Feature-Gates einbauen
+6. The Events Calendar + Tickets einrichten
+7. Custom-Post "Fly-In" mit Room-ID-Feld
+8. Hook: Bei Bestellung → PDF-Generierung + Mailversand
+9. Landing-Seite `gsimulations.com/fly-ins`
 
-### Phase 3 — Private Rooms (~2 Tage)
+### Launch (~1 Tag)
 
-9. Trystero-Room-Key-Ableitung aus Passphrase
-10. UI: Private-Rooms-Tab
-11. Test mit 2 Geräten
-
-### Phase 4 — Event-Plattform (~3 Tage)
-
-12. The Events Calendar + Tickets einrichten
-13. Custom-Post "Fly-In" mit Room-ID-Feld
-14. Hook: Bei Bestellung → PDF-Generierung + Mailversand
-15. Landing-Seite `gsimulations.com/fly-ins`
-
-### Phase 5 — Launch (~1 Tag)
-
-16. MSFSVoiceWalker als Public-Produkt auf gsimulations.com
-17. Press-Kit (Video, Screenshots) für Avsim/Reddit
-18. Erste Users → Feedback → iterieren
+10. MSFSVoiceWalker als Public-Produkt auf gsimulations.com
+11. Press-Kit (Video, Screenshots) für Avsim/Reddit
+12. Erste Users → Feedback → iterieren
 
 ---
 
-## 6. Optionale Features später
+## 7. Optionale Features später
 
 * Recording of Sessions (Pro-Feature)
 * Custom Audio-Profile (z. B. Headset-spezifische HRTF)
@@ -220,35 +202,21 @@ Bereits implementiert in `index.html`:
 
 ---
 
-## 7. Risiken & Mitigation
+## 8. Risiken & Mitigation
 
 | Risiko | Mitigation |
 |---|---|
-| Piraterie (License-Key leak) | Online-Validation + rate-limit; Grace-Period aber endet irgendwann |
+| Piraterie (License-Key leak) | Online-Validation + rate-limit; Grace-Period endet nach 7 Tagen offline |
 | WebTorrent-Tracker-Ausfall | Fallback-Tracker in Trystero-Config hardcoded; eigenen TURN/STUN als Pro-Feature hosten |
-| MSFS-2026-Kompatibilität | Minimal auf fsVars abhängig → vergleichsweise robust gegen MSFS-Updates |
+| MSFS-2026-Kompatibilität | Minimal auf fsVars abhängig → robust gegen MSFS-Updates |
 | DSGVO-Beschwerde | Privacy-Dialog bereits DSGVO-konform; P2P = keine zentrale Speicherung |
-| Konkurrenz durch Asobo-eigenes Voice | Asobo hat bisher kein Walker-Voice announced; wenn doch: unser Alleinstellungsmerkmal bleibt die 3D-HRTF-Qualität |
+| Konkurrenz durch Asobo-eigenes Voice | Alleinstellungsmerkmal: 3D-HRTF-Qualität + Private Rooms |
 
 ---
 
-## 8. Metriken — wann ist Pro launch-reif?
+## 9. Realistische Umsatz-Schätzung
 
-* [ ] **MSFS-Panel zeigt Overlay stabil** (aktuell BLOCKER, siehe §0)
-* [ ] Free-Version stabil für ≥2 Wochen ohne Major-Bugs
-* [ ] Mindestens 100 aktive Free-Nutzer (indikativ für Interesse)
-* [ ] Private-Rooms mit 3+ Testern verifiziert
-* [ ] License-Backend in Produktion, durchgespielt
-* [ ] Landing-Page bereit
-* [ ] FAQ / Support-Mail-Vorlage
-
-### Teilfortschritt bisher
-* [x] WASM-Bridge Avatar-ClientData-Publisher
-* [x] Core-Overlay (Mic, HRTF, Mesh, Geohash) im Browser funktionstüchtig
-* [x] DSGVO-Dialog / In-App-Consent
-* [x] Diagnostik-Logging im Panel-Loader (22.04.2026)
-
-Realistische Umsatz-Schätzung bei 2000 aktiven Usern + 10 % Pro-Conversion:
+Bei 2000 aktiven Usern + 10 % Pro-Conversion:
 
 * **~1.600 € Pro-Einnahmen im ersten Jahr** (einmalig)
 * **+300–500 €/Monat aus Events** (wiederkehrend)
