@@ -11,11 +11,14 @@
     --fg: #e9eefc;
     --muted: #8696b8;
     --good: #3fdc8a;
+    --warn: #ffb454;
+    --bad:  #ff6b6b;
     --speaking: #ffe066;
+    --accent: #6aa5ff;
   }
   html, body { margin: 0; padding: 0; font-family: "Segoe UI", system-ui, sans-serif;
                background: transparent; color: var(--fg); font-size: 13px; }
-  body { padding: 10px; }
+  body { padding: 8px; }
   .panel {
     background: var(--bg); border: 1px solid var(--border);
     border-radius: 10px; padding: 10px 12px;
@@ -27,89 +30,63 @@
            justify-content: space-between; align-items: center; }
   .title .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
   .title .dot.good { background: var(--good); box-shadow: 0 0 8px var(--good); }
+  .title .dot.warn { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+  .title .dot.bad  { background: var(--bad);  box-shadow: 0 0 8px var(--bad); }
+  .radar-wrap { position: relative; margin: 6px 0; padding: 6px 0; }
+  .radar-wrap::before {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(circle at center, rgba(106,165,255,0.08), transparent 60%);
+    pointer-events: none; border-radius: 999px;
+  }
+  canvas#radar { display: block; margin: 0 auto;
+                 filter: drop-shadow(0 6px 18px rgba(47,92,255,0.18)); }
   .row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
   .row .pdot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
   .row.speaking .pdot { background: var(--speaking); box-shadow: 0 0 8px var(--speaking); }
   .row.speaking .nm { color: var(--speaking); }
   .nm { flex: 1; font-weight: 600; font-size: 12px; }
   .d  { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 11px; }
-  .empty { color: var(--muted); font-size: 11px; padding: 4px 0; }
+  .empty { color: var(--muted); font-size: 11px; padding: 4px 0; text-align: center; }
   .hint { color: var(--muted); font-size: 10px; margin-top: 6px; text-align: center;
           border-top: 1px solid var(--border); padding-top: 6px; }
+  .me { font-size: 10px; color: var(--muted); text-align: center; margin-top: 4px; }
+  .me .badge { display: inline-block; padding: 1px 6px; border-radius: 10px;
+               background: rgba(106,165,255,0.18); color: var(--accent);
+               font-weight: 600; margin-left: 4px; font-size: 10px; }
+  .offline {
+    border: 1px dashed var(--warn); border-radius: 8px;
+    padding: 10px; text-align: center; margin: 8px 0;
+    color: var(--warn); font-size: 11px; line-height: 1.4;
+  }
+  .offline .big { font-size: 13px; font-weight: 600; margin-bottom: 4px; color: var(--fg); }
 </style>
 </head>
 <body>
 <div class="panel">
   <div class="title">
     <span>MSFSVoiceWalker</span>
-    <span class="dot" id="meshDot"></span>
+    <span class="dot" id="connDot"></span>
   </div>
+
+  <div id="offline" class="offline" style="display:none">
+    <div class="big">Keine Verbindung zur App</div>
+    <div>MSFSVoiceWalker-App nicht gestartet.</div>
+  </div>
+
+  <div class="radar-wrap">
+    <canvas id="radar" width="220" height="220"></canvas>
+  </div>
+
+  <div class="me" id="me">—</div>
+
   <div id="list"><div class="empty">wartet auf Mesh…</div></div>
-  <div class="hint" id="hint">Drücke Leertaste oder deinen PTT-Knopf zum Sprechen.</div>
+  <div class="hint" id="hint">Leertaste / PTT = Sprechen</div>
 </div>
-<script>
-(() => {
-  const MAX_RANGE_M = 1000;
-  const peers = new Map();
-  let mySim = null;
 
-  const R = 6371000, toRad = d => d * Math.PI / 180;
-  function dist(a, b) {
-    const dLat = toRad(b.lat - a.lat), dLon = toRad(b.lon - a.lon);
-    const h = Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon/2)**2;
-    return 2 * R * Math.asin(Math.sqrt(h));
-  }
-  function esc(s) { return String(s).replace(/[&<>"']/g,
-      c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-  function fmt(m) { return m < 1000 ? `${m.toFixed(0)} m` : `${(m/1000).toFixed(2)} km`; }
-
-  // Overlay reads state via BroadcastChannel from the main app in the same origin.
-  // Main app publishes { type: 'overlay', peers: [...], mySim } at ~4 Hz.
-  const ch = new BroadcastChannel('msfsvoicewalker');
-  ch.onmessage = e => {
-    const m = e.data;
-    if (m?.type !== 'overlay') return;
-    mySim = m.mySim;
-    peers.clear();
-    for (const p of m.peers || []) peers.set(p.id, p);
-    render();
-  };
-
-  function render() {
-    const host = document.getElementById('list');
-    const dot = document.getElementById('meshDot');
-    dot.classList.toggle('good', peers.size > 0);
-    if (peers.size === 0) {
-      host.innerHTML = '<div class="empty">niemand in der Nähe</div>';
-      return;
-    }
-    const inRange = [], far = [];
-    for (const p of peers.values()) {
-      const d = mySim && p.sim ? dist(mySim, p.sim) : null;
-      p._d = d;
-      (d != null && d < MAX_RANGE_M ? inRange : far).push(p);
-    }
-    inRange.sort((a, b) => (a._d ?? 1e12) - (b._d ?? 1e12));
-    let html = '';
-    for (const p of inRange) {
-      const sp = p.speaking ? ' speaking' : '';
-      html += `<div class="row${sp}">
-        <div class="pdot"></div>
-        <div class="nm">${esc(p.callsign || p.id.slice(0,6))}${p.on_foot ? ' 🚶' : ''}</div>
-        <div class="d">${p._d != null ? fmt(p._d) : '—'}</div>
-      </div>`;
-    }
-    if (inRange.length === 0) {
-      html = '<div class="empty">niemand in 1 km Hörweite</div>';
-    }
-    if (far.length) {
-      html += `<div class="d" style="margin-top:4px;opacity:.7;">+${far.length} außer Reichweite</div>`;
-    }
-    host.innerHTML = html;
-  }
-
-  render();
-})();
-</script>
+<!-- Externe JS-Datei — muss nach /overlay.js geladen werden, weil der
+     CSP-Header `script-src 'self'` keine Inline-<script>-Bloecke erlaubt.
+     Das war der Grund warum das MSFS-Panel bisher schwarz war: die
+     Inline-Logik wurde von Coherent GT geblockt. -->
+<script src="/overlay.js" defer></script>
 </body>
 </html>

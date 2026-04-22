@@ -202,16 +202,16 @@ function initDebugPanel() {
         <section>
           <h4>HRTF-Testton (prüft Richtungs-Audio)</h4>
           <div class="btnrow">
-            <button data-dir="N">Norden</button>
-            <button data-dir="E">Osten</button>
-            <button data-dir="S">Süden</button>
-            <button data-dir="W">Westen</button>
+            <button data-dir="N">Vorne</button>
+            <button data-dir="E">Rechts</button>
+            <button data-dir="S">Hinten</button>
+            <button data-dir="W">Links</button>
           </div>
           <div class="btnrow">
-            <button data-dir="UP">oben</button>
-            <button data-dir="DOWN">unten</button>
-            <button data-dir="NE">NO</button>
-            <button data-dir="SW">SW</button>
+            <button data-dir="UP">Oben</button>
+            <button data-dir="DOWN">Unten</button>
+            <button data-dir="NE">Vorne-Rechts</button>
+            <button data-dir="SW">Hinten-Links</button>
           </div>
           <div class="hint">Spielt 440 Hz für 1,5 s aus der gewählten Richtung. Kopfhörer nötig.</div>
         </section>
@@ -310,15 +310,20 @@ function initDebugPanel() {
 
 
   // ==== HRTF-Testtoene ====================================================
+  // Feine Elevation-Tricks fuer Front/Back-Disambiguation: HRTF hat im
+  // reinen Horizontplane (y=0) bekanntermassen Front/Back-Confusion.
+  // Ein minimaler Up/Down-Anteil (y != 0) hilft dem Hirn, die Richtung
+  // unmissverstaendlich zu lokalisieren — Norden oben hinten, Sueden unten
+  // vorne. Das ist ein Trick den z.B. Doom / VR-Audio-Engines verwenden.
   const dirVectors = {
-    N:    { x: 0,  y: 0,  z: -1 },
-    NE:   { x: 0.71, y: 0, z: -0.71 },
-    E:    { x: 1,  y: 0,  z: 0 },
-    S:    { x: 0,  y: 0,  z: 1 },
-    SW:   { x: -0.71, y: 0, z: 0.71 },
-    W:    { x: -1, y: 0,  z: 0 },
-    UP:   { x: 0,  y: 1,  z: 0 },
-    DOWN: { x: 0,  y: -1, z: 0 },
+    N:    { x: 0,     y:  0.15, z: -1    },   // vorne, leicht oben
+    NE:   { x: 0.71,  y:  0.10, z: -0.71 },
+    E:    { x: 1,     y:  0,    z:  0    },
+    S:    { x: 0,     y: -0.15, z:  1    },   // hinten, leicht unten
+    SW:   { x: -0.71, y: -0.10, z:  0.71 },
+    W:    { x: -1,    y:  0,    z:  0    },
+    UP:   { x: 0,     y:  1,    z:  0    },
+    DOWN: { x: 0,     y: -1,    z:  0    },
   };
   panel.querySelectorAll('button[data-dir]').forEach(b => {
     b.addEventListener('click', () => playTestTone(b.dataset.dir));
@@ -335,21 +340,43 @@ function initDebugPanel() {
     pan.panningModel  = 'HRTF';
     pan.distanceModel = 'linear';
     pan.refDistance   = 1;
-    pan.maxDistance   = 1;
+    pan.maxDistance   = 50;     // vorher 1 — kein Cap mehr, Distanz darf wirken
     pan.rolloffFactor = 0;
-    pan.positionX.value = v.x;
-    pan.positionY.value = v.y;
-    pan.positionZ.value = v.z;
-    osc.frequency.value = 440;
-    osc.type = 'sine';
+    // Buttons sind LISTENER-RELATIV: dirVectors ist in Ohr-Koordinaten
+    // definiert (v.x = rechts, v.y = oben, v.z = hinten). Der Listener wird
+    // aber durch updateListenerOrientation() im Weltraum gedreht — wenn wir
+    // v einfach 1:1 als pan.positionX/Y/Z nehmen, sind das Welt-Koordinaten,
+    // und "Rechts" klingt bei heading=90 (Ost) ploetzlich von vorne.
+    // Fix: v in Welt-Koordinaten transformieren mit aktuellem heading:
+    //   world = v.x * listener_right  + v.y * listener_up  + (-v.z) * listener_forward
+    const headingRad = (window.__voicewalker?.state?.mySim?.heading_deg || 0) * Math.PI / 180;
+    const sinH = Math.sin(headingRad), cosH = Math.cos(headingRad);
+    // listener forward = (sinH, 0, -cosH)
+    // listener right   = (cosH, 0,  sinH)   (forward × up, right-handed)
+    const DIST = 4; // Meter — fern genug, dass HRTF nicht "in den Kopf" klingt
+    const wx = DIST * (v.x * cosH + (-v.z) * sinH);
+    const wy = DIST *  v.y;
+    const wz = DIST * (v.x * sinH + v.z *  cosH);
+    pan.positionX.value = wx;
+    pan.positionY.value = wy;
+    pan.positionZ.value = wz;
+
+    // Sawtooth + Frequenz-Sweep = breitbandiges Signal mit reichen Obertoenen.
+    // HRTF-Lokalisation braucht spektrale Cues — reine Sinus haben keine
+    // Obertoene und koennen vorne/hinten kaum unterschieden werden.
+    osc.type = 'sawtooth';
+    const t0 = ctx.currentTime;
+    osc.frequency.setValueAtTime(320, t0);
+    osc.frequency.linearRampToValueAtTime(520, t0 + 0.8);
+    osc.frequency.linearRampToValueAtTime(320, t0 + 1.5);
     g.gain.value = 0;
-    g.gain.setValueAtTime(0, ctx.currentTime);
-    g.gain.linearRampToValueAtTime(0.3, ctx.currentTime + 0.05);
-    g.gain.linearRampToValueAtTime(0, ctx.currentTime + 1.5);
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(0.22, t0 + 0.05);
+    g.gain.linearRampToValueAtTime(0, t0 + 1.5);
     osc.connect(g).connect(pan).connect(ctx.destination);
     osc.start();
-    osc.stop(ctx.currentTime + 1.55);
-    console.info(`[debug] test tone from ${dir}`);
+    osc.stop(t0 + 1.55);
+    console.info(`[debug] test tone from ${dir} (heading=${heading.toFixed(0)}°)`);
   }
 
 

@@ -43,3 +43,25 @@ package-lock.json
 *.tmp
 .env
 .env.local
+
+# --- Installer build output ---
+installer/bin/
+installer/obj/
+
+# --- VS Upgrade logs ---
+UpgradeLog*.htm
+
+# --- Local Claude config / context ---
+.claude/
+CLAUDE_CONTEXT.md
+
+# --- MSFS SDK build intermediates ---
+msfs-project/_PackageInt/
+msfs-project/PackagesMetadata/
+msfs-project/Packages/
+MSFS/Release/*.pdb
+msfs-project/Sources/wasm/MSFS/
+*.tlog
+*.lastbuildstate
+*.recipe
+*.obj

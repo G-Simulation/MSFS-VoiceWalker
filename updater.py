@@ -116,7 +116,13 @@ def is_newer(remote: str, local: str) -> bool:
 # -----------------------------------------------------------------------------
 # GitHub-Release abrufen
 # -----------------------------------------------------------------------------
-def _fetch_release_blocking() -> dict:
+def _fetch_release_blocking() -> dict | None:
+    """GitHub-Release holen. Gibt None zurueck wenn noch kein Release existiert
+    (404) — das ist kein Fehler, nur ein leeres Repo. Andere HTTP-Codes und
+    Netzwerk-Fehler werden via ``Fehler``-Attribut im opener signalisiert,
+    niemals per exception geraised (sonst stoppt der VS-Debugger auf
+    'first-chance exception' jeden Check-Lauf).
+    """
     req = urllib.request.Request(
         RELEASE_API_URL,
         headers={
@@ -124,7 +130,21 @@ def _fetch_release_blocking() -> dict:
             "User-Agent": USER_AGENT,
         },
     )
-    with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_S) as r:
+    # HTTPErrorProcessor-freier Opener — 404/403 kommen als normale Response
+    # mit .status durch, ohne urllib's urlopen einen HTTPError werfen zu
+    # lassen. Das haelt den VS-Debugger ruhig.
+    class _NoRaiseProcessor(urllib.request.HTTPErrorProcessor):
+        def http_response(self, request, response):  # noqa: N802
+            return response
+        https_response = http_response
+    opener = urllib.request.build_opener(_NoRaiseProcessor())
+    with opener.open(req, timeout=REQUEST_TIMEOUT_S) as r:
+        status = getattr(r, "status", 200)
+        if status == 404:
+            return None
+        if status >= 400:
+            # Nicht-404-Fehler signalisieren wir durch dict mit _http_status
+            return {"_http_status": status}
         return json.loads(r.read().decode("utf-8", errors="replace"))
 
 
@@ -132,21 +152,23 @@ async def check_once() -> UpdateState:
     """Einmal prüfen, State aktualisieren, zurückgeben."""
     try:
         data = await asyncio.to_thread(_fetch_release_blocking)
-    except urllib.error.HTTPError as e:
-        # 404 = noch kein Release veroeffentlicht — kein Fehler, nur normal
-        if e.code == 404:
-            STATE.error = None
-            STATE.available = False
-            STATE.latest = None
-            STATE.checked_at = time.time()
-            log.debug("updater: noch kein Release im Repo")
-            return STATE
-        STATE.error = f"HTTP {e.code}"
-        log.warning("updater: HTTP-Fehler %s", e.code)
-        return STATE
-    except Exception as e:
+    except Exception as e:  # nur noch echte Netzwerk-/DNS-Fehler
         STATE.error = str(e)
-        log.debug("updater: Pruefung fehlgeschlagen: %s", e)
+        log.debug("updater: Netzwerk-Fehler: %s", e)
+        return STATE
+
+    # 404 = noch kein Release veroeffentlicht — kein Fehler, nur normal
+    if data is None:
+        STATE.error = None
+        STATE.available = False
+        STATE.latest = None
+        STATE.checked_at = time.time()
+        log.debug("updater: noch kein Release im Repo")
+        return STATE
+
+    if isinstance(data, dict) and "_http_status" in data:
+        STATE.error = f"HTTP {data['_http_status']}"
+        log.warning("updater: HTTP-Fehler %s", data["_http_status"])
         return STATE
 
     tag = data.get("tag_name", "")

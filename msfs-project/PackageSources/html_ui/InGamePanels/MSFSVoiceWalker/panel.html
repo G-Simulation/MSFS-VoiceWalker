@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Cache-control" content="NO-CACHE" />
+    <title>MSFSVoiceWalker</title>
+
+    <link rel="stylesheet" href="/SCSS/common.css" />
+
+    <script type="text/javascript" src="/JS/coherent.js"></script>
+    <script type="text/javascript" src="/JS/common.js"></script>
+    <script type="text/javascript" src="/JS/dataStorage.js"></script>
+    <script type="text/javascript" src="/JS/buttons.js"></script>
+    <script type="text/javascript" src="/JS/Services/ToolBarPanels.js"></script>
+    <script type="text/javascript" src="/JS/simvar.js"></script>
+    <script type="text/javascript" src="/Pages/VCockpit/Instruments/Shared/Utils/DataReadManager.js"></script>
+    <script type="text/javascript" src="/Pages/VCockpit/Instruments/Shared/BaseInstrument.js"></script>
+
+    <link rel="import" href="/templates/NewPushButton/NewPushButton.html" />
+    <link rel="import" href="/templates/ingameUi/ingameUi.html" />
+    <link rel="import" href="/templates/ingameUiHeader/ingameUiHeader.html" />
+
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; overflow: hidden; }
+
+      .ingameUiContent, .ingameUiWrapper {
+        flex: 1 1 auto;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        min-width: 0;
+      }
+      ingame-ui.fittedContent .ingameUiWrapper { margin: 0 !important; }
+
+      #vw-root {
+        position: relative;
+        flex: 1 1 auto;
+        min-height: 0; min-width: 0;
+        display: flex; flex-direction: column;
+        background: #0b1220; color: #e9eefc;
+        font-family: "Segoe UI", system-ui, sans-serif; font-size: 13px;
+        padding: 12px; gap: 8px; align-items: center;
+      }
+
+      .vw-header { display: flex; align-items: center; gap: 8px;
+                   align-self: flex-start; flex-shrink: 0; }
+      .vw-dot { width: 9px; height: 9px; border-radius: 50%; background: #ff6b6b;
+                flex-shrink: 0; }
+      .vw-dot.good { background: #3fdc8a; box-shadow: 0 0 8px #3fdc8a; }
+      .vw-dot.warn { background: #ffb454; box-shadow: 0 0 8px #ffb454; }
+      .vw-label  { font-size: 11px; color: #8696b8; text-transform: uppercase;
+                   letter-spacing: 0.08em; }
+
+      #vw-radar-wrap { flex: 1 1 auto; width: 100%;
+                       display: flex; align-items: center; justify-content: center;
+                       min-height: 0; }
+      canvas#radar { display: block; max-width: 100%; max-height: 100%; }
+      #vw-status { font-size: 13px; color: #e9eefc; text-align: center; flex-shrink: 0; }
+      #vw-peers  { font-size: 12px; color: #8696b8; text-align: center; flex-shrink: 0; }
+    </style>
+
+    <script type="text/javascript" src="panel.js"></script>
+  </head>
+  <body class="border-box">
+    <ingame-ui
+      id="PANEL_MSFSVOICEWALKER"
+      panel-id="PANEL_MSFSVOICEWALKER"
+      title="MSFSVoiceWalker"
+      class="ingameUiFrame panelInvisible"
+      content-fit="true"
+    >
+      <div id="vw-root">
+        <div class="vw-header">
+          <span class="vw-dot" id="vw-conn"></span>
+          <span class="vw-label" id="vw-label">offline</span>
+        </div>
+        <div id="vw-radar-wrap">
+          <canvas id="radar" width="340" height="340"></canvas>
+        </div>
+        <div id="vw-status">-</div>
+        <div id="vw-peers">wartet auf Mesh ...</div>
+      </div>
+    </ingame-ui>
+  </body>
+</html>

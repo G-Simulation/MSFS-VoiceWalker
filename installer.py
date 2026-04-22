@@ -22,7 +22,10 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 APP_NAME      = "MSFSVoiceWalker"
-ADDON_NAME    = "msfsvoicewalker"
+# Package-Name nach fspackagetool-Build: gsimulation-msfsvoicewalker.
+# Fallback auf den alten Hand-Ordner-Namen wenn das neue Build-Output fehlt.
+ADDON_NAME    = "gsimulation-msfsvoicewalker"
+ADDON_NAME_LEGACY = "msfsvoicewalker"
 APP_EXE_FILE  = "MSFSVoiceWalker.exe"
 
 
@@ -43,6 +46,21 @@ def _glob_first(patterns):
                 yield hit
 
 
+def _safe_glob(root: Path, pattern: str):
+    """glob der jeden OSError schluckt (UWP-Sandbox wirft WinError 448)."""
+    try:
+        return list(root.glob(pattern))
+    except OSError:
+        return []
+
+
+def _safe_is_dir(p: Path) -> bool:
+    try:
+        return p.is_dir()
+    except OSError:
+        return False
+
+
 def detect_msfs_installs():
     """Liefert Liste: [{label, local_cache, community, exe_xml}]"""
     local   = Path(os.environ.get("LOCALAPPDATA", ""))
@@ -53,20 +71,20 @@ def detect_msfs_installs():
 
     # MSFS 2020 Store
     if local:
-        for d in local.glob("Packages/Microsoft.FlightSimulator_*/LocalCache"):
+        for d in _safe_glob(local, "Packages/Microsoft.FlightSimulator_*/LocalCache"):
             candidates.append(("MSFS 2020 (Store)", d))
     # MSFS 2020 Steam
     s = roaming / "Microsoft Flight Simulator"
-    if s.is_dir():
+    if _safe_is_dir(s):
         candidates.append(("MSFS 2020 (Steam)", s))
     # MSFS 2024 Store — Package-Name ist je nach Version unterschiedlich
     if local:
         for pat in ("Microsoft.Limitless_*", "Microsoft.FlightSimulator2024_*"):
-            for d in local.glob(f"Packages/{pat}/LocalCache"):
+            for d in _safe_glob(local, f"Packages/{pat}/LocalCache"):
                 candidates.append(("MSFS 2024 (Store)", d))
     # MSFS 2024 Steam
     s = roaming / "Microsoft Flight Simulator 2024"
-    if s.is_dir():
+    if _safe_is_dir(s):
         candidates.append(("MSFS 2024 (Steam)", s))
 
     results = []
@@ -84,10 +102,15 @@ def detect_msfs_installs():
 
 def resolve_community_folder(local_cache: Path) -> Path:
     """Liest UserCfg.opt aus, um den Community-Folder zu finden. Fallback:
-    <local_cache>/Packages/Community."""
+    <local_cache>/Packages/Community.
+
+    Windows 11 sperrt den Zugriff auf UWP-Sandbox-Pfade (MSFS Store-Edition)
+    fuer normale Prozesse ab — das wirft WinError 448 bei is_file()/read_text().
+    Wir fangen JEDE OSError ab, nicht nur FileNotFound, damit der Installer
+    in dem Fall einfach auf den Default-Pfad zurueckfaellt."""
     cfg = local_cache / "UserCfg.opt"
-    if cfg.is_file():
-        try:
+    try:
+        if cfg.is_file():
             for line in cfg.read_text(encoding="utf-8", errors="ignore").splitlines():
                 line = line.strip()
                 if line.startswith("InstalledPackagesPath"):
@@ -95,8 +118,12 @@ def resolve_community_folder(local_cache: Path) -> Path:
                     if len(parts) >= 2:
                         p = Path(parts[1]) / "Community"
                         return p
-        except Exception:
-            pass
+    except OSError:
+        # UWP-Sandbox-Pfad nicht durchlaufbar (WinError 448) oder aehnliches —
+        # ignorieren und Default-Pfad verwenden.
+        pass
+    except Exception:
+        pass
     return local_cache / "Packages" / "Community"
 
 
@@ -221,6 +248,51 @@ def copy_community_addon(community_dir: Path) -> Path:
     return dst
 
 
+def clear_wasm_compile_cache(sim: dict, addon_name: str) -> list[str]:
+    """MSFS 2024 compiliert WASM-Module einmalig zu nativem Code und cached das
+    Ergebnis in LocalState/WASM/MSFS2024/<package-hash>/. Wenn wir die .wasm
+    aktualisieren aber der Cache alt ist, laedt MSFS die alte kompilierte
+    Version — Bytecode-Hash wird offenbar nicht immer neu berechnet.
+    Loescht alle Cache-Subordner die addon_name im Pfad enthalten.
+    Gibt Liste der geloeschten Pfade zurueck (fuer Logging).
+    """
+    removed: list[str] = []
+    local_cache = sim.get("local_cache")
+    if not local_cache:
+        return removed
+    local_cache = Path(local_cache)
+    # LocalCache-Ordner ist z.B. .../Microsoft.Limitless_.../LocalCache
+    # WASM-Compile-Cache liegt als Geschwister daneben: .../LocalState/WASM/
+    base = local_cache.parent
+    candidates = [
+        base / "LocalState" / "WASM" / "MSFS2024",
+        base / "LocalState" / "WASM",
+        local_cache / "WASM",           # MSFS 2020 Fallback
+    ]
+    needle = addon_name.lower()
+    for cache_dir in candidates:
+        try:
+            if not cache_dir.is_dir():
+                continue
+        except OSError:
+            continue
+        # Nicht rekursiv — der Cache ist meistens flach organisiert (pro Package
+        # ein Ordner). Wir matchen Namen die unseren addon_name enthalten.
+        try:
+            for sub in cache_dir.iterdir():
+                if sub.is_dir() and needle in sub.name.lower():
+                    try:
+                        shutil.rmtree(sub)
+                        removed.append(str(sub))
+                    except Exception:
+                        # Datei kann in Benutzung sein wenn MSFS laeuft —
+                        # dann lassen und dem User sagen.
+                        pass
+        except OSError:
+            continue
+    return removed
+
+
 # -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
@@ -256,6 +328,18 @@ def install() -> int:
         except Exception as e:
             print(f"    [FEHLER] Addon-Kopie fehlgeschlagen: {e}")
             continue
+        # Alte kompilierte WASM-Version aus dem Cache entfernen — sonst laedt
+        # MSFS beim Start weiter den alten Bytecode trotz neuer .wasm-Datei.
+        try:
+            cleared = clear_wasm_compile_cache(sim, ADDON_NAME)
+            if cleared:
+                print(f"    [OK] WASM-Cache geleert ({len(cleared)} Eintraege)")
+                for p in cleared:
+                    print(f"         - {p}")
+            else:
+                print(f"    [INFO] Kein alter WASM-Cache gefunden (clean install)")
+        except Exception as e:
+            print(f"    [INFO] WASM-Cache konnte nicht geleert werden: {e}")
         try:
             action = upsert_exe_xml(sim["exe_xml"], APP_NAME, dst_exe)
             print(f"    [OK] exe.xml: {action}")

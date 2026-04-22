@@ -7,13 +7,172 @@
 //   5. USB PTT is driven by the Python backend (ptt_press / ptt_release events);
 //      keyboard PTT (Spacebar) works in-browser as a fallback.
 
-import { joinRoom } from 'https://cdn.jsdelivr.net/npm/trystero@0.23.0/+esm';
+// Trystero v0.15.0 war die letzte Version vor dem Multi-Strategy-Split.
+// Das ist reiner WebTorrent-Tracker, keine Nostr-Relays, kein Rate-Limit.
+// Ab v0.16+ gibt's mehrere Strategien und der Default wechselt je Version —
+// der Subpath-Import `/torrent/+esm` wird von jsDelivr nicht zuverlaessig
+// aufgeloest. Mit 0.15.0 haben wir eine stabile Default-Einstiegspunkt.
+import { joinRoom } from 'https://cdn.jsdelivr.net/npm/trystero@0.15.0/+esm';
+
+// --- Single-Tab-Lock --------------------------------------------------------
+// Verhindert, dass mehrere Browser-Tabs gleichzeitig das Mesh joinen und sich
+// als Ghost-Peers in der Liste zeigen. Erster Tab wird "primary" und sendet
+// alle 2 s einen Heartbeat ueber BroadcastChannel. Neue Tabs fragen beim Load
+// kurz an — hoeren sie einen Heartbeat, zeigen sie einen Blocker-Screen und
+// booten die eigentliche App nicht.
+const LOCK_CHANNEL = 'msfsvoicewalker-instance-lock';
+const HEARTBEAT_MS = 2000;
+const PROBE_WAIT_MS = 350;
+let _isPrimaryTab = false;
+
+function showInstanceBlocker() {
+  // Blocker-UI ueber das gesamte Fenster. User muss diesen Tab schliessen
+  // oder auf "Dieser Tab" klicken um die Kontrolle zu uebernehmen.
+  const overlay = document.createElement('div');
+  overlay.id = 'vw-instance-blocker';
+  overlay.style.cssText = `
+    position: fixed; inset: 0; z-index: 99999;
+    background: rgba(11, 18, 32, 0.96); color: #e9eefc;
+    display: flex; align-items: center; justify-content: center;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    backdrop-filter: blur(6px);
+  `;
+  overlay.innerHTML = `
+    <div style="max-width:420px; padding:32px; text-align:center;
+                border:1px solid #233457; border-radius:12px;
+                background:#0b1220;">
+      <div style="font-size:36px; margin-bottom:12px;">⚠</div>
+      <h2 style="margin:0 0 12px 0; font-size:18px;">
+        MSFSVoiceWalker läuft bereits
+      </h2>
+      <p style="color:#8696b8; font-size:13px; line-height:1.5; margin:0 0 20px 0;">
+        Die App ist schon in einem anderen Browser-Fenster oder Tab geöffnet.
+        Um Ghost-Peers im Mesh zu vermeiden, darf nur eine Instanz gleichzeitig
+        laufen.
+      </p>
+      <button id="vw-takeover-btn" style="
+        background:#6aa5ff; color:#0b1220; border:none; border-radius:6px;
+        padding:10px 18px; font-weight:600; cursor:pointer; font-size:13px;">
+        Diesen Tab aktivieren (anderen schließen)
+      </button>
+      <p style="color:#556582; font-size:11px; margin:14px 0 0 0;">
+        oder einfach diesen Tab schließen
+      </p>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('vw-takeover-btn')?.addEventListener('click', () => {
+    // Sende "takeover" — der aktuelle primary-Tab hoert das und zeigt
+    // SELBER einen Blocker, dieser Tab wird dann primary bei nächstem Reload.
+    try {
+      const ch = new BroadcastChannel(LOCK_CHANNEL);
+      ch.postMessage({ type: 'takeover' });
+      ch.close();
+    } catch {}
+    setTimeout(() => location.reload(), 200);
+  });
+}
+
+async function acquireInstanceLock() {
+  if (!('BroadcastChannel' in window)) {
+    // Alte Browser: keine Instanz-Kontrolle moeglich — einfach zulassen.
+    _isPrimaryTab = true;
+    return true;
+  }
+  const ch = new BroadcastChannel(LOCK_CHANNEL);
+  let primaryExists = false;
+
+  return new Promise(resolve => {
+    const onProbeMsg = e => {
+      if (e.data?.type === 'heartbeat' || e.data?.type === 'i-am-primary') {
+        primaryExists = true;
+      }
+    };
+    ch.addEventListener('message', onProbeMsg);
+    ch.postMessage({ type: 'probe' });
+
+    setTimeout(() => {
+      ch.removeEventListener('message', onProbeMsg);
+      if (primaryExists) {
+        becomeSecondary(ch);
+        resolve(false);
+      } else {
+        becomePrimary(ch);
+        resolve(true);
+      }
+    }, PROBE_WAIT_MS);
+  });
+}
+
+// --- Tab wird Primary -------------------------------------------------------
+function becomePrimary(ch) {
+  _isPrimaryTab = true;
+  ch.postMessage({ type: 'i-am-primary' });
+
+  // Heartbeat senden + auf Probes/Takeover reagieren
+  const heartbeatTimer = setInterval(
+    () => ch.postMessage({ type: 'heartbeat' }), HEARTBEAT_MS);
+
+  ch.addEventListener('message', e => {
+    if (e.data?.type === 'probe') {
+      ch.postMessage({ type: 'i-am-primary' });
+    } else if (e.data?.type === 'takeover') {
+      // Anderer Tab will uebernehmen — wir deaktivieren uns, dieser Tab
+      // wird zum Blocker und der andere uebernimmt nach Reload.
+      clearInterval(heartbeatTimer);
+      try { for (const { room } of state.rooms.values()) room.leave(); } catch {}
+      try { ch.postMessage({ type: 'goodbye' }); } catch {}
+      _isPrimaryTab = false;
+      showInstanceBlocker();
+    }
+  });
+
+  // Beim Schliessen/Reload aktiv "goodbye" senden — damit der naechste
+  // Tab (falls einer im Secondary-State offen ist) SOFORT uebernimmt
+  // statt auf Probe-Timeout zu warten.
+  window.addEventListener('beforeunload', () => {
+    try {
+      clearInterval(heartbeatTimer);
+      ch.postMessage({ type: 'goodbye' });
+      ch.close();
+    } catch {}
+  });
+}
+
+// --- Tab wird Secondary -----------------------------------------------------
+function becomeSecondary(ch) {
+  _isPrimaryTab = false;
+
+  // Blocker zeigen (sobald DOM bereit)
+  const render = () => showInstanceBlocker();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', render);
+  } else {
+    render();
+  }
+
+  // Channel OFFEN halten — falls der primary-Tab schliesst, wollen wir
+  // automatisch uebernehmen ohne dass der User reloaden muss.
+  ch.addEventListener('message', e => {
+    if (e.data?.type === 'goodbye') {
+      // Primary ist weg — wir laden neu und werden beim naechsten Mal primary.
+      // Reload ist sauberer als "on-the-fly upgrade", weil beim Booten
+      // alle Subsysteme (WS, Mic, Mesh) frisch initialisiert werden.
+      location.reload();
+    }
+  });
+}
+
+// Gate: nichts anderes darf laufen solange wir nicht primary sind.
+const _instanceLockPromise = acquireInstanceLock();
 
 // --- Config (all times in ms unless noted) -----------------------------------
 const APP_ID = 'msfsvoicewalker-v1';
 const GEOHASH_PRECISION = 4;
 const CELL_UPDATE_HZ = 0.5;
-const POS_SEND_HZ    = 5;
+// 5 Hz war zu aggressiv fuer die Signaling-Relays. 2 Hz reicht voellig —
+// WebRTC-Voice ist eh kontinuierlich, die Position ist nur fuer Radar+Panner.
+const POS_SEND_HZ    = 2;
 
 // Audio-Konfiguration — zur Laufzeit ueber das Debug-Menue aenderbar.
 // Defaults an realer menschlicher Stimmausbreitung orientiert (event-tauglich):
@@ -25,11 +184,75 @@ const POS_SEND_HZ    = 5;
 //   75 m    stumm
 // Damit bildet jeder Spieler seine eigene ~75m-Bubble — bei einem Fly-in mit
 // 30 Piloten hoert jeder nur seine direkten Nachbarn, nicht alle gleichzeitig.
+//
+// ZWEI AUDIO-WELTEN:
+//   walker  — Leute die nebeneinander an der Rampe stehen / laufen (75 m)
+//   cockpit — Piloten die im Cockpit sitzen und "UKW-Funk" haben (5 km)
+//   crossoverM — optionaler Uebergangsradius zwischen Welten (0 = strict)
+//
+// Alle drei Radien + Crossover sind in der UI einstellbar (Slider in der
+// "Einstellungen"-Sektion) und werden in localStorage persistiert.
 const audioConfig = {
-  maxRangeM:   75,     // harte Hoergrenze in Metern
-  fullVolumeM: 3,      // volle Lautstaerke bis diese Distanz
-  rolloff:     1.0,    // 1.0 = physikalisch inverse-distance; >1 steiler, <1 flacher
+  walker:  { maxRangeM: 75,   fullVolumeM: 3,  rolloff: 1.0 },
+  cockpit: { maxRangeM: 5000, fullVolumeM: 50, rolloff: 0.8 },
+  // Crossover: wenn > 0 koennen sich Walker und Cockpit-Piloten innerhalb
+  // dieses Radius hoeren (z.B. Walker steht neben eigener Cessna → Co-Pilot
+  // im Cockpit ist noch hoerbar). Default 0 = Welten streng getrennt.
+  crossoverM: 0,
+
+  // Backward-Compat-Getter+Setter: alter Code (z.B. debug.js) liest/schreibt
+  // .maxRangeM direkt. Wir mappen auf das AKTUELLE Modus-Profil (Walker
+  // wenn on_foot, sonst Cockpit). Neuer Code sollte lieber getAudioProfile()
+  // nutzen bzw. direkt audioConfig.walker.x / audioConfig.cockpit.x.
+  get maxRangeM()   { return getAudioProfile().maxRangeM; },
+  set maxRangeM(v)  { getAudioProfile().maxRangeM = +v; saveAudioConfig(); },
+  get fullVolumeM() { return getAudioProfile().fullVolumeM; },
+  set fullVolumeM(v){ getAudioProfile().fullVolumeM = +v; saveAudioConfig(); },
+  get rolloff()     { return getAudioProfile().rolloff; },
+  set rolloff(v)    { getAudioProfile().rolloff = +v; saveAudioConfig(); },
 };
+
+// Welches Audio-Profil gilt aktuell fuer MICH? Nutzt state.mySim.on_foot.
+function getAudioProfile() {
+  return (state && state.mySim && state.mySim.on_foot)
+    ? audioConfig.walker : audioConfig.cockpit;
+}
+// Zwischen welchen zwei Peers herrscht welches Profil?
+//   gleicher Modus → Profil des Modus
+//   anders + d≤crossover → Crossover-Profil (enger, steiler)
+//   anders + d>crossover → null (stumm)
+function profileBetween(mineOnFoot, peerOnFoot, distM) {
+  if (mineOnFoot === peerOnFoot) {
+    return mineOnFoot ? audioConfig.walker : audioConfig.cockpit;
+  }
+  if (audioConfig.crossoverM > 0 && distM != null && distM <= audioConfig.crossoverM) {
+    // Crossover-Profil: kurzer Radius, harter Falloff → nur unmittelbarer Nahbereich
+    return { maxRangeM: audioConfig.crossoverM, fullVolumeM: 2, rolloff: 1.4 };
+  }
+  return null;   // stumm
+}
+
+// Persistenz in localStorage
+function loadAudioConfig() {
+  try {
+    const s = localStorage.getItem('vw.audioConfig_v2');
+    if (!s) return;
+    const j = JSON.parse(s);
+    if (j.walker)  Object.assign(audioConfig.walker,  j.walker);
+    if (j.cockpit) Object.assign(audioConfig.cockpit, j.cockpit);
+    if (Number.isFinite(+j.crossoverM)) audioConfig.crossoverM = +j.crossoverM;
+  } catch {}
+}
+function saveAudioConfig() {
+  try {
+    localStorage.setItem('vw.audioConfig_v2', JSON.stringify({
+      walker:     audioConfig.walker,
+      cockpit:    audioConfig.cockpit,
+      crossoverM: audioConfig.crossoverM,
+    }));
+  } catch {}
+}
+loadAudioConfig();
 
 // --- Security / hardening ----------------------------------------------------
 const MAX_PEERS             = 50;
@@ -82,7 +305,45 @@ const state = {
   rooms: new Map(),   // cell → { room, peers:Map, posTimer }
   currentCell: null,
   ptt: { available: false, devices: [], binding: null, binding_mode: false },
+  // Tracking-Enabled: wird vom Backend geliefert (persistiert in config.json).
+  // Bei false → alle Rooms verlassen, keine Pos an Mesh senden, UI zeigt "verborgen".
+  trackingEnabled: true,
 };
+
+// --- Tracking an/aus -------------------------------------------------------
+function applyTrackingState(enabled) {
+  state.trackingEnabled = !!enabled;
+  const btn   = document.getElementById('trackingToggle');
+  const dot   = document.getElementById('trackingDot');
+  const label = document.getElementById('trackingLabel');
+  if (btn) btn.dataset.enabled = enabled ? 'true' : 'false';
+  if (label) label.textContent = enabled ? 'Sichtbar' : 'Verborgen';
+  if (dot) {
+    if (enabled) {
+      dot.className = 'w-2 h-2 rounded-full bg-[color:var(--color-good)] shadow-[0_0_8px_var(--color-good)]';
+    } else {
+      dot.className = 'w-2 h-2 rounded-full bg-[color:var(--color-muted)]';
+    }
+  }
+  // Bei "aus": alle Mesh-Rooms verlassen — andere Piloten sehen unsere
+  // Position dann nicht mehr. Bei "an": updateRooms() joint beim naechsten
+  // snapshot automatisch neu (via renderSelf → updateRooms).
+  if (!enabled) {
+    for (const [cell, entry] of state.rooms) {
+      if (entry.posTimer) clearInterval(entry.posTimer);
+      try { entry.room.leave(); } catch {}
+      state.rooms.delete(cell);
+    }
+    renderPeers();
+    renderMeshChip();
+  } else if (state.mySim) {
+    updateRooms();
+  }
+}
+
+function requestTrackingToggle() {
+  sendBackend({ type: 'set_tracking', enabled: !state.trackingEnabled });
+}
 
 function currentPeerCount() {
   let n = 0;
@@ -159,8 +420,9 @@ function distMeters(a, b) {
 //    500 m  -> 0.06
 //    850 m  -> 0.034  (Fade beginnt)
 //   1000 m  -> 0.00
-function volumeForDistance(m) {
-  const { fullVolumeM: full, maxRangeM: max, rolloff } = audioConfig;
+function volumeForDistance(m, profile) {
+  const p = profile || getAudioProfile();
+  const full = p.fullVolumeM, max = p.maxRangeM, rolloff = p.rolloff;
   if (m <= full) return 1.0;
   if (m >= max) return 0.0;
   const g = full / (full + rolloff * (m - full));
@@ -188,7 +450,9 @@ function sendBackend(obj) {
 }
 function connectBackendWs() {
   backendWs = new WebSocket(`ws://${location.host}/ui`);
-  backendWs.onopen = () => setStatus('sim', 'verbunden', 'good');
+  // WS-Open heisst Python-App laeuft — nicht dass SimConnect zu MSFS steht.
+  // Echte Sim-Status-Updates kommen erst mit dem ersten 'sim'-Snapshot.
+  backendWs.onopen = () => setStatus('sim', 'wartet auf Sim…', 'warn');
   backendWs.onmessage = e => {
     let m;
     try { m = JSON.parse(e.data); } catch { return; }
@@ -208,6 +472,8 @@ function connectBackendWs() {
       location.reload();
     } else if (m.type === 'update_available' || m.type === 'update_state') {
       showUpdateBanner(m);
+    } else if (m.type === 'tracking_state') {
+      applyTrackingState(!!m.enabled);
     }
   };
   backendWs.onclose = () => {
@@ -216,16 +482,89 @@ function connectBackendWs() {
   };
   backendWs.onerror = () => {};
 }
-connectBackendWs();
+
+// --- Privacy / Consent -------------------------------------------------------
+// Beim ersten Start (oder wenn der User den localStorage geleert hat) fragen
+// wir die Zustimmung zur Stimm-/IP-Uebertragung explizit ab. Ohne Consent
+// werden Mikrofon + Mesh gar nicht initialisiert — die UI zeigt nur den
+// Dialog und tut sonst nichts. Ist DSGVO-konform fuer biometrische Daten
+// (Stimme). Der Dialog kann spaeter erneut geoeffnet werden falls wir einen
+// Link dafuer einbauen wollen (z.B. im Footer "Datenschutz").
+const CONSENT_KEY = 'vw.privacy_consent_v1';
+function hasConsent()   { return localStorage.getItem(CONSENT_KEY) === 'yes'; }
+function storeConsent() { localStorage.setItem(CONSENT_KEY, 'yes'); }
+
+function ensureConsent() {
+  return new Promise(resolve => {
+    if (hasConsent()) { resolve(true); return; }
+    const wire = () => {
+      const dlg = document.getElementById('consentDialog');
+      if (!dlg) { resolve(false); return; }
+      dlg.classList.remove('hidden');
+      dlg.classList.add('flex');
+      dlg.setAttribute('aria-hidden', 'false');
+      const accept  = document.getElementById('consentAcceptBtn');
+      const decline = document.getElementById('consentDeclineBtn');
+      const close = (ok) => {
+        dlg.classList.add('hidden');
+        dlg.classList.remove('flex');
+        dlg.setAttribute('aria-hidden', 'true');
+        resolve(ok);
+      };
+      accept.onclick  = () => { storeConsent(); close(true); };
+      decline.onclick = () => { close(false); };
+    };
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', wire);
+    } else {
+      wire();
+    }
+  });
+}
+
+// Bootstrap-Sequenz: erst Single-Tab-Lock, dann Consent, dann App starten.
+// Wenn einer der Gates failed → App bleibt still (Blocker bzw. Consent-Dialog
+// sichtbar). Alles was nach hinten Netzwerk/Mic initialisiert MUSS hinter
+// diesem Gate haengen, damit kein Mic-Prompt/Mesh-Join ohne Einwilligung
+// erfolgt.
+const _appStartPromise = (async () => {
+  const primary = await _instanceLockPromise;
+  if (!primary) return false;
+  const consented = await ensureConsent();
+  if (!consented) {
+    console.warn('[privacy] User hat Einwilligung abgelehnt — App bleibt inaktiv');
+    return false;
+  }
+  return true;
+})();
+
+// Network (WS zum lokalen Python-Backend) — nach Consent
+_appStartPromise.then(ok => { if (ok) connectBackendWs(); });
 
 // --- Microphone --------------------------------------------------------------
+state.audioInputId  = localStorage.getItem('vw.audioInputId')  || '';
+state.audioOutputId = localStorage.getItem('vw.audioOutputId') || '';
+
 async function ensureMic() {
-  if (state.micStream) return;
   try {
-    state.micStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
-    state.micTrack = state.micStream.getAudioTracks()[0];
+    // Alten Stream sauber beenden wenn Device wechselt
+    if (state.micStream) {
+      for (const t of state.micStream.getTracks()) t.stop();
+      state.micStream = null;
+      state.micTrack  = null;
+    }
+    const constraints = {
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl:  true,
+      },
+    };
+    if (state.audioInputId) {
+      constraints.audio.deviceId = { exact: state.audioInputId };
+    }
+    state.micStream = await navigator.mediaDevices.getUserMedia(constraints);
+    state.micTrack  = state.micStream.getAudioTracks()[0];
     state.micTrack.enabled = state.voxMode;
     setStatus('mic', 'bereit', 'good');
     // Audio-Streams zu Peers werden NICHT pauschal angehaengt — das macht
@@ -236,13 +575,185 @@ async function ensureMic() {
     console.error('[mic]', e);
   }
 }
-ensureMic();
-document.addEventListener('click',   ensureMic, { once: true });
-document.addEventListener('keydown', ensureMic, { once: true });
+// Mikrofon (getUserMedia) — erst nach erfolgreichem Consent (biometrische
+// Daten-Einwilligung). Auto-Retry auf Click/Keydown falls der Browser den
+// ersten Mic-Prompt blockt (manche Browser verlangen User-Interaction).
+_appStartPromise.then(ok => {
+  if (!ok) return;
+  ensureMic();
+  document.addEventListener('click',   () => ensureMic(), { once: true });
+  document.addEventListener('keydown', () => ensureMic(), { once: true });
+});
+
+// --- Audio Device Selection --------------------------------------------------
+async function populateAudioDevices() {
+  try {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const inEl  = document.getElementById('audioInput');
+    const outEl = document.getElementById('audioOutput');
+    if (!inEl || !outEl) return;
+
+    const fill = (sel, list, savedId) => {
+      const prev = sel.value;
+      sel.innerHTML = '';
+      const def = document.createElement('option');
+      def.value = '';
+      def.textContent = 'Standard';
+      sel.appendChild(def);
+      for (const d of list) {
+        const opt = document.createElement('option');
+        opt.value = d.deviceId;
+        opt.textContent = d.label || `${d.kind} ${d.deviceId.slice(0, 6)}`;
+        sel.appendChild(opt);
+      }
+      sel.value = savedId && list.some(d => d.deviceId === savedId) ? savedId : prev;
+    };
+
+    fill(inEl,  devices.filter(d => d.kind === 'audioinput'),  state.audioInputId);
+    fill(outEl, devices.filter(d => d.kind === 'audiooutput'), state.audioOutputId);
+  } catch (e) {
+    console.warn('[audio-devices]', e);
+  }
+}
+
+function applyAudioOutput() {
+  // setSinkId auf alle Peer-Audio-Elemente anwenden. Braucht Secure-Context
+  // oder localhost — bei uns 127.0.0.1, passt.
+  if (!state.audioOutputId) return;
+  for (const [, room] of state.rooms) {
+    for (const [, p] of room.peers) {
+      if (p.audioEl && typeof p.audioEl.setSinkId === 'function') {
+        p.audioEl.setSinkId(state.audioOutputId).catch(e => {
+          console.warn('[audio-out]', e);
+        });
+      }
+    }
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const inEl  = document.getElementById('audioInput');
+  const outEl = document.getElementById('audioOutput');
+
+  populateAudioDevices();
+  navigator.mediaDevices?.addEventListener?.(
+    'devicechange', populateAudioDevices,
+  );
+
+  inEl?.addEventListener('change', () => {
+    state.audioInputId = inEl.value;
+    localStorage.setItem('vw.audioInputId', state.audioInputId);
+    ensureMic();
+  });
+  outEl?.addEventListener('change', () => {
+    state.audioOutputId = outEl.value;
+    localStorage.setItem('vw.audioOutputId', state.audioOutputId);
+    applyAudioOutput();
+  });
+
+  // Tracking-Toggle — Klick sendet an Backend, Backend persistiert +
+  // broadcastet 'tracking_state' zurueck → applyTrackingState rendert Button um
+  const trackBtn = document.getElementById('trackingToggle');
+  trackBtn?.addEventListener('click', requestTrackingToggle);
+
+  // Audio-Reichweite Slider
+  setupRangeSliders();
+
+  // Logo-Fallback: wenn /logo.png nicht existiert, das <img> entfernen
+  // damit das darunterliegende inline-SVG sichtbar wird. Via JS statt
+  // inline onerror= (CSP-konform ohne unsafe-inline).
+  const logoImg = document.getElementById('appLogo');
+  logoImg?.addEventListener('error', () => logoImg.remove(), { once: true });
+
+  // --- Radar-Zoom (Mausrad / Doppelklick) --------------------------------
+  const radar = document.getElementById('radar');
+  if (radar) {
+    radar.addEventListener('wheel', e => {
+      e.preventDefault();
+      // scroll up (negative deltaY) → reinzoomen (kleinere Range)
+      // scroll down → rauszoomen (groessere Range). Faktor 1.25 je Tick.
+      const factor = e.deltaY > 0 ? 1.25 : 1 / 1.25;
+      setRadarRange(RADAR_RANGE_M * factor);
+    }, { passive: false });
+    // Doppelklick: Reset auf Default
+    radar.addEventListener('dblclick', () => setRadarRange(RADAR_RANGE_DEFAULT));
+    // Cursor-Hint damit User weiss dass interaktiv
+    radar.style.cursor = 'ns-resize';
+    radar.title = 'Mausrad zum Zoomen · Doppelklick zum Zurücksetzen';
+  }
+  // Initial-Label (falls beim Load schon ein gespeicherter Zoom existiert)
+  setRadarRange(RADAR_RANGE_M);
+});
+
+// --- Audio-Reichweite-UI -----------------------------------------------------
+function fmtRange(m) {
+  if (m < 1000) return `${m} m`;
+  return `${(m / 1000).toFixed(1)} km`;
+}
+
+function setupRangeSliders() {
+  const walkerEl    = document.getElementById('rangeWalker');
+  const walkerValEl = document.getElementById('rangeWalkerVal');
+  const cockpitEl   = document.getElementById('rangeCockpit');
+  const cockpitValEl= document.getElementById('rangeCockpitVal');
+  const crossEl     = document.getElementById('rangeCrossover');
+  const crossValEl  = document.getElementById('rangeCrossoverVal');
+  const resetBtn    = document.getElementById('rangeReset');
+
+  // Slider auf aktuelle Werte aus audioConfig (ggf. aus localStorage geladen)
+  function refresh() {
+    if (walkerEl)  walkerEl.value  = audioConfig.walker.maxRangeM;
+    if (cockpitEl) cockpitEl.value = audioConfig.cockpit.maxRangeM;
+    if (crossEl)   crossEl.value   = audioConfig.crossoverM;
+    if (walkerValEl)  walkerValEl.textContent  = fmtRange(audioConfig.walker.maxRangeM);
+    if (cockpitValEl) cockpitValEl.textContent = fmtRange(audioConfig.cockpit.maxRangeM);
+    if (crossValEl)   crossValEl.textContent   =
+      audioConfig.crossoverM > 0 ? fmtRange(audioConfig.crossoverM) : 'aus';
+  }
+  refresh();
+
+  walkerEl?.addEventListener('input', () => {
+    audioConfig.walker.maxRangeM = +walkerEl.value;
+    // fullVolumeM skaliert mit — realistisch nah volle Lautstaerke
+    audioConfig.walker.fullVolumeM = Math.max(1, Math.min(10, audioConfig.walker.maxRangeM * 0.04));
+    walkerValEl.textContent = fmtRange(audioConfig.walker.maxRangeM);
+    saveAudioConfig();
+    reconcileAudioStreams();
+  });
+  cockpitEl?.addEventListener('input', () => {
+    audioConfig.cockpit.maxRangeM = +cockpitEl.value;
+    audioConfig.cockpit.fullVolumeM = Math.max(10, Math.min(200, audioConfig.cockpit.maxRangeM * 0.01));
+    cockpitValEl.textContent = fmtRange(audioConfig.cockpit.maxRangeM);
+    saveAudioConfig();
+    reconcileAudioStreams();
+  });
+  crossEl?.addEventListener('input', () => {
+    audioConfig.crossoverM = +crossEl.value;
+    crossValEl.textContent =
+      audioConfig.crossoverM > 0 ? fmtRange(audioConfig.crossoverM) : 'aus';
+    saveAudioConfig();
+    reconcileAudioStreams();
+  });
+  resetBtn?.addEventListener('click', () => {
+    audioConfig.walker  = { maxRangeM: 75,   fullVolumeM: 3,  rolloff: 1.0 };
+    audioConfig.cockpit = { maxRangeM: 5000, fullVolumeM: 50, rolloff: 0.8 };
+    audioConfig.crossoverM = 0;
+    saveAudioConfig();
+    refresh();
+    reconcileAudioStreams();
+  });
+}
 
 // --- Room management ---------------------------------------------------------
 function updateRooms() {
   if (!state.mySim) return;
+  // Wenn Tracking aus: keine Rooms joinen (andere Piloten sollen uns NICHT sehen).
+  // applyTrackingState(false) hat bestehende Rooms bereits verlassen.
+  if (!state.trackingEnabled) return;
+  // Wenn MSFS im Hauptmenue: kein Mesh-Join, keine Audio-Uebertragung.
+  // renderSelf() hat bestehende Rooms bei in_menu bereits verlassen.
+  if (state.mySim.in_menu) return;
   const cells = geohashNeighbors(geohashEncode(state.mySim.lat, state.mySim.lon));
   state.currentCell = cells[0];
   setText('cell', state.currentCell);
@@ -306,6 +817,10 @@ function joinCellRoom(cell) {
     el.muted = true;
     el.play().catch(() => {});
     p.audioEl = el;
+    // Ausgabegeraet auf gewaehlten Sink setzen (falls konfiguriert).
+    if (state.audioOutputId && typeof el.setSinkId === 'function') {
+      el.setSinkId(state.audioOutputId).catch(() => {});
+    }
 
     const src = ctx.createMediaStreamSource(stream);
     p.gainNode    = ctx.createGain();
@@ -430,6 +945,27 @@ function updateAudioFor(p) {
 
   // 1) Distanz-basierte Lautstaerke
   const d = distMeters(state.mySim, p.sim);
+  p.currentDistance = d;
+
+  // ZWEI AUDIO-WELTEN: Mein Modus vs. Peer-Modus bestimmt das Profil.
+  // Gleicher Modus → volle Hoerweite des Profils; anders + d ≤ crossover →
+  // Crossover-Profil; anders + d > crossover → stumm.
+  const mineOnFoot = !!state.mySim.on_foot;
+  const peerOnFoot = !!p.sim.on_foot;
+  const profile    = profileBetween(mineOnFoot, peerOnFoot, d);
+  if (!profile) {
+    // Unterschiedliche Welten, kein Crossover → stumm (andere Modi hoert
+    // man nicht). UI zeigt den Peer in "anderer Modus"-Sektion.
+    // Panner-Position trotzdem weiter aktualisieren — falls der Peer seinen
+    // Modus wechselt (z.B. aussteigt), soll die Richtung sofort stimmen.
+    p.gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.05);
+    p.currentVolume = 0;
+    // Panner-Update: fall-through NICHT — Position des Gain=0-Panners zu
+    // updaten kostet CPU ohne Effekt. Wir setzen ihn beim naechsten Modus-
+    // Wechsel neu (dann ist profile != null).
+    return;
+  }
+
   // 2) Mundrichtungs-Faktor (Kardioid): wie stark strahlt der Peer zu mir ab?
   //    - Peer schaut direkt auf mich -> 1.0
   //    - Peer dreht mir den Ruecken zu -> 0.5
@@ -438,14 +974,23 @@ function updateAudioFor(p) {
   const bearingPeerToMe = bearingDeg(p.sim, state.mySim);
   const peerHeading = p.sim.heading_deg || 0;
   const deltaDeg = ((bearingPeerToMe - peerHeading) + 540) % 360 - 180; // -180..180
-  const mouthFactor = 0.5 + 0.5 * Math.cos(deltaDeg * Math.PI / 180);
+  // Mundrichtungs-Faktor fuer Test-Peer deaktivieren — sein kuenstliches
+  // Heading rotiert mit dem Kreis und erzeugt Lautstaerke-Schwankungen die
+  // wie Richtungsfehler wirken koennen. Echte Peers behalten das Kardioid.
+  const mouthFactor = (p.callsign === 'TEST-WALK')
+    ? 1.0
+    : (0.5 + 0.5 * Math.cos(deltaDeg * Math.PI / 180));
 
-  const v = volumeForDistance(d) * mouthFactor;
+  const v = volumeForDistance(d, profile) * mouthFactor;
   p.gainNode.gain.setTargetAtTime(v, audioCtx.currentTime, 0.05);
-  p.currentDistance = d;
   p.currentVolume = v;
 
-  // 2) Richtung: relativer Vektor in ENU, auf Einheitslaenge normiert
+  // 3) Richtung: relativer Vektor ME → PEER in ENU (East/North/Up), normiert.
+  //    Der Panner wird auf diesen Einheitsvektor gesetzt (Distanz irrelevant,
+  //    weil refDistance=1 + rolloffFactor=0 — Distanzdaempfung macht der
+  //    gainNode). HRTF rendert basierend darauf die Richtung relativ zur
+  //    Listener-Orientation, die wiederum am Avatar-Heading (Walker) oder
+  //    Aircraft-Heading (Cockpit) haengt.
   if (!p.pannerNode || !p.pannerNode.positionX) return;
 
   const R = 6371000;
@@ -460,41 +1005,77 @@ function updateAudioFor(p) {
   const len = Math.hypot(east, north, up);
   if (len < 0.1) return;  // fast am gleichen Punkt, Richtung egal
 
-  const nx =  east  / len;
-  const ny =  up    / len;
-  const nz = -north / len;  // WebAudio: -Z ist "nach vorn" (Nord)
+  // KOPF-LOKALE Koordinaten statt Welt-ENU.
+  //
+  // Alte Variante: Welt-ENU am Panner + listener.forwardX/Y/Z per
+  // setTargetAtTime rotieren. Das klang bei Rotation verzoegert/verkehrt,
+  // weil Listener-Orientation-Updates in Coherent GT / manchen WebAudio-
+  // Implementierungen unzuverlaessig bzw. traege greifen. Zusaetzlich
+  // schwer zu debuggen weil zwei Systeme (Panner-Welt + Listener-Rotation)
+  // gleichzeitig ineinandergreifen.
+  //
+  // Neu: Wir rotieren den Welt-Vektor (east, north) per mein heading_deg
+  // direkt in MEIN Kopf-System und setzen den Panner auf (rechts, oben,
+  // -vorn). Listener bleibt fix auf Default (forward=-Z, up=+Y) — siehe
+  // updateListenerOrientation(). Heading=0 => "vorn" ist Norden, steigend
+  // im Uhrzeigersinn (nautisch).
+  const h = toRad(me.heading_deg || 0);
+  const cosH = Math.cos(h), sinH = Math.sin(h);
+  //   rechts = east·cos(h) - north·sin(h)
+  //   vorn   = east·sin(h) + north·cos(h)
+  const right   = east  * cosH - north * sinH;
+  const forward = east  * sinH + north * cosH;
 
-  const now = audioCtx.currentTime;
-  p.pannerNode.positionX.setTargetAtTime(nx, now, 0.08);
-  p.pannerNode.positionY.setTargetAtTime(ny, now, 0.08);
-  p.pannerNode.positionZ.setTargetAtTime(nz, now, 0.08);
+  // X-Achse gespiegelt: empirisch verifiziert dass WebAudio-HRTF in
+  // Coherent GT bzw. Chromium nicht der Standard-Konvention folgt
+  // (+X=rechts). Wer hier nochmal "aufraeumen" will: erst pruefen ob
+  // Peer rechts auf dem Radar auch rechts hoerbar ist.
+  const nx = -right   / len;
+  const ny =  up      / len;
+  const nz = -forward / len;
+
+  // Direkte Value-Zuweisung statt setTargetAtTime: keine Smoothing-Latenz,
+  // Panner reagiert sofort auf Rotation / Peer-Bewegung. Bei 5 Hz Update
+  // (200ms) ist Smoothing ohnehin unnoetig und macht nur Debug schwieriger.
+  p.pannerNode.positionX.value = nx;
+  p.pannerNode.positionY.value = ny;
+  p.pannerNode.positionZ.value = nz;
+
+  // Listener-Default bei jedem Update erzwingen — Coherent GT verliert die
+  // Orientation gelegentlich still, dann panned HRTF aus unbekannter
+  // Referenz und klingt "irgendwie falsch".
+  updateListenerOrientation();
+
+  if (p.callsign === 'TEST-WALK') {
+    const now = performance.now();
+    if (!updateAudioFor._lastDbg || now - updateAudioFor._lastDbg > 500) {
+      updateAudioFor._lastDbg = now;
+      const hdgDeg = ((me.heading_deg || 0)).toFixed(1);
+      console.info('[audio-dbg] myHdg=%s east=%s north=%s right=%s fwd=%s nx=%s nz=%s',
+        hdgDeg, east.toFixed(1), north.toFixed(1),
+        right.toFixed(2), forward.toFixed(2),
+        nx.toFixed(2), nz.toFixed(2));
+    }
+  }
 }
 
-// Listener-Orientierung: forward-Vector zeigt in Flugrichtung des eigenen
-// Flugzeugs. Damit hoert man Peers relativ zur eigenen Nase — ein Peer noerdlich
-// von dir ist "vor dir" wenn du Richtung Norden fliegst, "hinter dir" wenn
-// du Richtung Sueden fliegst.
+// Listener bleibt auf DEFAULT-Orientierung (forward=-Z, up=+Y). Die eigene
+// Heading-Rotation wird stattdessen direkt auf die Panner-Positionen
+// angewendet (siehe updateAudioFor). Grund: Listener-Parameter sind in
+// Coherent GT / manchen Browsern traege/buggy bzgl. Live-Updates — Panner
+// sind verlaesslich.
 function updateListenerOrientation() {
-  if (!audioCtx || !state.mySim) return;
-  const heading = state.mySim.heading_deg || 0;
-  const rad = heading * Math.PI / 180;
-  // 0 grad = Norden -> forward = (0, 0, -1)
-  // 90 grad = Osten -> forward = (1, 0, 0)
-  const fx =  Math.sin(rad);
-  const fy =  0;
-  const fz = -Math.cos(rad);
+  if (!audioCtx) return;
   const L = audioCtx.listener;
-  const now = audioCtx.currentTime;
   if (L.forwardX) {
-    L.forwardX.setTargetAtTime(fx, now, 0.08);
-    L.forwardY.setTargetAtTime(fy, now, 0.08);
-    L.forwardZ.setTargetAtTime(fz, now, 0.08);
+    L.forwardX.value = 0;
+    L.forwardY.value = 0;
+    L.forwardZ.value = -1;
     L.upX.value = 0;
     L.upY.value = 1;
     L.upZ.value = 0;
   } else if (L.setOrientation) {
-    // Aeltere Browser-API
-    L.setOrientation(fx, fy, fz, 0, 1, 0);
+    L.setOrientation(0, 0, -1, 0, 1, 0);
   }
 }
 
@@ -510,6 +1091,13 @@ function detectSpeaking(p) {
 }
 
 setInterval(() => {
+  // Sim-Watchdog: wenn seit >3 s kein Snapshot mehr kam, ist SimConnect
+  // (oder MSFS) weg — degradiere die Status-Anzeige, statt stumm weiter
+  // "verbunden" zu zeigen.
+  if (state.mySim && Date.now() / 1000 - (state.mySim.t || 0) > 3) {
+    setStatus('sim', 'getrennt (MSFS beendet?)', 'warn');
+  }
+
   // Listener-Orientierung aus eigenem Heading — so dreht sich die Welt
   // relativ zu deiner Nase, wenn du kurvst.
   updateListenerOrientation();
@@ -525,7 +1113,30 @@ setInterval(() => {
 }, 200);
 
 // --- Radar -------------------------------------------------------------------
-const RADAR_RANGE_M = 1250;   // 1.25 km
+const RADAR_RANGE_DEFAULT = 1250;   // 1.25 km
+// Zoomable: via Mausrad aendern. Min 100 m (sehr nah) bis 20 km (Uebersicht).
+// Persistiert in localStorage. Doppelklick aufs Radar = Reset auf Default.
+let RADAR_RANGE_M = (() => {
+  try {
+    const saved = +localStorage.getItem('vw.radarRangeM');
+    if (Number.isFinite(saved) && saved >= 50 && saved <= 50000) return saved;
+  } catch {}
+  return RADAR_RANGE_DEFAULT;
+})();
+const RADAR_RANGE_MIN = 100;
+const RADAR_RANGE_MAX = 20000;
+function setRadarRange(m) {
+  RADAR_RANGE_M = Math.max(RADAR_RANGE_MIN, Math.min(RADAR_RANGE_MAX, m));
+  try { localStorage.setItem('vw.radarRangeM', String(RADAR_RANGE_M)); } catch {}
+  // Header-Label updaten + sofort neu zeichnen
+  const lab = document.getElementById('radarRangeLabel');
+  if (lab) {
+    lab.textContent = RADAR_RANGE_M < 1000
+      ? `${RADAR_RANGE_M.toFixed(0)} m`
+      : `${(RADAR_RANGE_M / 1000).toFixed(2)} km`;
+  }
+  renderRadar();
+}
 
 // Bearing in Grad (0 = Nord, 90 = Ost) von from nach to
 function bearingDeg(from, to) {
@@ -588,19 +1199,105 @@ function renderRadar() {
   ctx.textAlign = 'left';
   ctx.fillText('1 km', cx + R * ringFracs[2] + 3, cy - 6);
 
-  // Eigenes Flugzeug (Dreieck im Zentrum, zeigt nach oben)
+  // Hörbarkeits-Kreis (Audio-Bubble) um den eigenen Punkt.
+  // Radius = audioConfig.maxRangeM (harte Hoergrenze). Im Gradient-Verlauf
+  // sieht man wie Lautstaerke nach aussen hin abfaellt: voll bis
+  // fullVolumeM, dann stetig leiser bis maxRangeM = stumm.
+  const myRangeM    = audioConfig.maxRangeM   || 75;
+  const myFullM     = audioConfig.fullVolumeM || 3;
+  const rRangePx    = R * Math.min(1, myRangeM / RADAR_RANGE_M);
+  const rFullPx     = R * Math.min(1, myFullM  / RADAR_RANGE_M);
+  if (rRangePx > 4) {
+    const audioGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, rRangePx);
+    audioGrad.addColorStop(0,                              'rgba(63, 220, 138, 0.22)');
+    audioGrad.addColorStop(Math.min(0.95, rFullPx/rRangePx), 'rgba(63, 220, 138, 0.16)');
+    audioGrad.addColorStop(1,                              'rgba(63, 220, 138, 0.00)');
+    ctx.fillStyle = audioGrad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rRangePx, 0, Math.PI * 2);
+    ctx.fill();
+    // Konturlinie am Rand der Hoergrenze
+    ctx.strokeStyle = 'rgba(63, 220, 138, 0.55)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, rRangePx, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // Label "75 m" rechts oben am Ring
+    ctx.fillStyle = 'rgba(63, 220, 138, 0.75)';
+    ctx.font = '9px system-ui';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText(
+      myRangeM < 1000 ? `${myRangeM.toFixed(0)} m` : `${(myRangeM/1000).toFixed(1)} km`,
+      cx + rRangePx + 4, cy - 2,
+    );
+  }
+
+  // Eigenes Icon im Zentrum — Dreieck (Flugzeug) oder Kreis (Walker/zu Fuß)
   ctx.save();
   ctx.translate(cx, cy);
-  ctx.fillStyle = '#6aa5ff';
-  ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(0, -9);
-  ctx.lineTo(6, 6);
-  ctx.lineTo(0, 3);
-  ctx.lineTo(-6, 6);
-  ctx.closePath();
-  ctx.fill(); ctx.stroke();
+  if (state.mySim && state.mySim.on_foot) {
+    // Walker: kleiner gelb-grüner Kreis
+    ctx.fillStyle = '#3fdc8a';
+    ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, 5, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+  } else {
+    // Flugzeug-Dreieck, zeigt nach oben (Heading-Up)
+    ctx.fillStyle = '#6aa5ff';
+    ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, -9);
+    ctx.lineTo(6, 6);
+    ctx.lineTo(0, 3);
+    ctx.lineTo(-6, 6);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+  }
   ctx.restore();
+
+  // Wenn zu Fuß: das ZURUECKGELASSENE Flugzeug als zweiten Punkt zeigen.
+  // Berechnet Distanz + Bearing von mir (Walker) zum Flugzeug relativ zu
+  // meiner aktuellen Heading. Erscheint irgendwo auf dem Radar entlang
+  // der Richtung, in der das Flugzeug steht.
+  if (state.mySim && state.mySim.on_foot
+      && state.mySim.aircraft
+      && Number.isFinite(state.mySim.aircraft.lat)
+      && Number.isFinite(state.mySim.aircraft.lon)) {
+    const me = { lat: state.mySim.lat, lon: state.mySim.lon };
+    const ac = { lat: state.mySim.aircraft.lat, lon: state.mySim.aircraft.lon };
+    const dAc = distMeters(me, ac);
+    if (dAc > 1) {   // Mikro-Abweichungen ignorieren
+      const brgAc = bearingDeg(me, ac);
+      const myHeadLocal = state.mySim.heading_deg || 0;
+      const relAc = ((brgAc - myHeadLocal) + 360) % 360;
+      const thetaAc = (relAc - 90) * Math.PI / 180;
+      const rAc = R * Math.min(1, dAc / RADAR_RANGE_M);
+      const axAc = cx + Math.cos(thetaAc) * rAc;
+      const ayAc = cy + Math.sin(thetaAc) * rAc;
+
+      // Flugzeug-Dreieck, orientiert nach Flugzeug-Heading
+      ctx.save();
+      ctx.translate(axAc, ayAc);
+      const acHead = state.mySim.aircraft.heading_deg || 0;
+      const acRel  = ((acHead - myHeadLocal) + 360) % 360;
+      ctx.rotate(acRel * Math.PI / 180);
+      ctx.fillStyle = '#6aa5ff';
+      ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(0, -7);
+      ctx.lineTo(5, 5);
+      ctx.lineTo(0, 2);
+      ctx.lineTo(-5, 5);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.restore();
+
+      // (kein zusaetzliches Label — das Dreieck ist eindeutig das Flugzeug)
+    }
+  }
 
   // Peers
   if (!state.mySim) return;
@@ -737,12 +1434,47 @@ function setText(id, txt) {
 function renderSelf() {
   const s = state.mySim;
   if (!s) return;
-  setText('pos', `${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}`);
+  const modeEl  = document.getElementById('mode');
+  const posRow  = document.getElementById('posRow');
+  const aglRow  = document.getElementById('aglRow');
+  const cellRow = document.getElementById('cellRow');
+  const acRow   = document.getElementById('acRow');
+
+  // --- Hauptmenue / kein Flug ----------------------------------------------
+  if (s.in_menu) {
+    setStatus('sim', 'Hauptmenü / kein Flug', 'warn');
+    modeEl.innerHTML = '<span class="badge external">Hauptmenü</span>';
+    // Nur "Ansicht" zeigen, alles andere ausblenden — die Zahlen wären
+    // Default-Werte (0/90) und verwirren nur.
+    if (posRow)  posRow.style.display  = 'none';
+    if (aglRow)  aglRow.style.display  = 'none';
+    if (cellRow) cellRow.style.display = 'none';
+    if (acRow)   acRow.style.display   = 'none';
+    // Falls noch Mesh-Rooms offen sind: leave
+    if (state.rooms.size > 0) {
+      for (const [cell, entry] of state.rooms) {
+        if (entry.posTimer) clearInterval(entry.posTimer);
+        try { entry.room.leave(); } catch {}
+        state.rooms.delete(cell);
+      }
+      renderPeers();
+      renderMeshChip();
+    }
+    return;
+  }
+
+  // --- Normaler Flug-/Walker-Zustand ---------------------------------------
+  if (posRow)  posRow.style.display  = 'flex';
+  if (aglRow)  aglRow.style.display  = 'flex';
+  if (cellRow) cellRow.style.display = 'flex';
+
+  // 6 Nachkommastellen = ca. 11 cm Aufloesung → jede Bewegung sichtbar.
+  // (4 Stellen waren ~11 m Aufloesung → Walker-Bewegung kaum erkennbar.)
+  setText('pos', `${s.lat.toFixed(6)}, ${s.lon.toFixed(6)}`);
   setText('agl', `${s.agl_ft.toFixed(0)} ft`);
   if (s.demo) setStatus('sim', 'Demo (kein Sim)', 'warn');
   else        setStatus('sim', 'verbunden', 'good');
 
-  const modeEl = document.getElementById('mode');
   if (s.on_foot) {
     modeEl.innerHTML = '<span class="badge walker">zu Fuß</span>';
   } else if (s.camera_state === 2) {
@@ -750,6 +1482,39 @@ function renderSelf() {
   } else {
     modeEl.innerHTML = `<span class="badge external">Außenansicht (${s.camera_state})</span>`;
   }
+
+  // --- "Flugzeug" nur wenn zu Fuß UND nennenswert weg vom Aircraft ---------
+  // Koordinaten sparen wir uns — die stehen oben bereits als "Position".
+  // Stattdessen: Distanz + Himmelsrichtung vom Pilot zum zurueckgelassenen
+  // Flugzeug. Das ist die eigentlich relevante Info.
+  if (acRow) {
+    if (s.on_foot && s.aircraft
+        && Number.isFinite(s.aircraft.lat) && Number.isFinite(s.aircraft.lon)
+        && (Math.abs(s.aircraft.lat) > 0.001 || Math.abs(s.aircraft.lon) > 0.001)) {
+      const me = { lat: s.lat, lon: s.lon };
+      const ac = { lat: s.aircraft.lat, lon: s.aircraft.lon };
+      const d  = distMeters(me, ac);
+      if (d > 5) {
+        const brg = bearingDeg(me, ac);
+        const compass = bearingToCompass(brg);
+        const distStr = d < 1000
+          ? `${d.toFixed(0)} m`
+          : `${(d / 1000).toFixed(2)} km`;
+        acRow.style.display = 'flex';
+        setText('acPos', `${distStr} · ${compass} (${brg.toFixed(0)}°)`);
+      } else {
+        acRow.style.display = 'none';
+      }
+    } else {
+      acRow.style.display = 'none';
+    }
+  }
+}
+
+// Kompakte Himmelsrichtung (N, NO, O, …)
+function bearingToCompass(deg) {
+  const dirs = ['N','NO','O','SO','S','SW','W','NW'];
+  return dirs[Math.round((deg % 360) / 45) % 8];
 }
 
 function renderMeshChip() {
@@ -773,7 +1538,18 @@ function renderPeers() {
   if (!host) return;
   const all = [];
   for (const { peers } of state.rooms.values()) {
-    for (const [id, p] of peers) all.push([id, p]);
+    for (const [id, p] of peers) {
+      // Ghost-Filter: nur Peers mit tatsaechlich gueltiger Position zeigen.
+      // Ohne Position koennen wir keine Distanz berechnen und sie sind
+      // eh nicht hoerbar — also auch nicht anzeigen.
+      const sim = p.sim;
+      if (!sim) continue;
+      const lat = +sim.lat;
+      const lon = +sim.lon;
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      if (Math.abs(lat) < 0.0001 && Math.abs(lon) < 0.0001) continue;
+      all.push([id, p]);
+    }
   }
   if (all.length === 0) {
     host.innerHTML =
@@ -781,14 +1557,30 @@ function renderPeers() {
       'Warte auf andere Piloten in deiner Nähe…</p>';
     return;
   }
-  const inRange = [], far = [];
+  // Drei Kategorien:
+  //   inRange    — gleicher Modus + innerhalb Hoerweite  → hoerbar
+  //   otherMode  — anderer Modus (Walker vs Cockpit)     → NICHT hoerbar
+  //                (Crossover-Sonderfall: wird wie inRange behandelt wenn
+  //                 Distanz ≤ crossoverM und crossoverM > 0)
+  //   far        — gleicher Modus + aber > Hoerweite     → NICHT hoerbar
+  const mineOnFoot = !!(state.mySim && state.mySim.on_foot);
+  const inRange = [], otherMode = [], far = [];
   for (const entry of all) {
     const p = entry[1];
     const d = p.currentDistance ?? Infinity;
-    (d < audioConfig.maxRangeM ? inRange : far).push(entry);
+    const peerOnFoot = !!p.sim?.on_foot;
+    const profile = profileBetween(mineOnFoot, peerOnFoot, d);
+    if (profile && d < profile.maxRangeM) {
+      inRange.push(entry);
+    } else if (mineOnFoot !== peerOnFoot) {
+      otherMode.push(entry);
+    } else {
+      far.push(entry);
+    }
   }
-  inRange.sort((a, b) => (a[1].currentDistance ?? 1e12) - (b[1].currentDistance ?? 1e12));
-  far.sort((a, b)     => (a[1].currentDistance ?? 1e12) - (b[1].currentDistance ?? 1e12));
+  inRange.sort((a, b)   => (a[1].currentDistance ?? 1e12) - (b[1].currentDistance ?? 1e12));
+  otherMode.sort((a, b) => (a[1].currentDistance ?? 1e12) - (b[1].currentDistance ?? 1e12));
+  far.sort((a, b)       => (a[1].currentDistance ?? 1e12) - (b[1].currentDistance ?? 1e12));
 
   const section = (title, count) =>
     `<div class="text-[10px] uppercase tracking-widest text-[color:var(--color-muted)] mt-3 first:mt-0 mb-1">
@@ -819,6 +1611,12 @@ function renderPeers() {
   } else {
     html += section('in Hörweite', 0);
     html += '<p class="text-center text-xs text-[color:var(--color-muted)] py-2">niemand in Hörweite</p>';
+  }
+  // Andere Audio-Welt — sichtbar aber nicht hoerbar (Walker ↔ Cockpit-Split)
+  if (otherMode.length) {
+    const label = mineOnFoot ? 'im Cockpit (andere Welt)' : 'zu Fuß (andere Welt)';
+    html += section(label, otherMode.length);
+    html += otherMode.map(e => row(e, 'far')).join('');
   }
   if (state.showFar && far.length) {
     html += section('außer Reichweite', far.length);
@@ -876,13 +1674,14 @@ function renderPttBinding() {
   }
 }
 
-// --- BroadcastChannel: publish state to overlay.html ------------------------
-const overlayChan = 'BroadcastChannel' in window
-  ? new BroadcastChannel('msfsvoicewalker')
-  : null;
-
+// --- Overlay-State ans Backend senden ---------------------------------------
+// Der MSFS-Toolbar-Panel-iframe laeuft in Coherent GT als separater Prozess
+// und kann BroadcastChannel-Nachrichten nicht sehen. Wir senden den
+// Overlay-State stattdessen ueber die WS-Verbindung zum Backend, welches
+// ihn an alle anderen WS-Clients (inkl. MSFS-Panel-iframe) relayted.
 function publishOverlay() {
-  if (!overlayChan) return;
+  if (!_isPrimaryTab) return;          // nur primary-Tab publiziert
+  if (!backendWs || backendWs.readyState !== 1) return;
   const out = [];
   for (const { peers } of state.rooms.values()) {
     for (const [id, p] of peers) {
@@ -893,6 +1692,7 @@ function publishOverlay() {
           lat: p.sim.lat,
           lon: p.sim.lon,
           hearRangeM: p.sim.hearRangeM || 1000,
+          on_foot: !!p.sim.on_foot,
         } : null,
         on_foot: !!p.sim?.on_foot,
         speaking: !!(p.speaking && p.currentVolume > 0.05),
@@ -900,19 +1700,28 @@ function publishOverlay() {
       });
     }
   }
-  try {
-    overlayChan.postMessage({
-      type: 'overlay',
-      mySim: state.mySim ? {
-        lat: state.mySim.lat,
-        lon: state.mySim.lon,
-        heading_deg: state.mySim.heading_deg || 0,
+  sendBackend({
+    type: 'overlay_state',
+    mySim: state.mySim ? {
+      lat: state.mySim.lat,
+      lon: state.mySim.lon,
+      heading_deg: state.mySim.heading_deg || 0,
+      on_foot: !!state.mySim.on_foot,
+      in_menu: !!state.mySim.in_menu,
+      // Aircraft-Position mitschicken damit der MSFS-Panel-Overlay das
+      // zurueckgelassene Flugzeug als zweiten Punkt einzeichnen kann.
+      aircraft: state.mySim.aircraft ? {
+        lat: state.mySim.aircraft.lat,
+        lon: state.mySim.aircraft.lon,
+        heading_deg: state.mySim.aircraft.heading_deg || 0,
       } : null,
-      myRange: audioConfig.maxRangeM,
-      peers: out,
-    });
-  } catch {}
+    } : null,
+    myRange: audioConfig.maxRangeM,
+    peers: out,
+  });
 }
+// 250 ms — gleich wie vorher bei BroadcastChannel, gibt fluessiges Radar.
+// Nur primary-Tab sendet (siehe Guard oben); secondary-Tabs sind eh blockiert.
 setInterval(publishOverlay, 250);
 
 // --- Test-Peer ---------------------------------------------------------------
@@ -967,8 +1776,14 @@ function spawnTestPeer() {
   osc.start();
   p._synth = { osc, env };
 
-  // Walking-Bewegung: 100 m Radius um den User, ca. 25 s fuer eine Umdrehung
-  const RADIUS_M = 100;
+  // Walking-Bewegung: 40 m Radius (INNERHALB Walker-Hoerweite 75 m) um den
+  // User, ca. 25 s fuer eine Umdrehung. Heading zeigt in Laufrichtung
+  // (tangential zum Kreis) und aendert sich kontinuierlich — damit man im
+  // Radar & bei Richtungs-Audio spuert, wohin der Test-Peer gerade laeuft.
+  //
+  // Wichtig: 100 m waere AUSSERHALB der Standard-Walker-Reichweite → Gain=0
+  // → nichts hoerbar ausser der TTS (die am HRTF-Panner vorbei geht).
+  const RADIUS_M = 40;
   const SPEED    = 0.25;   // rad/s
   let phase = 0;
   _testPeerWalkTimer = setInterval(() => {
@@ -976,6 +1791,11 @@ function spawnTestPeer() {
     phase += SPEED * 0.2;
     const east  = Math.cos(phase) * RADIUS_M;
     const north = Math.sin(phase) * RADIUS_M;
+    // Tangentiale Laufrichtung (Ableitung der Kreisbewegung)
+    const vx = -Math.sin(phase);   // east-Geschwindigkeit
+    const vy =  Math.cos(phase);   // north-Geschwindigkeit
+    // Nautisches Bearing (0° = Nord, 90° = Ost)
+    const heading = (Math.atan2(vx, vy) * 180 / Math.PI + 360) % 360;
     const R = 6371000;
     const dLat = (north / R) * 180 / Math.PI;
     const dLon = (east  / (R * Math.cos(state.mySim.lat * Math.PI / 180))) * 180 / Math.PI;
@@ -984,10 +1804,10 @@ function spawnTestPeer() {
       lon: state.mySim.lon + dLon,
       alt_ft: state.mySim.alt_ft || 0,
       agl_ft: 0,
-      heading_deg: 0,
+      heading_deg: heading,
       hearRangeM: audioConfig.maxRangeM,
       on_foot: true,
-      camera_state: 10,
+      camera_state: 26,           // Walker-Cam (konsistent mit on_foot)
       callsign: 'TEST-WALK',
     };
     p.lastSeen = Date.now();
@@ -995,28 +1815,22 @@ function spawnTestPeer() {
     p.speaking = detectSpeaking(p);
   }, 200);
 
-  // Alle 5 s: TTS + positionierter Ton-Burst
+  // Alle 5 s: HRTF-positionierter Ton-Burst (keine TTS — die geht am
+  // Panner vorbei und klingt dadurch "komisch"/nicht raeumlich).
   const sayHello = () => {
-    const cs = state.callsign || 'Pilot';
-    try {
-      const u = new SpeechSynthesisUtterance(`Hallo ${cs}`);
-      u.lang = 'de-DE';
-      u.rate = 0.95;
-      u.pitch = 1.05;
-      u.volume = 0.9;
-      window.speechSynthesis.speak(u);
-    } catch (e) { console.warn('[test] TTS failed:', e); }
-
-    // Ton-Burst (ca. 1 s) durch die HRTF-Pipeline, damit Radar + VAD reagieren
-    if (p._synth) {
-      const t = ctx.currentTime;
-      osc.frequency.setTargetAtTime(330, t, 0.02);
-      env.gain.cancelScheduledValues(t);
-      env.gain.setValueAtTime(0, t);
-      env.gain.linearRampToValueAtTime(0.22, t + 0.05);
-      env.gain.setValueAtTime(0.22, t + 0.9);
-      env.gain.linearRampToValueAtTime(0, t + 1.2);
-    }
+    if (!p._synth) return;
+    const t = ctx.currentTime;
+    // Kleine Tonfolge (dit-dah) damit man hoert dass "etwas passiert" und
+    // die Richtung trotzdem klar ist. Kurzer Ping auf 330 Hz, dann Pause,
+    // dann zweiter Ping auf 440 Hz.
+    osc.frequency.setTargetAtTime(330, t,        0.02);
+    osc.frequency.setTargetAtTime(440, t + 0.45, 0.02);
+    env.gain.cancelScheduledValues(t);
+    env.gain.setValueAtTime(0,      t);
+    env.gain.linearRampToValueAtTime(0.22, t + 0.05);
+    env.gain.linearRampToValueAtTime(0.0,  t + 0.35);
+    env.gain.linearRampToValueAtTime(0.22, t + 0.50);
+    env.gain.linearRampToValueAtTime(0.0,  t + 0.85);
   };
   sayHello();
   _testPeerSayTimer = setInterval(sayHello, 5000);

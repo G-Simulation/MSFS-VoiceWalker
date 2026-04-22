@@ -1,0 +1,125 @@
+MSFSVoiceWalker — Third-Party Licenses
+=======================================
+
+MSFSVoiceWalker enthält und verwendet die folgenden Drittanbieter-Komponenten.
+Jede behält ihre jeweilige Lizenz; die entsprechenden Notices sind unten
+aufgeführt bzw. werden mit der Distribution mitgeliefert.
+
+
+1. Trystero (v0.15.0)
+---------------------
+Peer-to-peer WebRTC-basiertes Mesh, verwendet im Browser-Client.
+Upstream: https://github.com/dmotz/trystero
+License:  MIT
+
+    Copyright (c) Daniel Motschenbacher
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included
+    in all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+    OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+    ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+    OTHER DEALINGS IN THE SOFTWARE.
+
+
+2. websockets (>=16.0)
+----------------------
+Python WebSocket-Implementierung, verwendet im Python-Backend.
+Upstream: https://github.com/python-websockets/websockets
+License:  BSD 3-Clause
+
+    Copyright (c) Aymeric Augustin and contributors
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions are met:
+
+    1. Redistributions of source code must retain the above copyright notice,
+       this list of conditions and the following disclaimer.
+    2. Redistributions in binary form must reproduce the above copyright
+       notice, this list of conditions and the following disclaimer in the
+       documentation and/or other materials provided with the distribution.
+    3. Neither the name of the copyright holder nor the names of its
+       contributors may be used to endorse or promote products derived from
+       this software without specific prior written permission.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES ARE DISCLAIMED.
+
+
+3. python-SimConnect (>=0.4.26)
+-------------------------------
+SimConnect-Bindings für Python, verwendet für die Verbindung zu MSFS.
+Upstream: https://github.com/odwdinc/Python-SimConnect
+License:  Apache 2.0
+
+    Copyright (c) odwdinc
+    Licensed under the Apache License, Version 2.0 — see LICENSE für Volltext.
+
+
+4. pygame (>=2.6.0)
+-------------------
+Eingabegeräte-Polling (USB-PTT) im Python-Backend.
+Upstream: https://www.pygame.org
+License:  LGPL 2.1+
+
+    Copyright (c) 2000-2001 Pete Shinners, and contributors
+
+    This library is free software; you can redistribute it and/or modify it
+    under the terms of the GNU Library General Public License as published by
+    the Free Software Foundation; either version 2.1 of the License, or
+    (at your option) any later version.
+
+    Hinweis zur Einhaltung (dynamische Einbindung):
+    Die mit PyInstaller gebündelte MSFSVoiceWalker.exe bindet pygame als
+    dynamische Bibliothek ein. Nutzer können die pygame-Binaries im
+    _internal-Ordner (bzw. im entpackten PyInstaller-PKG) durch eigene
+    austauschen, um diese LGPL-Anforderung zu erfüllen.
+
+
+5. Tailwind CSS (CDN)
+---------------------
+Utility-First CSS-Framework, eingebunden via CDN im Browser-Client.
+Upstream: https://tailwindcss.com
+License:  MIT
+
+
+6. Lucide Icons (optional, falls verwendet)
+-------------------------------------------
+Icon-Set für die UI.
+Upstream: https://lucide.dev
+License:  ISC
+
+
+7. WebTorrent-Tracker Network (öffentliche STUN/Signaling-Infrastruktur)
+-----------------------------------------------------------------------
+Trystero nutzt öffentliche WebTorrent-Tracker und STUN-Server für das
+Matchmaking von P2P-Verbindungen (keine zentrale Speicherung eurer Daten).
+Die Nutzung ist kostenfrei; bei kommerziellem Einsatz empfehlen wir das
+Hosten eines eigenen Trackers.
+
+
+8. Microsoft Flight Simulator 2024 SDK
+--------------------------------------
+Header-Dateien (MSFS.h, MSFS_Vars.h, SimConnect.h etc.) werden NUR während
+des WASM-Kompilierens verwendet und NICHT mit der Distribution vertrieben.
+Das kompilierte .wasm-Modul wird unter der Apache-2.0-Lizenz
+(siehe LICENSE) verteilt. Nutzung unterliegt den Microsoft/Asobo
+MSFS-2024-SDK-Terms.
+
+
+Vollständige Lizenztexte
+========================
+Die Volltexte der oben genannten Lizenzen (MIT, BSD-3, Apache-2.0, LGPL-2.1)
+sind auf den jeweiligen Projekt-Webseiten verfügbar. Bei Fragen zur
+MSFSVoiceWalker-eigenen Lizenz siehe LICENSE.

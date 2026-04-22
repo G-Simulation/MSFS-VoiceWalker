@@ -4,6 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MSFSVoiceWalker</title>
+  <!-- Leeres data-URI-Favicon — verhindert den 404-Spam im Browser-Log wenn
+       keine logo.png vorhanden ist und der Browser /favicon.ico als Fallback
+       anfragt. Nimmt keinen Platz weg, lädt nichts. -->
+  <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22/>">
   <link rel="icon" type="image/png" href="/logo.png">
 
   <!-- Tailwind v4 via jsDelivr (CSP-konform) -->
@@ -25,17 +29,23 @@
       --color-speaking: #ffe066;
     }
 
-    html, body {
+    /* Hintergrund auf <html>, damit die Glow-Gradients den KOMPLETTEN
+       Viewport fuellen — nicht nur den auf 960 px begrenzten body.
+       Sonst entsteht an der Body-Kante eine sichtbare vertikale Linie. */
+    html {
+      min-height: 100vh;
       background-color: var(--color-bg-deep);
-      color: var(--color-fg);
-      font-feature-settings: "cv11", "ss01";
-    }
-    body {
       background-image:
         radial-gradient(ellipse 80% 50% at 50% -20%, rgba(106,165,255,0.20), transparent 60%),
         radial-gradient(ellipse 60% 40% at 80% 110%, rgba(63,220,138,0.10), transparent 60%),
         radial-gradient(ellipse 60% 40% at 10% 90%, rgba(255,107,61,0.05), transparent 60%);
       background-attachment: fixed;
+      color: var(--color-fg);
+      font-feature-settings: "cv11", "ss01";
+    }
+    body {
+      background: transparent;    /* <html> zeigt durch */
+      color: inherit;
     }
 
     /* Glasscard */
@@ -211,8 +221,8 @@
         <!-- Inline-SVG-Fallback: Radar mit Mikro. Wenn spaeter eine logo.png
              in /web liegt, erscheint sie als <img> davor; das <svg> wird dann
              ueberdeckt. -->
-        <img src="/logo.png" alt="" class="w-full h-full object-contain absolute"
-             onerror="this.remove()">
+        <img id="appLogo" src="/logo.png" alt=""
+             class="w-full h-full object-contain absolute">
         <svg viewBox="0 0 24 24" class="w-7 h-7 text-white relative" fill="none">
           <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="0.8" opacity="0.45" fill="none"/>
           <circle cx="12" cy="12" r="6.5" stroke="currentColor" stroke-width="0.8" opacity="0.6" fill="none"/>
@@ -263,9 +273,11 @@
     <div class="glass rounded-2xl p-5 md:p-6 mb-6">
       <div class="flex items-baseline justify-between mb-2">
         <h2 class="text-[11px] font-bold tracking-widest uppercase text-[color:var(--color-muted)]">
-          Radar · 1.25 km · Heading Up
+          Radar · <span id="radarRangeLabel">1.25 km</span> · Heading Up
         </h2>
-        <span class="text-[10px] text-[color:var(--color-muted)]">Kopfhörer für echten Richtungs-Sound</span>
+        <span class="text-[10px] text-[color:var(--color-muted)]">
+          Kopfhörer für echten Richtungs-Sound · Mausrad = Zoom
+        </span>
       </div>
       <div class="radar-wrap">
         <canvas id="radar" width="340" height="340"></canvas>
@@ -299,14 +311,31 @@
 
       <!-- SELF / PTT -->
       <div class="glass rounded-2xl p-5">
-        <h2 class="text-[11px] font-bold tracking-widest uppercase text-[color:var(--color-muted)] mb-3">Du</h2>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-[11px] font-bold tracking-widest uppercase text-[color:var(--color-muted)]">Du</h2>
+          <!-- Tracking-Toggle: wenn aus, verschwindet der User aus dem Mesh
+               und andere sehen seine Position nicht mehr. Persistiert im
+               Backend (config.json). -->
+          <button id="trackingToggle" type="button"
+                  class="group inline-flex items-center gap-2 px-2.5 py-1 rounded-full
+                         border border-[color:var(--color-border)]
+                         text-[10px] font-semibold uppercase tracking-wider
+                         hover:bg-white/5 transition"
+                  data-enabled="true"
+                  title="Tracking ein-/ausschalten">
+            <span id="trackingDot"
+                  class="w-2 h-2 rounded-full bg-[color:var(--color-good)]
+                         shadow-[0_0_8px_var(--color-good)]"></span>
+            <span id="trackingLabel">Sichtbar</span>
+          </button>
+        </div>
 
         <dl class="space-y-2 text-sm">
-          <div class="flex justify-between">
+          <div id="posRow" class="flex justify-between">
             <dt class="text-[color:var(--color-muted)] text-xs">Position</dt>
             <dd id="pos" class="tabular-nums text-xs">—</dd>
           </div>
-          <div class="flex justify-between">
+          <div id="aglRow" class="flex justify-between">
             <dt class="text-[color:var(--color-muted)] text-xs">Höhe über Grund</dt>
             <dd id="agl" class="tabular-nums text-xs">—</dd>
           </div>
@@ -314,9 +343,16 @@
             <dt class="text-[color:var(--color-muted)] text-xs">Ansicht</dt>
             <dd id="mode" class="text-xs">—</dd>
           </div>
-          <div class="flex justify-between">
+          <div id="cellRow" class="flex justify-between">
             <dt class="text-[color:var(--color-muted)] text-xs">Mesh-Zelle</dt>
             <dd id="cell" class="tabular-nums text-xs">—</dd>
+          </div>
+          <!-- Nur wenn zu Fuß UND das Flugzeug nennenswert entfernt ist.
+               Zeigt die Distanz + Richtung, nicht die Koordinaten (die stehen
+               oben bereits als Pilot-Position). -->
+          <div id="acRow" class="flex justify-between" style="display:none">
+            <dt class="text-[color:var(--color-muted)] text-xs">Flugzeug</dt>
+            <dd id="acPos" class="tabular-nums text-xs">—</dd>
           </div>
         </dl>
 
@@ -336,6 +372,76 @@
             VOX
           </label>
         </div>
+
+        <div class="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 items-center text-xs">
+          <label for="audioInput" class="text-[color:var(--color-muted)]">Mikrofon</label>
+          <select id="audioInput"
+                  class="min-w-0 bg-[color:var(--color-bg-soft)] border border-[color:var(--color-border)] rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--color-ring)] transition">
+            <option value="">Standard</option>
+          </select>
+          <label for="audioOutput" class="text-[color:var(--color-muted)]">Lautsprecher</label>
+          <select id="audioOutput"
+                  class="min-w-0 bg-[color:var(--color-bg-soft)] border border-[color:var(--color-border)] rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--color-ring)] transition">
+            <option value="">Standard</option>
+          </select>
+        </div>
+
+        <!-- Audio-Reichweite (zwei Welten: zu Fuß vs. Cockpit) -->
+        <details id="rangeDetails" class="mt-3 text-xs">
+          <summary class="cursor-pointer text-[color:var(--color-muted)] select-none py-1">
+            Audio-Reichweite anpassen
+          </summary>
+          <div class="mt-3 space-y-4">
+
+            <!-- Walker-Reichweite -->
+            <div>
+              <div class="flex justify-between items-baseline mb-1">
+                <label for="rangeWalker" class="text-[color:var(--color-muted)]">
+                  Zu Fuß <span class="opacity-70">(Walker ↔ Walker)</span>
+                </label>
+                <span id="rangeWalkerVal" class="tabular-nums font-semibold">75 m</span>
+              </div>
+              <input type="range" id="rangeWalker"
+                     min="10" max="500" step="5" value="75"
+                     class="w-full accent-[color:var(--color-accent)]">
+            </div>
+
+            <!-- Cockpit-Reichweite -->
+            <div>
+              <div class="flex justify-between items-baseline mb-1">
+                <label for="rangeCockpit" class="text-[color:var(--color-muted)]">
+                  Im Cockpit <span class="opacity-70">(Funk-ähnlich)</span>
+                </label>
+                <span id="rangeCockpitVal" class="tabular-nums font-semibold">5.0 km</span>
+              </div>
+              <input type="range" id="rangeCockpit"
+                     min="500" max="20000" step="500" value="5000"
+                     class="w-full accent-[color:var(--color-accent)]">
+            </div>
+
+            <!-- Crossover -->
+            <div>
+              <div class="flex justify-between items-baseline mb-1">
+                <label for="rangeCrossover" class="text-[color:var(--color-muted)]">
+                  Welten-Crossover <span class="opacity-70">(Walker ↔ Cockpit)</span>
+                </label>
+                <span id="rangeCrossoverVal" class="tabular-nums font-semibold">aus</span>
+              </div>
+              <input type="range" id="rangeCrossover"
+                     min="0" max="100" step="5" value="0"
+                     class="w-full accent-[color:var(--color-accent)]">
+              <p class="text-[10px] text-[color:var(--color-muted)] mt-1 leading-snug">
+                0 m = strikt getrennt. &gt; 0 m = Walker und Cockpit-Piloten
+                hören sich innerhalb dieses Radius (z. B. am eigenen Flugzeug).
+              </p>
+            </div>
+
+            <button id="rangeReset" type="button"
+                    class="text-[10px] text-[color:var(--color-muted)] hover:text-[color:var(--color-accent)] underline decoration-dotted">
+              Auf Standardwerte zurücksetzen
+            </button>
+          </div>
+        </details>
 
         <details id="pttDetails" class="mt-4 text-xs">
           <summary class="cursor-pointer text-[color:var(--color-muted)] select-none py-1">
@@ -409,6 +515,87 @@
       </div>
     </footer>
 
+  </div>
+
+  <!-- ================= CONSENT / PRIVACY DIALOG =================
+       Wird beim ersten Start gezeigt (wenn localStorage.vw.privacy_consent_v1
+       nicht gesetzt ist). Blockiert die App bis der User ausdruecklich auf
+       "Verstanden & Starten" klickt. Zustimmung wird danach persistiert, der
+       Dialog erscheint nicht wieder. Kann ueber den "Datenschutz"-Link im
+       Footer erneut geoeffnet werden. -->
+  <div id="consentDialog"
+       class="fixed inset-0 z-[10000] hidden items-center justify-center
+              bg-[rgba(7,11,22,0.92)] backdrop-blur-md p-4"
+       aria-hidden="true">
+    <div class="glass rounded-2xl max-w-2xl w-full p-6 md:p-8 border border-[color:var(--color-border)]"
+         role="dialog" aria-labelledby="consentTitle">
+      <h2 id="consentTitle" class="text-xl md:text-2xl font-bold mb-1">
+        Kurz zur Einordnung
+      </h2>
+      <p class="text-sm text-[color:var(--color-muted)] mb-5">
+        Bevor MSFSVoiceWalker loslegt, hier was im Hintergrund passiert.
+        Keine langen AGB, nur das Wichtige:
+      </p>
+
+      <ul class="space-y-3 text-sm mb-6">
+        <li class="flex gap-3">
+          <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--color-accent)] mt-2 shrink-0"></span>
+          <div>
+            <strong>Dein Mikrofon wird an Piloten in deiner Nähe übertragen.</strong>
+            Stimme gilt nach DSGVO als biometrisches Datum — wir fragen deshalb
+            hier ausdrücklich. Du kannst jederzeit stumm schalten oder den
+            <em>Sichtbar/Verborgen</em>-Schalter nutzen.
+          </div>
+        </li>
+        <li class="flex gap-3">
+          <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--color-accent)] mt-2 shrink-0"></span>
+          <div>
+            <strong>Peer-to-Peer, kein zentraler Server.</strong>
+            Für das Finden anderer Piloten kontaktiert dein Browser öffentliche
+            WebTorrent-Tracker (<code>openwebtorrent.com</code> u. ä.) — dabei
+            wird deine IP-Adresse kurz sichtbar. Keine Namen, kein Callsign,
+            keine Audio-Daten landen bei diesen Trackern. Nach dem Matchmaking
+            geht alles direkt zwischen dir und den Mitspielern.
+          </div>
+        </li>
+        <li class="flex gap-3">
+          <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--color-accent)] mt-2 shrink-0"></span>
+          <div>
+            <strong>Nichts wird dauerhaft gespeichert.</strong>
+            Weder wir noch irgendein Server kennen deine Flüge, Positionen
+            oder Gespräche. Was lokal auf deinem Rechner bleibt: Callsign,
+            gewähltes Audiogerät, Tracking-Schalter (in <code>config.json</code>
+            und <code>localStorage</code>).
+          </div>
+        </li>
+        <li class="flex gap-3">
+          <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--color-accent)] mt-2 shrink-0"></span>
+          <div>
+            <strong>Virtuelle Sim-Koordinaten, nicht dein echter Ort.</strong>
+            Die Position die geteilt wird ist die deines virtuellen Flugzeugs /
+            Avatars in MSFS — keine echten GPS-Daten vom PC.
+          </div>
+        </li>
+      </ul>
+
+      <div class="flex flex-col sm:flex-row gap-3 items-center justify-end">
+        <a href="https://www.gsimulation.com/datenschutz" target="_blank" rel="noopener"
+           class="text-xs text-[color:var(--color-muted)] hover:text-[color:var(--color-accent)] underline decoration-dotted">
+          Vollständige Datenschutzerklärung
+        </a>
+        <button id="consentDeclineBtn" type="button"
+                class="px-4 py-2 text-sm rounded-lg border border-[color:var(--color-border)]
+                       text-[color:var(--color-muted)] hover:bg-white/5 transition">
+          Nein danke
+        </button>
+        <button id="consentAcceptBtn" type="button"
+                class="px-5 py-2 text-sm font-semibold rounded-lg
+                       bg-[color:var(--color-accent)] text-[#0b1220]
+                       hover:bg-blue-300 transition">
+          Verstanden &amp; Starten
+        </button>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="/app.js"></script>
