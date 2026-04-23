@@ -1302,10 +1302,11 @@ async def main():
     # existiert, werden LICENSE_API_URL/_CONSUMER_KEY/_SECRET daraus gezogen;
     # sonst bleibt der Dev-Mode aktiv (DEV-PRO-* / DEV-FREE). Gitignored.
     _load_env_file(data_dir() / ".secrets" / "license.env")
-    if os.environ.get("LICENSE_API_URL"):
-        log.info("license backend configured: %s", os.environ["LICENSE_API_URL"])
-    else:
-        log.info("license: dev-mode (no backend configured)")
+    # Backend-URL kommt per default aus license_client.DEFAULT_API_URL und ist
+    # in die exe gebaut — env-vars / .secrets/license.env dienen nur als Override
+    # (z.B. Staging-Server beim Testen).
+    log.info("license backend: %s",
+             os.environ.get("LICENSE_API_URL") or license_client.DEFAULT_API_URL)
 
     # User-Config (z.B. Tracking-Schalter) aus config.json laden
     _cfg = load_config()

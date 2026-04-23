@@ -32,6 +32,14 @@ GRACE_SECONDS    = 7 * 24 * 3600       # offline grace
 DEV_PRO_SECONDS  = 30 * 24 * 3600      # dev keys last 30 days each validate
 HTTP_TIMEOUT     = 6.0
 
+# Defaults, damit die distributed .exe out-of-the-box gegen die LMFWC-API
+# validieren kann. Diese Consumer-Credentials haben nur read-Zugriff auf
+# /lmfwc/v2/licenses — sie koennen Keys NICHT erzeugen oder editieren.
+# Override moeglich via echter env-var oder .secrets/license.env (Dev).
+DEFAULT_API_URL = "https://www.gsimulations.de/wp-json/lmfwc/v2/licenses/validate"
+DEFAULT_CK      = "ck_5c695af5ba91ffc9edcf8885c77420a8525924be"
+DEFAULT_CS      = "cs_ffd91d2fa6f5ca77644790548a1cce98e8c58867"
+
 
 def _cache_path(config_dir: pathlib.Path) -> pathlib.Path:
     return config_dir / CACHE_FILENAME
@@ -172,9 +180,17 @@ def validate(key: str, config_dir: pathlib.Path) -> dict:
        is_pro, key, reason, mode, validated_at, expires_at."""
     now = time.time()
     _reload_env_from_secrets(config_dir)
-    api_url = os.environ.get("LICENSE_API_URL", "").strip()
-    ck      = os.environ.get("LICENSE_API_CONSUMER_KEY", "").strip()
-    cs      = os.environ.get("LICENSE_API_CONSUMER_SECRET", "").strip()
+    api_url = os.environ.get("LICENSE_API_URL", "").strip()      or DEFAULT_API_URL
+    ck      = os.environ.get("LICENSE_API_CONSUMER_KEY", "").strip()    or DEFAULT_CK
+    cs      = os.environ.get("LICENSE_API_CONSUMER_SECRET", "").strip() or DEFAULT_CS
+
+    # Dev-keys umgehen den Backend-Call auch wenn der konfiguriert ist —
+    # so koennen wir Features lokal testen ohne die Prod-API zu belasten.
+    k_up = (key or "").strip().upper()
+    if k_up.startswith("DEV-PRO-") or k_up == "DEV-FREE":
+        result = _dev_validate(key)
+        _save_cache(config_dir, result)
+        return result
 
     if not (key or "").strip():
         result = {
