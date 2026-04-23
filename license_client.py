@@ -146,10 +146,32 @@ def _lmfwc_validate(key: str, api_url: str, ck: str, cs: str) -> dict:
     }
 
 
+def _reload_env_from_secrets(config_dir: pathlib.Path) -> None:
+    """Bei JEDEM validate()-Call frisch aus .secrets/license.env lesen, damit
+    der User die Datei zur Laufzeit reinlegen kann und es ohne App-Neustart
+    wirkt. Echte env-vars ueberschreiben die Datei nicht (haben Vorrang)."""
+    p = config_dir / ".secrets" / "license.env"
+    try:
+        if not p.is_file():
+            return
+        for raw in p.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if k:
+                os.environ[k] = v   # Datei gewinnt, damit Rotation ohne Restart wirkt
+    except Exception as e:
+        log.warning("license env reload failed: %s", e)
+
+
 def validate(key: str, config_dir: pathlib.Path) -> dict:
     """Validate a license key. Returns dict with at least:
        is_pro, key, reason, mode, validated_at, expires_at."""
     now = time.time()
+    _reload_env_from_secrets(config_dir)
     api_url = os.environ.get("LICENSE_API_URL", "").strip()
     ck      = os.environ.get("LICENSE_API_CONSUMER_KEY", "").strip()
     cs      = os.environ.get("LICENSE_API_CONSUMER_SECRET", "").strip()
