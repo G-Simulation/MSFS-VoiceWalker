@@ -1188,6 +1188,253 @@ function gsim_render_organizers_page() {
 }
 
 // -----------------------------------------------------------------------------
+// Styling: The Events Calendar + Einzelevent + Archive im Aviation-Look
+// Nur auf TEC-Seiten injizieren, um den Rest der Site nicht zu beeinflussen.
+// -----------------------------------------------------------------------------
+
+add_action('wp_head', function () {
+    $is_tec = (function_exists('tribe_is_event_query') && tribe_is_event_query())
+              || is_singular('tribe_events')
+              || is_post_type_archive('tribe_events')
+              || is_tax('tribe_events_cat');
+    if (!$is_tec) return;
+    ?>
+    <style id="gsim-tec-style">
+      /* ==== Aviation Dark Theme fuer The Events Calendar ==== */
+      :root {
+        --gsim-bg:      #0b1220;
+        --gsim-bg-2:    #15213a;
+        --gsim-border:  rgba(106, 165, 255, 0.15);
+        --gsim-fg:      #eaf0ff;
+        --gsim-muted:   #8696b8;
+        --gsim-accent:  #6aa5ff;
+        --gsim-good:    #3fdc8a;
+      }
+
+      .tribe-events-calendar-list,
+      .tribe-events-calendar-month,
+      .tribe-events-calendar-day,
+      .tribe-events-pg-template,
+      .tribe-events-single,
+      .tribe-events-view--list,
+      .tribe-events-view--month,
+      .tribe-events-view--day,
+      .tribe-events-view {
+        background: var(--gsim-bg) !important;
+        color: var(--gsim-fg);
+        border-radius: 12px;
+        padding: 24px !important;
+        border: 1px solid var(--gsim-border);
+      }
+
+      /* Titel, Texte, Labels generell heller */
+      .tribe-events-calendar-list *,
+      .tribe-events-calendar-month *,
+      .tribe-events-calendar-day *,
+      .tribe-events-single *,
+      .tribe-common * {
+        color: inherit;
+      }
+      .tribe-events-c-top-bar,
+      .tribe-events-header,
+      .tribe-events-c-nav {
+        color: var(--gsim-fg);
+      }
+      .tribe-events-calendar-list h1,
+      .tribe-events-calendar-list h2,
+      .tribe-events-calendar-list h3,
+      .tribe-events-single h1,
+      .tribe-events-single .tribe-events-single-event-title {
+        color: var(--gsim-fg) !important;
+      }
+      .tribe-common .tribe-common-anchor,
+      .tribe-common a {
+        color: var(--gsim-accent) !important;
+      }
+
+      /* Event-Karten in der Liste */
+      .tribe-events-calendar-list__event,
+      .tribe-events-calendar-list__event-row {
+        background: var(--gsim-bg-2);
+        border: 1px solid var(--gsim-border);
+        border-radius: 10px;
+        padding: 20px !important;
+        margin-bottom: 16px !important;
+        transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+      }
+      .tribe-events-calendar-list__event:hover,
+      .tribe-events-calendar-list__event-row:hover {
+        transform: translateY(-2px);
+        border-color: var(--gsim-accent);
+        box-shadow: 0 8px 24px rgba(47,92,255,0.25);
+      }
+
+      .tribe-events-calendar-list__event-title,
+      .tribe-events-calendar-list__event-row a {
+        color: var(--gsim-fg) !important;
+        font-weight: 700;
+        text-decoration: none;
+      }
+      .tribe-events-calendar-list__event-title:hover {
+        color: var(--gsim-accent) !important;
+      }
+
+      /* Event-Bild */
+      .tribe-events-calendar-list__event-featured-image-wrapper img,
+      .tribe-events-event-image img {
+        border-radius: 8px;
+      }
+
+      /* Datum-Chip */
+      .tribe-events-calendar-list__event-date-tag,
+      .tribe-events-calendar-list__event-datetime {
+        background: var(--gsim-bg);
+        border: 1px solid var(--gsim-accent);
+        border-radius: 8px;
+        padding: 6px 10px;
+        color: var(--gsim-accent) !important;
+        font-weight: 600;
+      }
+
+      /* Kategorien-Labels */
+      .tribe-events-calendar-list__event-category,
+      .tribe-event-categories a {
+        background: var(--gsim-accent);
+        color: var(--gsim-bg) !important;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      /* Buttons (z.B. "Calendar", "List", "Day") */
+      .tribe-common-c-btn,
+      .tribe-events-c-top-bar__datepicker-button,
+      .tribe-events-c-nav__next,
+      .tribe-events-c-nav__prev,
+      .tribe-common-b2 a,
+      .tribe-events-button {
+        background: var(--gsim-accent) !important;
+        color: var(--gsim-bg) !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        padding: 8px 16px !important;
+        transition: background 0.15s ease;
+      }
+      .tribe-common-c-btn:hover,
+      .tribe-events-button:hover {
+        background: #8ab8ff !important;
+      }
+      .tribe-common-c-btn--secondary {
+        background: transparent !important;
+        color: var(--gsim-accent) !important;
+        border: 1px solid var(--gsim-accent) !important;
+      }
+
+      /* Month-View Zellen */
+      .tribe-events-calendar-month__day {
+        background: var(--gsim-bg-2);
+        border: 1px solid var(--gsim-border);
+      }
+      .tribe-events-calendar-month__day--current {
+        background: rgba(106,165,255,0.1);
+      }
+      .tribe-events-calendar-month__calendar-event-tooltip,
+      .tribe-events-calendar-month__calendar-event {
+        color: var(--gsim-fg);
+        background: var(--gsim-bg-2);
+        border-left: 3px solid var(--gsim-accent);
+      }
+
+      /* Single Event: Hero */
+      .tribe-events-single .tribe-events-event-image {
+        margin: 0 -24px 24px;
+        overflow: hidden;
+      }
+      .tribe-events-single .tribe-events-event-image img {
+        width: 100%;
+        border-radius: 0;
+      }
+
+      /* Single Event: Meta-Panel (Datum, Ort) */
+      .tribe-events-single-section.tribe-events-event-meta {
+        background: var(--gsim-bg-2);
+        border: 1px solid var(--gsim-border);
+        border-radius: 10px;
+        padding: 16px !important;
+      }
+      .tribe-events-event-meta .tribe-events-meta-group,
+      .tribe-events-event-meta dt,
+      .tribe-events-event-meta dd {
+        color: var(--gsim-fg) !important;
+      }
+      .tribe-events-schedule {
+        background: transparent !important;
+      }
+
+      /* ==== Custom Join-CTA im Single Event ==== */
+      .gsim-event-cta {
+        margin-top: 24px;
+        padding: 24px;
+        background: linear-gradient(135deg, #15213a 0%, #1a2a4a 100%);
+        border: 1px solid var(--gsim-accent);
+        border-radius: 12px;
+        text-align: center;
+      }
+      .gsim-event-cta .btn-join {
+        display: inline-block;
+        padding: 14px 28px;
+        background: var(--gsim-accent);
+        color: #0b1220;
+        font-weight: 700;
+        border-radius: 10px;
+        text-decoration: none;
+        font-size: 15px;
+        box-shadow: 0 4px 16px rgba(47,92,255,0.3);
+      }
+      .gsim-event-cta .btn-join:hover {
+        background: #8ab8ff;
+      }
+      .gsim-event-cta .btn-secondary {
+        color: var(--gsim-muted);
+        margin-left: 12px;
+        font-size: 13px;
+        text-decoration: none;
+      }
+      .gsim-event-cta .passphrase {
+        font-family: ui-monospace, SFMono-Regular, monospace;
+        background: var(--gsim-bg);
+        padding: 4px 10px;
+        border-radius: 6px;
+        color: var(--gsim-accent);
+        font-size: 14px;
+      }
+    </style>
+    <?php
+});
+
+// Single-Event: Automatisch den Join-CTA unter den Content einfuegen
+add_filter('the_content', function ($content) {
+    if (!is_singular('tribe_events') || !in_the_loop() || !is_main_query()) return $content;
+    $id = get_the_ID();
+    $pass = get_post_meta($id, GSIM_EVENTS_META_PASSPHRASE, true);
+    $join = get_post_meta($id, GSIM_EVENTS_META_JOIN_URL, true);
+    if (!$pass) return $content;
+    $invite_url = home_url('/join/' . rawurlencode($pass));
+    $cta  = '<div class="gsim-event-cta">';
+    $cta .= '<p style="margin:0 0 14px 0;color:#8696b8;font-size:13px;text-transform:uppercase;letter-spacing:1px">Mitmachen</p>';
+    $cta .= '<a href="' . esc_url($join) . '" class="btn-join">▶ Event beitreten</a>';
+    $cta .= '<a href="' . esc_url($invite_url) . '" class="btn-secondary">Teilen-Link</a>';
+    $cta .= '<p style="margin:16px 0 0 0;color:#8696b8;font-size:13px">Passphrase: <span class="passphrase">' . esc_html($pass) . '</span></p>';
+    $cta .= '<p style="margin:10px 0 0 0;color:#8696b8;font-size:12px">MSFSVoiceWalker muss installiert und gestartet sein — <a href="' . esc_url(home_url('/msfsvoicewalker')) . '" style="color:#6aa5ff">hier herunterladen</a></p>';
+    $cta .= '</div>';
+    return $content . $cta;
+});
+
+// -----------------------------------------------------------------------------
 // Admin-Notice wenn WooCommerce oder TEC fehlt
 // -----------------------------------------------------------------------------
 
