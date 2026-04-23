@@ -474,33 +474,31 @@ add_action('rest_api_init', function () {
         'permission_callback' => '__return_true',
     ]);
 
-    // POST /events — Event anlegen
+    // POST /events — Event anlegen (via TEC's tribe_create_event, damit
+    // alle internen Rewrites / Taxonomien / Meta korrekt gesetzt werden).
     register_rest_route($ns, '/events', [
         'methods'  => 'POST',
         'callback' => function ($req) {
             $user_id = get_current_user_id();
-            $payload = [
-                'post_type'    => 'tribe_events',
-                'post_status'  => sanitize_text_field($req['status'] ?? 'draft'),
+            if (!function_exists('tribe_create_event')) {
+                return new WP_Error('tec_missing', 'The Events Calendar muss aktiv sein', ['status' => 500]);
+            }
+            $start = !empty($req['start']) ? date('Y-m-d H:i:s', strtotime($req['start'])) : date('Y-m-d H:i:s');
+            $end   = !empty($req['end'])   ? date('Y-m-d H:i:s', strtotime($req['end']))   : date('Y-m-d H:i:s', strtotime('+2 hours'));
+            $event_id = tribe_create_event([
                 'post_title'   => sanitize_text_field($req['title'] ?? 'Untitled Event'),
                 'post_content' => wp_kses_post($req['description'] ?? ''),
+                'post_status'  => sanitize_text_field($req['status'] ?? 'draft'),
                 'post_author'  => $user_id,
-            ];
-            $event_id = wp_insert_post($payload, true);
-            if (is_wp_error($event_id)) return $event_id;
-
-            // TEC-Datums-Meta (ohne Admin-UI)
-            if (!empty($req['start']) && !empty($req['end'])) {
-                $s = date('Y-m-d H:i:s', strtotime($req['start']));
-                $e = date('Y-m-d H:i:s', strtotime($req['end']));
-                update_post_meta($event_id, '_EventStartDate',    $s);
-                update_post_meta($event_id, '_EventEndDate',      $e);
-                update_post_meta($event_id, '_EventStartDateUTC', gmdate('Y-m-d H:i:s', strtotime($req['start'])));
-                update_post_meta($event_id, '_EventEndDateUTC',   gmdate('Y-m-d H:i:s', strtotime($req['end'])));
+                'EventStartDate' => $start,
+                'EventEndDate'   => $end,
+                'EventAllDay'    => false,
+                'EventTimezone'  => wp_timezone_string(),
+            ]);
+            if (!$event_id || is_wp_error($event_id)) {
+                return new WP_Error('create_failed', 'Event konnte nicht erstellt werden', ['status' => 500]);
             }
-            // Passphrase wird durch den save_post-Hook automatisch generiert
-            do_action('save_post_tribe_events', $event_id, get_post($event_id), true);
-
+            // Passphrase wird durch save_post_tribe_events-Hook automatisch generiert
             return gsim_events_shape_event(get_post($event_id));
         },
         'permission_callback' => 'gsim_events_require_organizer',
