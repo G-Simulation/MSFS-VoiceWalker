@@ -1261,6 +1261,27 @@ add_filter('rest_tribe_events_query', function ($args, $request) {
 // durcheinanderbringen — stattdessen lassen wir TEC nativ rendern).
 // -----------------------------------------------------------------------------
 
+// Ein paar gezielte TEC-Fixes fuers Dark-Theme (keine Komplett-Uebernahme,
+// nur sichtbare Glitches wegmachen)
+add_action('wp_head', function () {
+    $is_tec = (function_exists('tribe_is_event_query') && tribe_is_event_query())
+              || is_singular('tribe_events')
+              || is_post_type_archive('tribe_events')
+              || is_tax('tribe_events_cat');
+    if (!$is_tec) return;
+    ?>
+    <style id="gsim-tec-fixes">
+      /* Weisses Band vom View-Selector + Top-Bar wegmachen */
+      .tribe-events-c-view-selector,
+      .tribe-events-c-view-selector__content,
+      .tribe-events-c-top-bar,
+      .tribe-events-header {
+        background: transparent !important;
+      }
+    </style>
+    <?php
+});
+
 add_action('wp_head', function () {
     if (!is_singular('tribe_events')) return;
     ?>
