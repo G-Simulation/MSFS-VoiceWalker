@@ -1162,19 +1162,21 @@ async def ws_handler(ws):
                             asyncio.create_task(broadcast({"type": "tracking_off"}))
                 elif t == "set_license_key":
                     new_key = str(m.get("key", "")).strip()
-                    # Validate kann HTTP machen → in Thread auslagern, damit
-                    # Event-Loop nicht blockiert.
                     async def _do_license(k: str):
-                        result = await asyncio.to_thread(
-                            license_client.validate, k, data_dir()
-                        )
-                        _apply_license_result(result)
-                        cfg = load_config()
-                        cfg["license_key"] = STATE.license_key
-                        save_config(cfg)
-                        log.info("license: is_pro=%s mode=%s reason=%s",
-                                 STATE.is_pro, STATE.license_mode, STATE.license_reason)
-                        await broadcast(_license_state_msg())
+                        try:
+                            result = await asyncio.to_thread(
+                                license_client.validate, k, data_dir()
+                            )
+                            _apply_license_result(result)
+                            cfg = load_config()
+                            cfg["license_key"] = STATE.license_key
+                            save_config(cfg)
+                            log.info("license: is_pro=%s mode=%s reason=%s key=%r persisted",
+                                     STATE.is_pro, STATE.license_mode, STATE.license_reason,
+                                     STATE.license_key)
+                            await broadcast(_license_state_msg())
+                        except Exception as e:
+                            record_error("set_license_key", e)
                     asyncio.create_task(_do_license(new_key))
             except Exception as e:
                 record_error(f"ws_handler.{t}", e)
@@ -1316,17 +1318,25 @@ async def main():
     STATE.tracking_enabled = bool(_cfg.get("tracking_enabled", True))
     log.info("config loaded: tracking_enabled=%s", STATE.tracking_enabled)
 
-    # License-State bestimmen: zuerst Cache pruefen (damit offline-Start
-    # funktioniert), danach falls Key gesetzt neu validieren im Hintergrund.
+    # License-State bestimmen: Key kommt primaer aus config.json, faellt aber
+    # auf license_cache.json zurueck (robust gegen verlorene config). Dann
+    # entweder cached is_pro nutzen oder Backend neu validieren.
     _lk = str(_cfg.get("license_key", "")).strip()
+    _cache = license_client.load_cache(data_dir())
+    if not _lk and _cache and _cache.get("key"):
+        # config.json hatte keinen Key aber Cache schon → Key aus Cache nehmen
+        # und direkt in config.json re-persistieren, damit's beim naechsten
+        # Start kein Fallback mehr braucht.
+        _lk = str(_cache.get("key", "")).strip()
+        if _lk:
+            _cfg["license_key"] = _lk
+            save_config(_cfg)
+            log.info("license: recovered key from cache, re-saved config.json")
     if _lk:
-        cached = license_client.load_cache(data_dir())
-        if cached and cached.get("key") == _lk and cached.get("expires_at", 0) > time.time():
-            _apply_license_result(cached)
+        if _cache and _cache.get("key") == _lk and _cache.get("expires_at", 0) > time.time():
+            _apply_license_result(_cache)
             log.info("license (cache): is_pro=%s mode=%s", STATE.is_pro, STATE.license_mode)
         else:
-            # Synchroner Call beim Start ist ok (haeuft sich nur einmal auf),
-            # fuer Dev-Mode ist's instant, fuer Backend max ~6s HTTP-Timeout.
             try:
                 res = license_client.validate(_lk, data_dir())
                 _apply_license_result(res)
@@ -1334,6 +1344,8 @@ async def main():
                          STATE.is_pro, STATE.license_mode, STATE.license_reason)
             except Exception as e:
                 log.warning("license validate failed at startup: %s", e)
+    else:
+        log.info("license: no key configured (Free mode)")
 
     reader = SimReader()
     PTT = PTTBackend(on_ptt_event)
