@@ -861,11 +861,18 @@ add_shortcode('gsim_organizer_form', function () {
               'meta_value' => $ev->ID, 'post_status' => 'publish', 'fields' => 'ids', 'nopaging' => true,
           ]))->found_posts;
         ?>
+          <?php $invite_url = home_url('/join/' . rawurlencode($pass)); ?>
           <div class="gsim-event-row">
-            <div>
+            <div style="flex:1;min-width:0">
               <div class="title"><?php echo esc_html($ev->post_title); ?> <span style="color:#999;font-weight:400;font-size:12px">— <?php echo esc_html($ev->post_status); ?></span></div>
-              <div><code><?php echo esc_html($join ?: '—'); ?></code></div>
-              <div style="font-size:12px;color:#666;margin-top:2px"><?php echo (int) $atts; ?> Teilnehmer</div>
+              <div style="margin-top:6px;font-size:12px;color:#444">
+                <strong>Einladungs-Link</strong> (zum Teilen in Stream-Chat, Twitter, Discord):<br>
+                <input type="text" value="<?php echo esc_attr($invite_url); ?>" readonly
+                       onclick="this.select();document.execCommand('copy');this.nextSibling.textContent='✓ kopiert';"
+                       style="width:100%;padding:6px;font-family:ui-monospace,monospace;font-size:12px;border:1px solid #ddd;border-radius:4px">
+                <span style="color:#28a745;font-size:11px;margin-left:4px"></span>
+              </div>
+              <div style="font-size:12px;color:#666;margin-top:4px"><?php echo (int) $atts; ?> Teilnehmer · Passphrase: <code><?php echo esc_html($pass); ?></code></div>
             </div>
             <div style="display:flex;gap:6px;flex-wrap:wrap">
               <a href="<?php echo esc_url(add_query_arg('edit', $ev->ID, get_permalink())); ?>" style="padding:6px 12px;border:1px solid #ccc;border-radius:6px;text-decoration:none;color:#333">Editieren</a>
@@ -882,6 +889,123 @@ add_shortcode('gsim_organizer_form', function () {
     </div>
     <?php
     return ob_get_clean();
+});
+
+// -----------------------------------------------------------------------------
+// Public Invite Landing: /join/<passphrase>
+// Oeffentlich teilbarer Link den Streamer/Veranstalter in Chats/Overlays posten.
+// Zeigt Event-Info + App-Install-CTA + "Event beitreten"-Button.
+// -----------------------------------------------------------------------------
+
+add_action('init', function () {
+    add_rewrite_rule('^join/([^/]+)/?$', 'index.php?gsim_join_pass=$matches[1]', 'top');
+});
+
+add_filter('query_vars', function ($vars) {
+    $vars[] = 'gsim_join_pass';
+    return $vars;
+});
+
+add_action('template_redirect', function () {
+    $pass = get_query_var('gsim_join_pass');
+    if (!$pass) return;
+
+    // Event per Passphrase finden
+    $events = get_posts([
+        'post_type'   => 'tribe_events',
+        'numberposts' => 1,
+        'post_status' => 'publish',
+        'meta_key'    => GSIM_EVENTS_META_PASSPHRASE,
+        'meta_value'  => $pass,
+    ]);
+    $event = $events[0] ?? null;
+    $join_url = GSIM_EVENTS_APP_URL . '/?join=' . rawurlencode($pass);
+    $install_url = home_url('/msfsvoicewalker');
+
+    $title = $event ? esc_html($event->post_title) : 'MSFSVoiceWalker Event';
+    $desc_html = $event ? apply_filters('the_content', $event->post_content) : '';
+    $start = $event && function_exists('tribe_get_start_date') ? tribe_get_start_date($event->ID, true, 'd.m.Y H:i') : '';
+    $img   = $event && has_post_thumbnail($event->ID) ? get_the_post_thumbnail_url($event->ID, 'large') : '';
+    $event_url = $event ? get_permalink($event->ID) : '';
+
+    // Minimales HTML — bewusst ohne Theme-Template, damit Streamer-Browser + Overlays
+    // schlanke Seite bekommen. Theme-Styling via get_stylesheet_uri() optional mitgeladen.
+    nocache_headers();
+    header('Content-Type: text/html; charset=utf-8');
+    ?><!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title><?php echo $title; ?> — Join via MSFSVoiceWalker</title>
+<link rel="stylesheet" href="<?php echo esc_url(get_stylesheet_uri()); ?>">
+<style>
+  body { margin:0; background:#0b1220; color:#eaf0ff; font-family:"Segoe UI",system-ui,sans-serif; }
+  .wrap { max-width:640px; margin:40px auto; padding:24px; }
+  .card { background:#15213a; border:1px solid #233457; border-radius:12px; overflow:hidden; }
+  .hero { background-size:cover; background-position:center; min-height:220px; display:flex; align-items:flex-end; padding:20px; background-color:#152040; }
+  .hero h1 { margin:0; font-size:26px; text-shadow:0 2px 10px rgba(0,0,0,0.8); }
+  .body { padding:24px; }
+  .meta { color:#8696b8; font-size:14px; margin-bottom:16px; }
+  .desc { line-height:1.55; }
+  .desc p { margin:0 0 10px 0; }
+  .btn { display:inline-block; padding:14px 22px; border-radius:10px; background:#6aa5ff; color:#0b1220; font-weight:700; text-decoration:none; margin-top:20px; margin-right:10px; }
+  .btn.secondary { background:transparent; color:#6aa5ff; border:1px solid #6aa5ff; }
+  .passphrase { background:#0b1220; padding:10px 14px; border-radius:6px; font-family:ui-monospace,monospace; display:inline-block; margin-top:10px; }
+  .steps { background:#0f1729; padding:16px; border-radius:8px; margin-top:16px; font-size:13px; color:#b5c3dd; }
+  .steps ol { margin:0; padding-left:20px; }
+  footer { text-align:center; margin-top:24px; color:#8696b8; font-size:12px; }
+  .notfound { padding:30px; text-align:center; color:#ff9999; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<?php if (!$event): ?>
+  <div class="card"><div class="notfound">
+    <h2>Event nicht gefunden</h2>
+    <p>Die Passphrase <code><?php echo esc_html($pass); ?></code> gehoert zu keinem aktiven Event.</p>
+    <p>Vielleicht ist das Event schon vorbei oder der Link ist falsch. Teilnehmer mit Pro-Lizenz koennen die Passphrase auch manuell in der App unter "Privater Raum" eintragen.</p>
+  </div></div>
+<?php else: ?>
+  <div class="card">
+    <div class="hero" style="<?php if ($img) echo 'background-image:url(' . esc_url($img) . ');'; ?>">
+      <h1><?php echo $title; ?></h1>
+    </div>
+    <div class="body">
+      <?php if ($start): ?><div class="meta">📅 <?php echo esc_html($start); ?></div><?php endif; ?>
+      <div class="desc"><?php echo wp_kses_post($desc_html); ?></div>
+
+      <a href="<?php echo esc_url($join_url); ?>" class="btn">▶ Jetzt beitreten</a>
+      <a href="<?php echo esc_url($install_url); ?>" class="btn secondary">MSFSVoiceWalker installieren</a>
+
+      <div class="steps">
+        <strong>So machst du mit:</strong>
+        <ol>
+          <li>MSFSVoiceWalker installieren (falls noch nicht geschehen)</li>
+          <li>MSFS starten, App laeuft automatisch mit</li>
+          <li>Oben auf "▶ Jetzt beitreten" klicken</li>
+          <li>Du landest im privaten Event-Raum mit allen Teilnehmern</li>
+        </ol>
+        <p style="margin-top:10px">Passphrase zum manuellen Eintragen: <span class="passphrase"><?php echo esc_html($pass); ?></span></p>
+      </div>
+    </div>
+  </div>
+  <footer>
+    Hosted on <a href="https://www.gsimulations.de/msfsvoicewalker" style="color:#8696b8">gsimulations.de</a> ·
+    <a href="<?php echo esc_url($event_url); ?>" style="color:#8696b8">Event-Details</a>
+  </footer>
+<?php endif; ?>
+</div>
+</body>
+</html>
+    <?php
+    exit;
+});
+
+// Beim Plugin-Aktivierung rewrite rules flushen (Einmaligkeit via option-check)
+register_activation_hook(__FILE__, function () {
+    // Flush already in main activation hook above, this is safety
+    flush_rewrite_rules();
 });
 
 // -----------------------------------------------------------------------------
