@@ -329,6 +329,9 @@ const state = {
 };
 
 function currentMaxPeers() {
+  // In einem Event-/Private-Room gilt kein Free-Limit — sonst waeren grosse
+  // Fly-Ins mit >20 Teilnehmern nicht moeglich.
+  if (state.privateRoom) return MAX_PEERS_PRO;
   return state.isPro ? MAX_PEERS_PRO : MAX_PEERS_FREE;
 }
 
@@ -1068,8 +1071,10 @@ function joinCellRoom(cell) {
   room.onPeerJoin(peerId => {
     const cap = currentMaxPeers();
     if (currentPeerCount() >= cap) {
-      console.warn('[mesh] peer cap reached; ignoring', peerId, 'cap=', cap, 'isPro=', state.isPro);
-      if (!state.isPro) {
+      console.warn('[mesh] peer cap reached; ignoring', peerId, 'cap=', cap);
+      // Nur im oeffentlichen Geohash-Mesh Upgrade-Modal zeigen; im Event-Room
+      // hat der User nie ein Limit, deshalb kein Modal.
+      if (!state.isPro && !state.privateRoom) {
         showUpgradeModal(`Peer-Limit erreicht (${MAX_PEERS_FREE} Piloten in der Free-Version).`);
       }
       return;
