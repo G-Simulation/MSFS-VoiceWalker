@@ -664,13 +664,45 @@ add_action('admin_init', function () {
         exit;
     }
 });
-// Admin-Bar auf dem Frontend ausblenden fuer Organizer
-add_action('after_setup_theme', function () {
+// Admin-Bar: fuer Organizer minimieren (nur "Meine Events"-Shortcut behalten)
+add_action('admin_bar_menu', function ($wp_admin_bar) {
     if (!is_user_logged_in()) return;
     $user = wp_get_current_user();
-    if (in_array(GSIM_EVENTS_ROLE, (array) $user->roles) && !user_can($user, 'manage_options')) {
-        show_admin_bar(false);
+    $is_organizer = in_array(GSIM_EVENTS_ROLE, (array) $user->roles) && !user_can($user, 'manage_options');
+    if ($is_organizer) {
+        // Alle Standard-Items entfernen
+        foreach (['wp-logo','site-name','updates','comments','new-content','edit','customize'] as $node) {
+            $wp_admin_bar->remove_node($node);
+        }
     }
+    // Prominenter "Meine Events"-Button fuer Organizer + Admins
+    if ($is_organizer || user_can($user, 'manage_options')) {
+        $wp_admin_bar->add_node([
+            'id'    => 'gsim-events-shortcut',
+            'title' => '📅 Meine Events',
+            'href'  => home_url('/events-verwalten/'),
+            'meta'  => ['class' => 'gsim-events-shortcut'],
+        ]);
+    }
+}, 100);
+
+// Floating "Meine Events"-Button auf jeder Frontend-Seite fuer Organizer.
+// Unabhaengig von Admin-Bar, damit User nie den Einstieg verliert.
+add_action('wp_footer', function () {
+    if (!is_user_logged_in()) return;
+    $user = wp_get_current_user();
+    if (!in_array(GSIM_EVENTS_ROLE, (array) $user->roles) && !user_can($user, 'manage_options')) return;
+    // Auf der Editor-Seite selbst nicht anzeigen
+    if (is_page('events-verwalten')) return;
+    $url = home_url('/events-verwalten/');
+    echo '<a id="gsim-organizer-fab" href="' . esc_url($url) . '" style="'
+        . 'position:fixed;bottom:24px;right:24px;z-index:9999;'
+        . 'background:linear-gradient(135deg,#2f5cff,#6aa5ff);color:#fff;'
+        . 'padding:12px 18px;border-radius:999px;font-weight:700;font-size:14px;'
+        . 'text-decoration:none;box-shadow:0 4px 20px rgba(47,92,255,0.5);'
+        . 'display:inline-flex;align-items:center;gap:6px;'
+        . 'font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;'
+        . '">📅 Meine Events</a>';
 });
 
 add_shortcode('gsim_organizer_form', function () {
