@@ -169,6 +169,12 @@ const _instanceLockPromise = acquireInstanceLock();
 // --- Config (all times in ms unless noted) -----------------------------------
 const APP_ID = 'msfsvoicewalker-v1';
 const GEOHASH_PRECISION = 4;
+// Event-Meshes werden per Geohash geshardet, damit sich bei grossen Events nur
+// wirklich nahe Teilnehmer peer-to-peer verbinden. Voice hat ohnehin max ~5 km
+// Reichweite (Cockpit-Modus), weiter entfernte Peers sind nur unnoetige Mesh-
+// Last. Precision 5 = ~5 km-Kachel, mit 9 Nachbarn => ~15 km Suchradius —
+// passt fuer Flugplatz-Events, Formation-Flights, lokale Fly-Ins.
+const PRIVATE_GEOHASH_PRECISION = 5;
 const CELL_UPDATE_HZ = 0.5;
 // 5 Hz war zu aggressiv fuer die Signaling-Relays. 2 Hz reicht voellig —
 // WebRTC-Voice ist eh kontinuierlich, die Position ist nur fuer Radar+Panner.
@@ -1028,18 +1034,26 @@ function updateRooms() {
   // Wenn MSFS im Hauptmenue: kein Mesh-Join, keine Audio-Uebertragung.
   // renderSelf() hat bestehende Rooms bei in_menu bereits verlassen.
   if (state.mySim.in_menu) return;
-  // Privater Room (Pro) ueberschreibt Geohash: wir joinen NUR den Private Room.
+  // Privater Room / Event: Mesh wird zusaetzlich per Geohash geshardet, damit
+  // grosse Events (200 Leute ueber Europa verteilt) nicht in einem Full-Mesh
+  // ersticken. Jeder Teilnehmer verbindet sich nur mit geografisch nahen
+  // Mit-Teilnehmern desselben Events.
   if (state.privateRoom) {
-    if (!state.rooms.has(state.privateRoom.key)) {
-      joinCellRoom(state.privateRoom.key);
-    }
-    // Alle anderen Rooms verlassen (nicht __-Prefix)
-    for (const [cell, entry] of [...state.rooms]) {
-      if (cell !== state.privateRoom.key && !cell.startsWith('__')) {
+    const cell = geohashEncode(state.mySim.lat, state.mySim.lon, PRIVATE_GEOHASH_PRECISION);
+    const neighbors = geohashNeighbors(cell);
+    // Room-Keys: <event-passphrase-hash>:<geohash-cell>
+    const wantKeys = neighbors.map(n => state.privateRoom.key + ':' + n);
+    state.currentCell = cell;
+
+    for (const [existing, entry] of [...state.rooms]) {
+      if (!wantKeys.includes(existing) && !existing.startsWith('__')) {
         if (entry.posTimer) clearInterval(entry.posTimer);
         try { entry.room.leave(); } catch {}
-        state.rooms.delete(cell);
+        state.rooms.delete(existing);
       }
+    }
+    for (const k of wantKeys) {
+      if (!state.rooms.has(k)) joinCellRoom(k);
     }
     return;
   }
