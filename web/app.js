@@ -442,11 +442,14 @@ async function sha256Hex(text) {
   return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function joinPrivateRoom(passphrase) {
+async function joinPrivateRoom(passphrase, { forceAllow = false } = {}) {
   const pass = (passphrase || '').trim();
   if (!pass) return;
-  if (!state.isPro) {
-    showUpgradeModal('Private Rooms sind ein Pro-Feature.');
+  // Manuelle Passphrase-Eingabe ist Pro-only; Event-Links (forceAllow=true)
+  // sind offen fuer alle — so koennen Streamer ihre Zuschauer einladen ohne
+  // dass die Pro kaufen muessen.
+  if (!state.isPro && !forceAllow) {
+    showUpgradeModal('Private Rooms sind ein Pro-Feature. Event-Teilnehmer kommen über den Einladungs-Link des Veranstalters rein.');
     return;
   }
   const hash = await sha256Hex(pass + PRIVATE_ROOM_SALT);
@@ -785,19 +788,11 @@ _appStartPromise.then(ok => { if (ok) connectBackendWs(); });
     }, 100);
   });
   await waitForLicense();
-  if (state.isPro) {
-    console.info('[event-link] auto-join private room:', pass);
-    joinPrivateRoom(pass);
-  } else {
-    showUpgradeModal(
-      `Dieser Event-Link führt in einen privaten Raum. Dafür brauchst du ` +
-      `einen Pro-Key oder einen Event-Gast-Code. Passphrase: "${pass}"`
-    );
-    // Passphrase ins Feld fuellen, damit User sie nicht eintippen muss falls er
-    // einen Gast-Code aktiviert und dann manuell "Betreten" klickt.
-    const el = document.getElementById('privateRoomPass');
-    if (el) el.value = pass;
-  }
+  // Event-Teilnahme ist OFFEN — jeder User darf via ?join= beitreten, auch
+  // ohne Pro. Pro bleibt fuer manuelle Passphrase-Eingabe + Unlimited Peers
+  // + Supporter-Badge. Siehe ROADMAP: offene Plattform, Events = oeffentlich.
+  console.info('[event-link] auto-join event room:', pass, 'isPro=', state.isPro);
+  joinPrivateRoom(pass, { forceAllow: true });
 })();
 
 // --- Microphone --------------------------------------------------------------
