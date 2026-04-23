@@ -757,6 +757,49 @@ const _appStartPromise = (async () => {
 // Network (WS zum lokalen Python-Backend) — nach Consent
 _appStartPromise.then(ok => { if (ok) connectBackendWs(); });
 
+// --- Event-Direktlink via ?join=<passphrase> --------------------------------
+// PDF-Briefings und Stream-Overlays linken auf  http://127.0.0.1:7801/?join=...
+// Wir lesen den Parameter beim App-Start und joinen den privaten Raum sobald
+// (a) Consent erteilt ist (b) license_state geliefert hat (isPro entschieden).
+// Wenn nicht Pro: Hinweis-Modal mit Upgrade-Link statt silent fail.
+(async function handleJoinParam() {
+  const ok = await _appStartPromise;
+  if (!ok) return;
+  const params = new URLSearchParams(location.search);
+  const pass = (params.get('join') || '').trim();
+  if (!pass) return;
+  // URL saeubern damit der Parameter bei F5 nicht nochmal feuert
+  try {
+    const clean = location.origin + location.pathname;
+    history.replaceState(null, '', clean);
+  } catch {}
+  // Auf isPro-Entscheidung warten — license_state kommt ueber die WS-Verbindung
+  // via applyLicenseState. Timeout 5s, dann je nach Stand weitermachen.
+  const waitForLicense = () => new Promise(resolve => {
+    if (state.licenseMode && state.licenseMode !== 'none') return resolve();
+    const deadline = Date.now() + 5000;
+    const t = setInterval(() => {
+      if ((state.licenseMode && state.licenseMode !== 'none') || Date.now() > deadline) {
+        clearInterval(t); resolve();
+      }
+    }, 100);
+  });
+  await waitForLicense();
+  if (state.isPro) {
+    console.info('[event-link] auto-join private room:', pass);
+    joinPrivateRoom(pass);
+  } else {
+    showUpgradeModal(
+      `Dieser Event-Link führt in einen privaten Raum. Dafür brauchst du ` +
+      `einen Pro-Key oder einen Event-Gast-Code. Passphrase: "${pass}"`
+    );
+    // Passphrase ins Feld fuellen, damit User sie nicht eintippen muss falls er
+    // einen Gast-Code aktiviert und dann manuell "Betreten" klickt.
+    const el = document.getElementById('privateRoomPass');
+    if (el) el.value = pass;
+  }
+})();
+
 // --- Microphone --------------------------------------------------------------
 state.audioInputId  = localStorage.getItem('vw.audioInputId')  || '';
 state.audioOutputId = localStorage.getItem('vw.audioOutputId') || '';
