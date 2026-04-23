@@ -1389,10 +1389,13 @@ add_action('wp_head', function () {
       .tribe-events-button:hover {
         background: #8ab8ff !important;
       }
-      /* Subscribe-Dropdown dezent, damit er sich nicht mit Pagination ueberlappt */
-      .tribe-events-c-subscribe-dropdown {
-        position: relative;
-        z-index: 2;
+      /* "Kalender abonnieren"-Dropdown komplett ausblenden —
+         nutzen ohnehin fast keine User, und TEC-v6 positioniert ihn absolut
+         ueber der Vorherige/Naechste-Pagination */
+      .tribe-events-c-subscribe-dropdown,
+      .tribe-events-c-subscribe-dropdown__container,
+      .tribe-events-c-subscribe-dropdown__wrapper {
+        display: none !important;
       }
       /* View-Tabs (Liste/Monat/Tag) */
       .tribe-events-c-view-selector__list-item--active .tribe-events-c-view-selector__list-item-text {
