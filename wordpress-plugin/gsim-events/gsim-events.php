@@ -1041,6 +1041,153 @@ register_activation_hook(__FILE__, function () {
 });
 
 // -----------------------------------------------------------------------------
+// Admin-Seite: Veranstalter verwalten (nur fuer Admins)
+// wp-admin → Veranstaltungen → Organizer
+// -----------------------------------------------------------------------------
+
+add_action('admin_menu', function () {
+    add_submenu_page(
+        'edit.php?post_type=tribe_events',
+        'Organizer verwalten',
+        'Organizer',
+        'manage_options',
+        'gsim-organizers',
+        'gsim_render_organizers_page'
+    );
+});
+
+function gsim_render_organizers_page() {
+    if (!current_user_can('manage_options')) wp_die('Keine Berechtigung.');
+
+    // Actions
+    $notice = '';
+    if (!empty($_POST['gsim_add_organizer']) && check_admin_referer('gsim_organizer_action')) {
+        $email = sanitize_email($_POST['email'] ?? '');
+        $u = $email ? get_user_by('email', $email) : null;
+        if ($u) {
+            $role = new WP_User($u->ID);
+            if (!in_array(GSIM_EVENTS_ROLE, (array) $u->roles)) {
+                $role->add_role(GSIM_EVENTS_ROLE);
+                $notice = 'User <strong>' . esc_html($u->user_login) . '</strong> ist jetzt Event-Organizer.';
+            } else {
+                $notice = 'User hat die Rolle bereits.';
+            }
+        } else {
+            $notice = 'Kein User mit dieser E-Mail gefunden.';
+        }
+    }
+    if (!empty($_POST['gsim_remove_organizer']) && check_admin_referer('gsim_organizer_action')) {
+        $uid = (int) $_POST['user_id'];
+        $u = get_user_by('id', $uid);
+        if ($u && $uid !== get_current_user_id()) {
+            $role = new WP_User($uid);
+            $role->remove_role(GSIM_EVENTS_ROLE);
+            $notice = 'Organizer-Rolle von <strong>' . esc_html($u->user_login) . '</strong> entfernt.';
+        }
+    }
+    if (!empty($_POST['gsim_self_grant']) && check_admin_referer('gsim_organizer_action')) {
+        $me = new WP_User(get_current_user_id());
+        if (!in_array(GSIM_EVENTS_ROLE, (array) $me->roles)) {
+            $me->add_role(GSIM_EVENTS_ROLE);
+            $notice = 'Du hast dir selbst die Event-Organizer-Rolle gegeben (zusätzlich zu Admin).';
+        }
+    }
+
+    // Liste aller Organizer
+    $organizers = get_users(['role' => GSIM_EVENTS_ROLE, 'orderby' => 'registered', 'order' => 'DESC']);
+
+    ?>
+    <div class="wrap">
+      <h1>Event-Organizer verwalten</h1>
+
+      <?php if ($notice): ?>
+        <div class="notice notice-success is-dismissible"><p><?php echo $notice; ?></p></div>
+      <?php endif; ?>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px">
+
+        <div class="card" style="padding:16px;background:#fff;border:1px solid #ccd0d4;border-radius:4px">
+          <h2 style="margin-top:0">Dich selbst zum Organizer machen</h2>
+          <p>Als Admin kannst du dir die Rolle geben, um selbst Events zu testen/anlegen.</p>
+          <?php $me = wp_get_current_user(); $is_org = in_array(GSIM_EVENTS_ROLE, (array)$me->roles); ?>
+          <?php if ($is_org): ?>
+            <p style="color:#28a745;font-weight:600">✓ Du bist bereits Event-Organizer</p>
+          <?php else: ?>
+            <form method="post">
+              <?php wp_nonce_field('gsim_organizer_action'); ?>
+              <button type="submit" name="gsim_self_grant" value="1" class="button button-primary">
+                Mir die Organizer-Rolle geben
+              </button>
+            </form>
+          <?php endif; ?>
+        </div>
+
+        <div class="card" style="padding:16px;background:#fff;border:1px solid #ccd0d4;border-radius:4px">
+          <h2 style="margin-top:0">User manuell zum Organizer machen</h2>
+          <p>E-Mail eines existierenden Users eingeben (der muss vorher schon einen WP-Account haben).</p>
+          <form method="post">
+            <?php wp_nonce_field('gsim_organizer_action'); ?>
+            <input type="email" name="email" placeholder="user@example.com" style="width:100%;margin-bottom:8px">
+            <button type="submit" name="gsim_add_organizer" value="1" class="button button-primary">
+              Rolle hinzufügen
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <h2 style="margin-top:30px">Aktuelle Organizer (<?php echo count($organizers); ?>)</h2>
+
+      <?php if (empty($organizers)): ?>
+        <p style="color:#666"><em>Noch keine Organizer. Der erste Kauf von Produkt #975 oder eine manuelle Zuweisung erzeugt einen.</em></p>
+      <?php else: ?>
+        <table class="wp-list-table widefat fixed striped" style="margin-top:10px">
+          <thead>
+            <tr>
+              <th>User</th><th>E-Mail</th><th>Events</th><th>Registriert</th><th>Aktion</th>
+            </tr>
+          </thead>
+          <tbody>
+          <?php foreach ($organizers as $u):
+            $event_count = count(get_posts([
+                'post_type' => 'tribe_events', 'numberposts' => -1, 'author' => $u->ID,
+                'post_status' => ['publish','draft','future'], 'fields' => 'ids',
+            ]));
+          ?>
+            <tr>
+              <td>
+                <strong><?php echo esc_html($u->display_name ?: $u->user_login); ?></strong>
+                <div style="color:#999;font-size:12px">@<?php echo esc_html($u->user_login); ?> (ID <?php echo $u->ID; ?>)</div>
+              </td>
+              <td><?php echo esc_html($u->user_email); ?></td>
+              <td>
+                <?php echo $event_count; ?>
+                <?php if ($event_count): ?>
+                  <a href="<?php echo admin_url('edit.php?post_type=tribe_events&author=' . $u->ID); ?>" style="font-size:12px">ansehen</a>
+                <?php endif; ?>
+              </td>
+              <td><?php echo esc_html(mysql2date('d.m.Y', $u->user_registered)); ?></td>
+              <td>
+                <?php if ($u->ID !== get_current_user_id()): ?>
+                <form method="post" style="display:inline"
+                      onsubmit="return confirm('Rolle wirklich entfernen? User bleibt existieren, kann aber keine Events mehr anlegen.');">
+                  <?php wp_nonce_field('gsim_organizer_action'); ?>
+                  <input type="hidden" name="user_id" value="<?php echo $u->ID; ?>">
+                  <button type="submit" name="gsim_remove_organizer" value="1" class="button button-small">Rolle entfernen</button>
+                </form>
+                <?php else: ?>
+                  <span style="color:#999">(du)</span>
+                <?php endif; ?>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+          </tbody>
+        </table>
+      <?php endif; ?>
+    </div>
+    <?php
+}
+
+// -----------------------------------------------------------------------------
 // Admin-Notice wenn WooCommerce oder TEC fehlt
 // -----------------------------------------------------------------------------
 
