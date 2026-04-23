@@ -199,7 +199,10 @@ const POS_SEND_HZ    = 2;
 // Alle drei Radien + Crossover sind in der UI einstellbar (Slider in der
 // "Einstellungen"-Sektion) und werden in localStorage persistiert.
 const audioConfig = {
-  walker:  { maxRangeM: 75,   fullVolumeM: 3,  rolloff: 1.0 },
+  // Walker: wie echte Stimme im Freien — voll laut im unmittelbaren Nahbereich,
+  // bei 10 m nur noch ein Hauch, darueber stumm. Entspricht normaler
+  // Unterhaltungsdistanz am Vorfeld.
+  walker:  { maxRangeM: 10,   fullVolumeM: 1,  rolloff: 1.0 },
   cockpit: { maxRangeM: 5000, fullVolumeM: 50, rolloff: 0.8 },
   // Crossover: wenn > 0 koennen sich Walker und Cockpit-Piloten innerhalb
   // dieses Radius hoeren (z.B. Walker steht neben eigener Cessna → Co-Pilot
@@ -1016,7 +1019,7 @@ function setupRangeSliders() {
     reconcileAudioStreams();
   });
   resetBtn?.addEventListener('click', () => {
-    audioConfig.walker  = { maxRangeM: 75,   fullVolumeM: 3,  rolloff: 1.0 };
+    audioConfig.walker  = { maxRangeM: 10,   fullVolumeM: 1,  rolloff: 1.0 };
     audioConfig.cockpit = { maxRangeM: 5000, fullVolumeM: 50, rolloff: 0.8 };
     audioConfig.crossoverM = 0;
     saveAudioConfig();
