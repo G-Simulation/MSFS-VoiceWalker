@@ -488,6 +488,14 @@ function renderPrivateRoomUi() {
   const passInput = document.getElementById('privateRoomPass');
   const joinBtn   = document.getElementById('privateRoomJoinBtn');
   const leaveBtn  = document.getElementById('privateRoomLeaveBtn');
+  // Peers-Card-Titel dynamisch: "Piloten im Raum 'X'" im Private-Mode,
+  // sonst "Piloten im Mesh".
+  const titleEl = document.getElementById('peersTitle');
+  if (titleEl) {
+    titleEl.textContent = state.privateRoom
+      ? `Piloten im Raum "${state.privateRoom.passphrase}"`
+      : 'Piloten im Mesh';
+  }
   if (state.privateRoom) {
     if (joinedEl) {
       joinedEl.textContent = `Verbunden: "${state.privateRoom.passphrase}" (${state.privateRoom.key.slice(0, 14)}…)`;
