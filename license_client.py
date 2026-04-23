@@ -69,29 +69,23 @@ def _dev_validate(key: str) -> dict:
     k = (key or "").strip()
     if k.upper().startswith("DEV-PRO-"):
         return {
-            "is_pro":     True,
-            "key":        k,
-            "reason":     "dev-mode pro key",
-            "mode":       "dev",
-            "validated_at": now,
-            "expires_at": now + DEV_PRO_SECONDS,
+            "is_pro":          True,  "key": k, "reason": "dev-mode pro key",
+            "mode":            "dev", "validated_at": now,
+            "expires_at":      now + DEV_PRO_SECONDS,
+            "license_expires": 0.0,
         }
     if k.upper() == "DEV-FREE":
         return {
-            "is_pro":     False,
-            "key":        k,
-            "reason":     "dev-mode free key",
-            "mode":       "dev",
-            "validated_at": now,
-            "expires_at": now + DEV_PRO_SECONDS,
+            "is_pro":          False, "key": k, "reason": "dev-mode free key",
+            "mode":            "dev", "validated_at": now,
+            "expires_at":      now + DEV_PRO_SECONDS,
+            "license_expires": 0.0,
         }
     return {
-        "is_pro":     False,
-        "key":        k,
-        "reason":     "invalid (dev-mode: use DEV-PRO-<x> or DEV-FREE)",
-        "mode":       "dev",
-        "validated_at": now,
-        "expires_at": 0,
+        "is_pro":          False, "key": k,
+        "reason":          "invalid (dev-mode: use DEV-PRO-<x> or DEV-FREE)",
+        "mode":            "dev", "validated_at": now,
+        "expires_at":      0, "license_expires": 0.0,
     }
 
 
@@ -135,22 +129,30 @@ def _lmfwc_validate(key: str, api_url: str, ck: str, cs: str) -> dict:
         reason = f"activation limit reached ({act_now}/{act_max})"
     else:
         reason = "ok" if ok else "invalid or inactive"
+    # license_expires: echtes LMFWC-Ablaufdatum (0 = lifetime)
+    # cache_until:     bis wann der Cache fuer Offline-Start akzeptiert wird
     exp_raw = inner.get("expiresAt")
-    expires = now + GRACE_SECONDS
+    license_expires = 0.0
     try:
         if exp_raw:
             import datetime as _dt
             dt = _dt.datetime.fromisoformat(str(exp_raw).replace("Z", "+00:00"))
-            expires = min(expires, dt.timestamp())
+            license_expires = dt.timestamp()
     except Exception:
         pass
+    cache_until = now + GRACE_SECONDS
+    if license_expires:
+        cache_until = min(cache_until, license_expires)
     return {
-        "is_pro":       bool(ok),
-        "key":          key,
-        "reason":       reason,
-        "mode":         "backend",
-        "validated_at": now,
-        "expires_at":   expires,
+        "is_pro":          bool(ok),
+        "key":             key,
+        "reason":           reason,
+        "mode":             "backend",
+        "validated_at":     now,
+        # expires_at = Cache-Gueltigkeit (fuer Offline-Grace). UI zeigt stattdessen
+        # license_expires wenn vorhanden, sonst "lifetime".
+        "expires_at":       cache_until,
+        "license_expires":  license_expires,   # 0 = lifetime
     }
 
 

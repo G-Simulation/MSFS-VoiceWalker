@@ -224,7 +224,8 @@ class AppState:
     is_pro: bool = False
     license_key: str = ""
     license_reason: str = "no key"
-    license_expires_at: float = 0.0
+    license_expires_at: float = 0.0   # Cache-Grace (Offline), nicht License-Ablauf
+    license_expires_real: float = 0.0 # 0 = lifetime
     license_mode: str = "none"
 
 STATE = AppState()
@@ -1026,22 +1027,24 @@ ALLOWED_INBOUND = {
 
 def _license_state_msg() -> dict:
     return {
-        "type":       "license_state",
-        "is_pro":     bool(STATE.is_pro),
-        "key":        STATE.license_key,
-        "reason":     STATE.license_reason,
-        "expires_at": STATE.license_expires_at,
-        "mode":       STATE.license_mode,
+        "type":            "license_state",
+        "is_pro":          bool(STATE.is_pro),
+        "key":             STATE.license_key,
+        "reason":          STATE.license_reason,
+        "expires_at":      STATE.license_expires_at,
+        "license_expires": STATE.license_expires_real,
+        "mode":            STATE.license_mode,
     }
 
 
 def _apply_license_result(result: dict) -> None:
     """Uebernimmt ein license_client.validate()-Dict in STATE."""
-    STATE.is_pro             = bool(result.get("is_pro"))
-    STATE.license_key        = str(result.get("key", ""))
-    STATE.license_reason     = str(result.get("reason", ""))
-    STATE.license_expires_at = float(result.get("expires_at") or 0.0)
-    STATE.license_mode       = str(result.get("mode", "none"))
+    STATE.is_pro               = bool(result.get("is_pro"))
+    STATE.license_key          = str(result.get("key", ""))
+    STATE.license_reason       = str(result.get("reason", ""))
+    STATE.license_expires_at   = float(result.get("expires_at") or 0.0)
+    STATE.license_expires_real = float(result.get("license_expires") or 0.0)
+    STATE.license_mode         = str(result.get("mode", "none"))
 
 
 async def broadcast(obj: dict) -> None:

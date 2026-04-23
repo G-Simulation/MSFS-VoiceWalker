@@ -374,7 +374,8 @@ function applyLicenseState(m) {
   state.licenseKey     = String(m.key || '');
   state.licenseReason  = String(m.reason || '');
   state.licenseMode    = String(m.mode || 'none');
-  state.licenseExpires = +m.expires_at || 0;
+  state.licenseExpires = +m.expires_at || 0;   // cache-grace
+  state.licenseExpiresReal = +m.license_expires || 0;  // 0 = lifetime
   renderProUi();
   // Bei is_pro-Wechsel ggf. Peer-Cap neu durchsetzen und Private-Rooms-UI
   // ein-/ausblenden.
@@ -398,8 +399,12 @@ function renderProUi() {
   const input    = document.getElementById('licenseKeyInput');
   if (statusEl) {
     if (state.isPro) {
-      const until = state.licenseExpires ? new Date(state.licenseExpires * 1000).toLocaleDateString() : '—';
-      statusEl.textContent = `Pro aktiv (${state.licenseMode}), gültig bis ${until}`;
+      // license_expires = 0 heisst Lifetime (kein Ablauf in LMFWC gesetzt)
+      const realExp = state.licenseExpiresReal || 0;
+      const validity = realExp
+        ? `gültig bis ${new Date(realExp * 1000).toLocaleDateString()}`
+        : 'dauerhaft gültig';
+      statusEl.textContent = `Pro aktiv (${state.licenseMode}) — ${validity}`;
       statusEl.className = 'text-xs text-[color:var(--color-good)]';
     } else if (state.licenseKey) {
       statusEl.textContent = `Kein Pro: ${state.licenseReason}`;
