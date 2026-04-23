@@ -34,27 +34,38 @@ function gsim_events_hosting_product_id() {
 // Aktivierung / Deaktivierung
 // -----------------------------------------------------------------------------
 
+function gsim_events_role_caps() {
+    return [
+        'read'                            => true,
+        'upload_files'                    => true,
+        // tribe_events Capabilities (nur eigene Events managen)
+        'edit_tribe_events'               => true,
+        'edit_published_tribe_events'     => true,
+        'publish_tribe_events'            => true,
+        'delete_tribe_events'             => true,
+        'delete_published_tribe_events'   => true,
+        'read_private_tribe_events'       => true,
+        'edit_tribe_venues'               => true,
+        'publish_tribe_venues'            => true,
+        'edit_published_tribe_venues'     => true,
+        'edit_tribe_organizers'           => true,
+        'publish_tribe_organizers'        => true,
+        'edit_published_tribe_organizers' => true,
+        // eigene Attendee-Listen lesen
+        'edit_' . GSIM_EVENTS_CPT_ATTENDEE . 's'           => true,
+        'read_' . GSIM_EVENTS_CPT_ATTENDEE                 => true,
+    ];
+}
+
 register_activation_hook(__FILE__, function () {
-    // Rolle anlegen mit Rechten für Events + eigene Attendees (nur eigene!)
+    $caps = gsim_events_role_caps();
     if (!get_role(GSIM_EVENTS_ROLE)) {
-        add_role(GSIM_EVENTS_ROLE, 'Event Organizer', [
-            'read'                          => true,
-            'upload_files'                  => true,
-            // tribe_events Capabilities
-            'edit_tribe_events'             => true,
-            'edit_published_tribe_events'   => true,
-            'publish_tribe_events'          => true,
-            'delete_tribe_events'           => true,
-            'edit_tribe_venues'             => true,
-            'publish_tribe_venues'          => true,
-            'edit_tribe_organizers'         => true,
-            'publish_tribe_organizers'      => true,
-            // eigene Attendee-Listen lesen
-            'edit_' . GSIM_EVENTS_CPT_ATTENDEE . 's'         => true,
-            'read_' . GSIM_EVENTS_CPT_ATTENDEE               => true,
-        ]);
+        add_role(GSIM_EVENTS_ROLE, 'Event Organizer', $caps);
+    } else {
+        // Existing role: refresh capabilities (falls Plugin-Update neue caps mitbringt)
+        $role = get_role(GSIM_EVENTS_ROLE);
+        foreach ($caps as $cap => $grant) $role->add_cap($cap, $grant);
     }
-    // CPT-Flush damit Permalinks greifen
     gsim_events_register_attendee_cpt();
     flush_rewrite_rules();
 });
@@ -629,6 +640,248 @@ add_action('rest_api_init', function () {
             'description' => ['type' => 'string'],
         ],
     ]);
+});
+
+// -----------------------------------------------------------------------------
+// Frontend-Shortcode [gsim_organizer_form]
+// Rendert ein Formular mit TinyMCE-Editor, Bild-Upload (featured image),
+// Datums-Pickern und Tickets-Sektion — direkt auf einer WP-Seite nutzbar.
+// Nur fuer eingeloggte Organizer sichtbar; andere sehen Login-Hinweis.
+// -----------------------------------------------------------------------------
+
+// Organizer hat keinen wp-admin-Zugang: Redirect zurueck auf die Frontend-Seite.
+// Ausnahmen: /wp-login.php (zum Einloggen), AJAX, REST, Password-Reset.
+add_action('admin_init', function () {
+    if (!is_user_logged_in())                 return;
+    if (wp_doing_ajax() || wp_doing_cron())   return;
+    $user = wp_get_current_user();
+    if (user_can($user, 'manage_options'))    return;   // Admin darf
+    if (!in_array(GSIM_EVENTS_ROLE, (array) $user->roles)) return;
+    // Nur event_organizer (keine andere Rolle) → auf Frontend umleiten
+    $only_organizer = count(array_diff((array) $user->roles, [GSIM_EVENTS_ROLE, 'customer', 'subscriber'])) === 0;
+    if ($only_organizer) {
+        wp_safe_redirect(home_url('/events-verwalten/'));
+        exit;
+    }
+});
+// Admin-Bar auf dem Frontend ausblenden fuer Organizer
+add_action('after_setup_theme', function () {
+    if (!is_user_logged_in()) return;
+    $user = wp_get_current_user();
+    if (in_array(GSIM_EVENTS_ROLE, (array) $user->roles) && !user_can($user, 'manage_options')) {
+        show_admin_bar(false);
+    }
+});
+
+add_shortcode('gsim_organizer_form', function () {
+    if (!is_user_logged_in()) {
+        return '<div class="gsim-notice" style="padding:20px;background:#fff3cd;border-left:4px solid #ffc107;border-radius:6px;"><p><strong>Login erforderlich.</strong> <a href="' . esc_url(wp_login_url(get_permalink())) . '">Hier einloggen</a> um Events anzulegen. Noch kein Account? <a href="/veranstalter-werden">Event-Hosting-Paket buchen</a>.</p></div>';
+    }
+    $user = wp_get_current_user();
+    if (!in_array(GSIM_EVENTS_ROLE, (array) $user->roles) && !user_can($user, 'manage_options')) {
+        return '<div class="gsim-notice" style="padding:20px;background:#fff3cd;border-left:4px solid #ffc107;border-radius:6px;"><p>Dein Account hat keine Veranstalter-Rolle. Bitte erst <a href="/veranstalter-werden">Event-Hosting-Paket buchen</a>.</p></div>';
+    }
+
+    $editing_id = isset($_GET['edit']) ? (int) $_GET['edit'] : 0;
+    $editing    = null;
+    if ($editing_id) {
+        $e = get_post($editing_id);
+        if ($e && $e->post_type === 'tribe_events' && ($e->post_author == $user->ID || user_can($user, 'manage_options'))) {
+            $editing = $e;
+        }
+    }
+
+    $notice = '';
+
+    // Delete-Handling (?delete=ID&_gsim_nonce=...)
+    if (!empty($_GET['delete']) && wp_verify_nonce($_GET['_gsim_nonce'] ?? '', 'gsim_delete_' . (int) $_GET['delete'])) {
+        $del_id = (int) $_GET['delete'];
+        $e = get_post($del_id);
+        if ($e && $e->post_type === 'tribe_events' && ($e->post_author == $user->ID || user_can($user, 'manage_options'))) {
+            wp_delete_post($del_id, true);
+            $notice = '<div style="padding:12px;background:#f8d7da;border-left:4px solid #dc3545;border-radius:6px;margin-bottom:20px">Event geloescht.</div>';
+        }
+    }
+
+    // Submit-Handling (create or update)
+    if (!empty($_POST['gsim_submit_event']) && wp_verify_nonce($_POST['_gsim_nonce'] ?? '', 'gsim_new_event')) {
+        if (!function_exists('tribe_create_event')) {
+            $notice = '<div style="color:#900">The Events Calendar ist nicht aktiv.</div>';
+        } else {
+            $post_id = (int) ($_POST['gsim_event_id'] ?? 0);
+            $title = sanitize_text_field($_POST['gsim_title'] ?? '');
+            $desc  = wp_kses_post($_POST['gsim_description'] ?? '');
+            $start = sanitize_text_field($_POST['gsim_start'] ?? '');
+            $end   = sanitize_text_field($_POST['gsim_end'] ?? '');
+            if (!$title || !$start || !$end) {
+                $notice = '<div style="color:#900">Titel, Start und Ende sind Pflichtfelder.</div>';
+            } elseif ($post_id) {
+                // Update
+                $e = get_post($post_id);
+                if ($e && $e->post_type === 'tribe_events' && ($e->post_author == $user->ID || user_can($user, 'manage_options'))) {
+                    if (function_exists('tribe_update_event')) {
+                        tribe_update_event($post_id, [
+                            'post_title'     => $title,
+                            'post_content'   => $desc,
+                            'EventStartDate' => date('Y-m-d H:i:s', strtotime($start)),
+                            'EventEndDate'   => date('Y-m-d H:i:s', strtotime($end)),
+                            'EventTimezone'  => wp_timezone_string(),
+                        ]);
+                    } else {
+                        wp_update_post([
+                            'ID' => $post_id, 'post_title' => $title, 'post_content' => $desc,
+                        ]);
+                    }
+                    if (!empty($_FILES['gsim_image']['name'])) {
+                        require_once ABSPATH . 'wp-admin/includes/file.php';
+                        require_once ABSPATH . 'wp-admin/includes/media.php';
+                        require_once ABSPATH . 'wp-admin/includes/image.php';
+                        $attachment_id = media_handle_upload('gsim_image', $post_id);
+                        if (!is_wp_error($attachment_id)) set_post_thumbnail($post_id, $attachment_id);
+                    }
+                    $notice = sprintf('<div style="padding:12px;background:#d4edda;border-left:4px solid #28a745;border-radius:6px;margin-bottom:20px">Event aktualisiert. <a href="%s">Ansehen</a></div>', esc_url(get_permalink($post_id)));
+                    // Nach Update zurueck zur Liste (kein edit-Modus)
+                    $editing = null;
+                }
+            } else {
+                // Create
+                $event_id = tribe_create_event([
+                    'post_title'     => $title,
+                    'post_content'   => $desc,
+                    'post_status'    => 'publish',
+                    'post_author'    => $user->ID,
+                    'EventStartDate' => date('Y-m-d H:i:s', strtotime($start)),
+                    'EventEndDate'   => date('Y-m-d H:i:s', strtotime($end)),
+                    'EventTimezone'  => wp_timezone_string(),
+                ]);
+                if ($event_id && !is_wp_error($event_id)) {
+                    if (!empty($_FILES['gsim_image']['name'])) {
+                        require_once ABSPATH . 'wp-admin/includes/file.php';
+                        require_once ABSPATH . 'wp-admin/includes/media.php';
+                        require_once ABSPATH . 'wp-admin/includes/image.php';
+                        $attachment_id = media_handle_upload('gsim_image', $event_id);
+                        if (!is_wp_error($attachment_id)) set_post_thumbnail($event_id, $attachment_id);
+                    }
+                    $pass = get_post_meta($event_id, GSIM_EVENTS_META_PASSPHRASE, true);
+                    $notice = sprintf(
+                        '<div style="padding:16px;background:#d4edda;border-left:4px solid #28a745;border-radius:6px;margin-bottom:20px"><strong>Event angelegt!</strong><br>Passphrase: <code>%s</code><br>Join-Link: <code>%s</code><br><a href="%s">Event ansehen</a></div>',
+                        esc_html($pass),
+                        esc_html(get_post_meta($event_id, GSIM_EVENTS_META_JOIN_URL, true)),
+                        esc_url(get_permalink($event_id))
+                    );
+                } else {
+                    $notice = '<div style="color:#900">Fehler beim Anlegen des Events.</div>';
+                }
+            }
+        }
+    }
+
+    // Eigene Events (nach etwaigen Mutationen neu laden)
+    $own_events = get_posts([
+        'post_type'   => 'tribe_events',
+        'numberposts' => 50,
+        'author'      => $user->ID,
+        'post_status' => ['publish', 'draft', 'future'],
+        'orderby'     => 'date',
+        'order'       => 'DESC',
+    ]);
+
+    ob_start();
+    ?>
+    <style>
+      .gsim-form { max-width:800px; }
+      .gsim-form label { display:block; margin-top:14px; font-weight:600; }
+      .gsim-form input[type="text"],
+      .gsim-form input[type="datetime-local"] { width:100%; padding:8px; border:1px solid #ccc; border-radius:6px; box-sizing:border-box; }
+      .gsim-form input[type="file"] { margin-top:4px; }
+      .gsim-form button.gsim-btn { margin-top:20px; padding:10px 24px; background:#2f5cff; color:#fff; border:0; border-radius:6px; font-weight:600; cursor:pointer; }
+      .gsim-events-list { margin-top:40px; border-top:1px solid #eee; padding-top:20px; }
+      .gsim-event-row { padding:10px 0; border-bottom:1px solid #f2f2f2; display:flex; justify-content:space-between; align-items:center; gap:10px; }
+      .gsim-event-row .title { font-weight:600; }
+      .gsim-event-row code { font-size:12px; color:#666; }
+    </style>
+    <?php
+      // Pre-fill bei Edit-Modus
+      $f_title = $editing ? $editing->post_title                                    : '';
+      $f_desc  = $editing ? $editing->post_content                                  : '';
+      $f_start = $editing ? get_post_meta($editing->ID, '_EventStartDate', true)    : '';
+      $f_end   = $editing ? get_post_meta($editing->ID, '_EventEndDate',   true)    : '';
+      // DATETIME from MySQL has space, HTML input needs "T"
+      $to_input = function ($s) { return $s ? str_replace(' ', 'T', substr($s,0,16)) : ''; };
+    ?>
+    <div class="gsim-form">
+      <h2><?php echo $editing ? 'Event bearbeiten: ' . esc_html($editing->post_title) : 'Neues Event anlegen'; ?></h2>
+      <?php echo $notice; ?>
+      <form method="post" enctype="multipart/form-data">
+        <?php wp_nonce_field('gsim_new_event', '_gsim_nonce'); ?>
+        <?php if ($editing): ?>
+          <input type="hidden" name="gsim_event_id" value="<?php echo (int) $editing->ID; ?>">
+        <?php endif; ?>
+
+        <label for="gsim_title">Titel *</label>
+        <input type="text" name="gsim_title" id="gsim_title" required maxlength="200" value="<?php echo esc_attr($f_title); ?>">
+
+        <label for="gsim_description">Beschreibung</label>
+        <?php
+          wp_editor($f_desc, 'gsim_description', [
+            'textarea_name' => 'gsim_description',
+            'textarea_rows' => 10,
+            'media_buttons' => true,
+            'teeny'         => false,
+            'tinymce'       => ['toolbar1' => 'bold,italic,underline,bullist,numlist,link,unlink,hr,undo,redo'],
+          ]);
+        ?>
+
+        <label for="gsim_start">Start *</label>
+        <input type="datetime-local" name="gsim_start" id="gsim_start" required value="<?php echo esc_attr($to_input($f_start)); ?>">
+
+        <label for="gsim_end">Ende *</label>
+        <input type="datetime-local" name="gsim_end" id="gsim_end" required value="<?php echo esc_attr($to_input($f_end)); ?>">
+
+        <label for="gsim_image">Event-Bild <?php echo $editing ? '(optional ersetzen)' : '(optional)'; ?></label>
+        <?php if ($editing && has_post_thumbnail($editing->ID)): ?>
+          <div style="margin-bottom:6px;"><?php echo get_the_post_thumbnail($editing->ID, 'medium', ['style'=>'max-height:120px;border-radius:6px']); ?></div>
+        <?php endif; ?>
+        <input type="file" name="gsim_image" id="gsim_image" accept="image/*">
+
+        <button type="submit" name="gsim_submit_event" value="1" class="gsim-btn"><?php echo $editing ? 'Aenderungen speichern' : 'Event veroeffentlichen'; ?></button>
+        <?php if ($editing): ?>
+          <a href="<?php echo esc_url(get_permalink()); ?>" style="margin-left:10px;color:#666">Abbrechen</a>
+        <?php endif; ?>
+      </form>
+
+      <?php if ($own_events): ?>
+      <div class="gsim-events-list">
+        <h3>Deine Events</h3>
+        <?php foreach ($own_events as $ev):
+          $pass = get_post_meta($ev->ID, GSIM_EVENTS_META_PASSPHRASE, true);
+          $join = get_post_meta($ev->ID, GSIM_EVENTS_META_JOIN_URL, true);
+          $atts = (new WP_Query([
+              'post_type' => GSIM_EVENTS_CPT_ATTENDEE, 'meta_key' => '_event_id',
+              'meta_value' => $ev->ID, 'post_status' => 'publish', 'fields' => 'ids', 'nopaging' => true,
+          ]))->found_posts;
+        ?>
+          <div class="gsim-event-row">
+            <div>
+              <div class="title"><?php echo esc_html($ev->post_title); ?> <span style="color:#999;font-weight:400;font-size:12px">— <?php echo esc_html($ev->post_status); ?></span></div>
+              <div><code><?php echo esc_html($join ?: '—'); ?></code></div>
+              <div style="font-size:12px;color:#666;margin-top:2px"><?php echo (int) $atts; ?> Teilnehmer</div>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <a href="<?php echo esc_url(add_query_arg('edit', $ev->ID, get_permalink())); ?>" style="padding:6px 12px;border:1px solid #ccc;border-radius:6px;text-decoration:none;color:#333">Editieren</a>
+              <a href="<?php echo esc_url(get_permalink($ev->ID)); ?>" style="padding:6px 12px;background:#2f5cff;color:#fff;border-radius:6px;text-decoration:none">Ansehen</a>
+              <?php $del_nonce = wp_create_nonce('gsim_delete_' . $ev->ID); ?>
+              <a href="<?php echo esc_url(add_query_arg(['delete' => $ev->ID, '_gsim_nonce' => $del_nonce], get_permalink())); ?>"
+                 onclick="return confirm('Event wirklich loeschen? Teilnehmer-Daten bleiben erhalten.');"
+                 style="padding:6px 12px;border:1px solid #dc3545;color:#dc3545;border-radius:6px;text-decoration:none">Loeschen</a>
+            </div>
+          </div>
+        <?php endforeach; ?>
+      </div>
+      <?php endif; ?>
+    </div>
+    <?php
+    return ob_get_clean();
 });
 
 // -----------------------------------------------------------------------------
