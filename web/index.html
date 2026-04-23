@@ -8,7 +8,6 @@
        keine logo.png vorhanden ist und der Browser /favicon.ico als Fallback
        anfragt. Nimmt keinen Platz weg, lädt nichts. -->
   <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22/>">
-  <link rel="icon" type="image/png" href="/logo.png">
 
   <!-- Tailwind v4 via jsDelivr (CSP-konform) -->
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
@@ -218,11 +217,7 @@
     <header class="flex items-center gap-4 mb-8">
       <div class="w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden ring-1 ring-white/10 shadow-lg shadow-blue-500/20"
            style="background: linear-gradient(135deg, #6aa5ff, #2f5cff);">
-        <!-- Inline-SVG-Fallback: Radar mit Mikro. Wenn spaeter eine logo.png
-             in /web liegt, erscheint sie als <img> davor; das <svg> wird dann
-             ueberdeckt. -->
-        <img id="appLogo" src="/logo.png" alt=""
-             class="w-full h-full object-contain absolute">
+        <!-- Inline-SVG-Logo: Radar mit Mikro. -->
         <svg viewBox="0 0 24 24" class="w-7 h-7 text-white relative" fill="none">
           <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="0.8" opacity="0.45" fill="none"/>
           <circle cx="12" cy="12" r="6.5" stroke="currentColor" stroke-width="0.8" opacity="0.6" fill="none"/>

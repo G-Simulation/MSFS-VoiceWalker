@@ -899,12 +899,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // Audio-Reichweite Slider
   setupRangeSliders();
 
-  // Logo-Fallback: wenn /logo.png nicht existiert, das <img> entfernen
-  // damit das darunterliegende inline-SVG sichtbar wird. Via JS statt
-  // inline onerror= (CSP-konform ohne unsafe-inline).
-  const logoImg = document.getElementById('appLogo');
-  logoImg?.addEventListener('error', () => logoImg.remove(), { once: true });
-
   // --- Radar-Zoom (Mausrad / Doppelklick) --------------------------------
   const radar = document.getElementById('radar');
   if (radar) {
