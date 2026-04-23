@@ -1256,269 +1256,50 @@ add_filter('rest_tribe_events_query', function ($args, $request) {
 // gleichen meta_query-Trick in der listEvents-Callback. (Redundanz, aber sicher.)
 
 // -----------------------------------------------------------------------------
-// Styling: The Events Calendar + Einzelevent + Archive im Aviation-Look
-// Nur auf TEC-Seiten injizieren, um den Rest der Site nicht zu beeinflussen.
+// Minimal-Styling: NUR den Join-CTA unter Single-Events. Keine Theme-Override
+// (TEC-v6 hat zu viele interne Layout-Abhaengigkeiten die !important-Regeln
+// durcheinanderbringen — stattdessen lassen wir TEC nativ rendern).
 // -----------------------------------------------------------------------------
 
 add_action('wp_head', function () {
-    $is_tec = (function_exists('tribe_is_event_query') && tribe_is_event_query())
-              || is_singular('tribe_events')
-              || is_post_type_archive('tribe_events')
-              || is_tax('tribe_events_cat');
-    if (!$is_tec) return;
+    if (!is_singular('tribe_events')) return;
     ?>
     <style id="gsim-tec-style">
-      /* ==== Aviation Dark Theme fuer The Events Calendar ==== */
-      :root {
-        --gsim-bg:      #0b1220;
-        --gsim-bg-2:    #15213a;
-        --gsim-border:  rgba(106, 165, 255, 0.15);
-        --gsim-fg:      #eaf0ff;
-        --gsim-muted:   #8696b8;
-        --gsim-accent:  #6aa5ff;
-        --gsim-good:    #3fdc8a;
-      }
-
-      .tribe-events-calendar-list,
-      .tribe-events-calendar-month,
-      .tribe-events-calendar-day,
-      .tribe-events-pg-template,
-      .tribe-events-single,
-      .tribe-events-view--list,
-      .tribe-events-view--month,
-      .tribe-events-view--day,
-      .tribe-events-view {
-        background: var(--gsim-bg) !important;
-        color: var(--gsim-fg);
-        border-radius: 12px;
-        padding: 24px !important;
-        border: 1px solid var(--gsim-border);
-      }
-
-      /* ALLE Texte im TEC-Block auf hell zwingen — TEC bringt eigene
-         dunkle Farben mit, die auf unserem Dark-Theme nicht lesbar sind. */
-      .tribe-events-view,
-      .tribe-events-view *,
-      .tribe-common,
-      .tribe-common *,
-      .tribe-events-calendar-list *,
-      .tribe-events-calendar-month *,
-      .tribe-events-calendar-day *,
-      .tribe-events-single *,
-      .tribe-events-header *,
-      .tribe-events-c-top-bar *,
-      .tribe-events-c-nav *,
-      .tribe-events-c-subscribe-dropdown * {
-        color: var(--gsim-fg) !important;
-      }
-      /* Muted / Datums-Label etwas abgedunkelt */
-      .tribe-common-h8,
-      .tribe-events-calendar-list__month-separator-text,
-      .tribe-events-calendar-list__event-datetime,
-      .tribe-events-calendar-list__event-date-tag-daynum,
-      .tribe-events-calendar-list__event-date-tag-weekday,
-      .tribe-events-schedule,
-      .tribe-common-b2,
-      .tribe-events-c-nav__list-item--prev a,
-      .tribe-events-c-nav__list-item--next a {
-        color: var(--gsim-muted) !important;
-      }
-      /* Akzent fuer Links + aktive Tabs */
-      .tribe-events-view a,
-      .tribe-common a,
-      .tribe-events-c-view-selector__list-item--active .tribe-events-c-view-selector__list-item-link {
-        color: var(--gsim-accent) !important;
-      }
-      /* Search-Eingabe lesbar machen */
-      .tribe-events-c-search__input,
-      .tribe-events-view input[type="text"],
-      .tribe-events-view input[type="search"] {
-        background: var(--gsim-bg-2) !important;
-        color: var(--gsim-fg) !important;
-        border-color: var(--gsim-border) !important;
-      }
-      /* Heute-Button */
-      .tribe-events-c-top-bar__today-button,
-      .tribe-events-c-top-bar__today {
-        background: var(--gsim-bg-2) !important;
-        color: var(--gsim-fg) !important;
-        border-color: var(--gsim-accent) !important;
-      }
-      .tribe-events-c-top-bar,
-      .tribe-events-header,
-      .tribe-events-c-nav {
-        color: var(--gsim-fg);
-      }
-      .tribe-events-calendar-list h1,
-      .tribe-events-calendar-list h2,
-      .tribe-events-calendar-list h3,
-      .tribe-events-single h1,
-      .tribe-events-single .tribe-events-single-event-title {
-        color: var(--gsim-fg) !important;
-      }
-      .tribe-common .tribe-common-anchor,
-      .tribe-common a {
-        color: var(--gsim-accent) !important;
-      }
-
-      /* Event-Karten in der Liste */
-      .tribe-events-calendar-list__event,
-      .tribe-events-calendar-list__event-row {
-        background: var(--gsim-bg-2);
-        border: 1px solid var(--gsim-border);
-        border-radius: 10px;
-        padding: 20px !important;
-        margin-bottom: 16px !important;
-        transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
-      }
-      .tribe-events-calendar-list__event:hover,
-      .tribe-events-calendar-list__event-row:hover {
-        transform: translateY(-2px);
-        border-color: var(--gsim-accent);
-        box-shadow: 0 8px 24px rgba(47,92,255,0.25);
-      }
-
-      .tribe-events-calendar-list__event-title,
-      .tribe-events-calendar-list__event-row a {
-        color: var(--gsim-fg) !important;
-        font-weight: 700;
-        text-decoration: none;
-      }
-      .tribe-events-calendar-list__event-title:hover {
-        color: var(--gsim-accent) !important;
-      }
-
-      /* Event-Bild */
-      .tribe-events-calendar-list__event-featured-image-wrapper img,
-      .tribe-events-event-image img {
-        border-radius: 8px;
-      }
-
-      /* Datum-Chip */
-      .tribe-events-calendar-list__event-date-tag,
-      .tribe-events-calendar-list__event-datetime {
-        background: var(--gsim-bg);
-        border: 1px solid var(--gsim-accent);
-        border-radius: 8px;
-        padding: 6px 10px;
-        color: var(--gsim-accent) !important;
-        font-weight: 600;
-      }
-
-      /* Kategorien-Labels */
-      .tribe-events-calendar-list__event-category,
-      .tribe-event-categories a {
-        background: var(--gsim-accent);
-        color: var(--gsim-bg) !important;
-        padding: 2px 8px;
-        border-radius: 999px;
-        font-size: 11px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-      }
-
-      /* Nur den Haupt-Search-Button umfaerben, nicht alle TEC-Buttons
-         (sonst bricht die Pagination/Subscribe-Button-Positionierung) */
-      .tribe-events-c-search__button,
-      .tribe-events-button {
-        background: var(--gsim-accent) !important;
-        color: var(--gsim-bg) !important;
-        border-color: var(--gsim-accent) !important;
-      }
-      .tribe-events-c-search__button:hover,
-      .tribe-events-button:hover {
-        background: #8ab8ff !important;
-      }
-      /* "Kalender abonnieren"-Dropdown komplett ausblenden —
-         nutzen ohnehin fast keine User, und TEC-v6 positioniert ihn absolut
-         ueber der Vorherige/Naechste-Pagination */
-      .tribe-events-c-subscribe-dropdown,
-      .tribe-events-c-subscribe-dropdown__container,
-      .tribe-events-c-subscribe-dropdown__wrapper {
-        display: none !important;
-      }
-      /* View-Tabs (Liste/Monat/Tag) */
-      .tribe-events-c-view-selector__list-item--active .tribe-events-c-view-selector__list-item-text {
-        color: var(--gsim-accent) !important;
-      }
-
-      /* Month-View Zellen */
-      .tribe-events-calendar-month__day {
-        background: var(--gsim-bg-2);
-        border: 1px solid var(--gsim-border);
-      }
-      .tribe-events-calendar-month__day--current {
-        background: rgba(106,165,255,0.1);
-      }
-      .tribe-events-calendar-month__calendar-event-tooltip,
-      .tribe-events-calendar-month__calendar-event {
-        color: var(--gsim-fg);
-        background: var(--gsim-bg-2);
-        border-left: 3px solid var(--gsim-accent);
-      }
-
-      /* Single Event: Hero */
-      .tribe-events-single .tribe-events-event-image {
-        margin: 0 -24px 24px;
-        overflow: hidden;
-      }
-      .tribe-events-single .tribe-events-event-image img {
-        width: 100%;
-        border-radius: 0;
-      }
-
-      /* Single Event: Meta-Panel (Datum, Ort) */
-      .tribe-events-single-section.tribe-events-event-meta {
-        background: var(--gsim-bg-2);
-        border: 1px solid var(--gsim-border);
-        border-radius: 10px;
-        padding: 16px !important;
-      }
-      .tribe-events-event-meta .tribe-events-meta-group,
-      .tribe-events-event-meta dt,
-      .tribe-events-event-meta dd {
-        color: var(--gsim-fg) !important;
-      }
-      .tribe-events-schedule {
-        background: transparent !important;
-      }
-
-      /* ==== Custom Join-CTA im Single Event ==== */
+      /* Nur der Join-CTA unter Single Events. Keine TEC-Overrides mehr. */
       .gsim-event-cta {
-        margin-top: 24px;
+        margin: 30px 0;
         padding: 24px;
         background: linear-gradient(135deg, #15213a 0%, #1a2a4a 100%);
-        border: 1px solid var(--gsim-accent);
+        border: 1px solid #6aa5ff;
         border-radius: 12px;
         text-align: center;
+        color: #eaf0ff;
       }
+      .gsim-event-cta * { color: #eaf0ff; }
       .gsim-event-cta .btn-join {
         display: inline-block;
         padding: 14px 28px;
-        background: var(--gsim-accent);
-        color: #0b1220;
+        background: #6aa5ff;
+        color: #0b1220 !important;
         font-weight: 700;
         border-radius: 10px;
         text-decoration: none;
         font-size: 15px;
         box-shadow: 0 4px 16px rgba(47,92,255,0.3);
       }
-      .gsim-event-cta .btn-join:hover {
-        background: #8ab8ff;
-      }
+      .gsim-event-cta .btn-join:hover { background: #8ab8ff; }
       .gsim-event-cta .btn-secondary {
-        color: var(--gsim-muted);
+        color: #8696b8 !important;
         margin-left: 12px;
         font-size: 13px;
         text-decoration: none;
       }
       .gsim-event-cta .passphrase {
         font-family: ui-monospace, SFMono-Regular, monospace;
-        background: var(--gsim-bg);
+        background: #0b1220;
         padding: 4px 10px;
         border-radius: 6px;
-        color: var(--gsim-accent);
+        color: #6aa5ff !important;
         font-size: 14px;
       }
     </style>
