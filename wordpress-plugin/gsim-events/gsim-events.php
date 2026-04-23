@@ -1288,9 +1288,47 @@ add_action('wp_head', function () {
       .tribe-events-view * {
         color: #eaf0ff !important;
       }
+      /* Links generell Akzent-Blau, ABER Event-Titel weiss (nicht als Link faerben) */
       .tribe-events-view a,
       .tribe-events-view .tribe-common-anchor-alt {
         color: #6aa5ff !important;
+        opacity: 1 !important;
+      }
+      .tribe-events-calendar-list__event-title,
+      .tribe-events-calendar-list__event-title a,
+      .tribe-events-calendar-list__event-title-link,
+      .tribe-events-single .tribe-events-single-event-title {
+        color: #eaf0ff !important;
+        opacity: 1 !important;
+      }
+      /* Gespenster-Texte die durch TEC-Muting kaum sichtbar sind — voll anzeigen */
+      .tribe-events-c-top-bar__datepicker-button,
+      .tribe-events-c-top-bar__datepicker-button *,
+      .tribe-events-header__title,
+      .tribe-events-calendar-list__month-separator-text,
+      .tribe-events-c-view-selector__list-item-text,
+      .tribe-events-c-view-selector__list-item,
+      .tribe-events-c-view-selector__list-item-link,
+      .tribe-events-c-nav__list-item,
+      .tribe-events-c-nav__list-item *,
+      .tribe-events-c-nav__prev,
+      .tribe-events-c-nav__next,
+      .tribe-events-c-nav__prev *,
+      .tribe-events-c-nav__next * {
+        color: #eaf0ff !important;
+        opacity: 1 !important;
+      }
+      /* Aktive View-Tab Akzent-Unterstrich */
+      .tribe-events-c-view-selector__list-item--active .tribe-events-c-view-selector__list-item-text {
+        color: #6aa5ff !important;
+      }
+      /* Datum-Kachel MI 20 — dezenter Akzent */
+      .tribe-events-calendar-list__event-date-tag,
+      .tribe-events-calendar-list__event-date-tag-datetime,
+      .tribe-events-calendar-list__event-date-tag-weekday,
+      .tribe-events-calendar-list__event-date-tag-daynum {
+        color: #6aa5ff !important;
+        opacity: 1 !important;
       }
       .tribe-events-view .tribe-events-c-search__input,
       .tribe-events-view input[type="search"],
