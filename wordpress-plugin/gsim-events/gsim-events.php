@@ -1377,29 +1377,26 @@ add_action('wp_head', function () {
         letter-spacing: 0.5px;
       }
 
-      /* Buttons (z.B. "Calendar", "List", "Day") */
-      .tribe-common-c-btn,
-      .tribe-events-c-top-bar__datepicker-button,
-      .tribe-events-c-nav__next,
-      .tribe-events-c-nav__prev,
-      .tribe-common-b2 a,
+      /* Nur den Haupt-Search-Button umfaerben, nicht alle TEC-Buttons
+         (sonst bricht die Pagination/Subscribe-Button-Positionierung) */
+      .tribe-events-c-search__button,
       .tribe-events-button {
         background: var(--gsim-accent) !important;
         color: var(--gsim-bg) !important;
-        border: none !important;
-        border-radius: 8px !important;
-        font-weight: 600 !important;
-        padding: 8px 16px !important;
-        transition: background 0.15s ease;
+        border-color: var(--gsim-accent) !important;
       }
-      .tribe-common-c-btn:hover,
+      .tribe-events-c-search__button:hover,
       .tribe-events-button:hover {
         background: #8ab8ff !important;
       }
-      .tribe-common-c-btn--secondary {
-        background: transparent !important;
+      /* Subscribe-Dropdown dezent, damit er sich nicht mit Pagination ueberlappt */
+      .tribe-events-c-subscribe-dropdown {
+        position: relative;
+        z-index: 2;
+      }
+      /* View-Tabs (Liste/Monat/Tag) */
+      .tribe-events-c-view-selector__list-item--active .tribe-events-c-view-selector__list-item-text {
         color: var(--gsim-accent) !important;
-        border: 1px solid var(--gsim-accent) !important;
       }
 
       /* Month-View Zellen */
