@@ -23,6 +23,7 @@ define('GSIM_EVENTS_META_TICKET_EVENT', '_gsim_ticket_event_id');
 // Event-Meta-Keys: auto-generiert beim Save
 define('GSIM_EVENTS_META_PASSPHRASE',   '_gsim_event_passphrase');
 define('GSIM_EVENTS_META_JOIN_URL',     '_gsim_event_join_url');
+define('GSIM_EVENTS_META_VISIBILITY',   '_gsim_event_visibility');  // 'public' | 'private'
 
 // WC-Produkt-ID des "Fly-In Event Hosting"-Produkts. Beim Kauf dieses Produkts
 // wird der Käufer zum event_organizer. Kann via Filter überschrieben werden.
@@ -438,10 +439,26 @@ function gsim_events_require_organizer($req) {
 add_action('rest_api_init', function () {
     $ns = 'gsim-events/v1';
 
-    // GET /events — Liste öffentlicher Events
+    // GET /events — Liste oeffentlicher Events (private rausgefiltert)
     register_rest_route($ns, '/events', [
         'methods'  => 'GET',
         'callback' => function ($req) {
+            $meta_query = [
+                'relation' => 'AND',
+                [
+                    'relation' => 'OR',
+                    [ 'key' => GSIM_EVENTS_META_VISIBILITY, 'value' => 'private', 'compare' => '!=' ],
+                    [ 'key' => GSIM_EVENTS_META_VISIBILITY, 'compare' => 'NOT EXISTS' ],
+                ],
+            ];
+            if (!empty($req['upcoming'])) {
+                $meta_query[] = [
+                    'key'     => '_EventStartDate',
+                    'value'   => current_time('mysql'),
+                    'compare' => '>=',
+                    'type'    => 'DATETIME',
+                ];
+            }
             $args = [
                 'post_type'   => 'tribe_events',
                 'post_status' => 'publish',
@@ -450,16 +467,8 @@ add_action('rest_api_init', function () {
                 'orderby'     => 'meta_value',
                 'meta_key'    => '_EventStartDate',
                 'order'       => 'ASC',
+                'meta_query'  => $meta_query,
             ];
-            // Nur zukünftige Events wenn ?upcoming=1
-            if (!empty($req['upcoming'])) {
-                $args['meta_query'] = [[
-                    'key'     => '_EventStartDate',
-                    'value'   => current_time('mysql'),
-                    'compare' => '>=',
-                    'type'    => 'DATETIME',
-                ]];
-            }
             $events = get_posts($args);
             return array_map('gsim_events_shape_event', $events);
         },
@@ -751,6 +760,8 @@ add_shortcode('gsim_organizer_form', function () {
                 // Update
                 $e = get_post($post_id);
                 if ($e && $e->post_type === 'tribe_events' && ($e->post_author == $user->ID || user_can($user, 'manage_options'))) {
+                    $vis_in = ($_POST['gsim_visibility'] ?? 'public') === 'private' ? 'private' : 'public';
+                    update_post_meta($post_id, GSIM_EVENTS_META_VISIBILITY, $vis_in);
                     if (function_exists('tribe_update_event')) {
                         tribe_update_event($post_id, [
                             'post_title'     => $title,
@@ -787,6 +798,8 @@ add_shortcode('gsim_organizer_form', function () {
                     'EventTimezone'  => wp_timezone_string(),
                 ]);
                 if ($event_id && !is_wp_error($event_id)) {
+                    $vis_in = ($_POST['gsim_visibility'] ?? 'public') === 'private' ? 'private' : 'public';
+                    update_post_meta($event_id, GSIM_EVENTS_META_VISIBILITY, $vis_in);
                     if (!empty($_FILES['gsim_image']['name'])) {
                         require_once ABSPATH . 'wp-admin/includes/file.php';
                         require_once ABSPATH . 'wp-admin/includes/media.php';
@@ -870,7 +883,24 @@ add_shortcode('gsim_organizer_form', function () {
         <label for="gsim_end">Ende *</label>
         <input type="datetime-local" name="gsim_end" id="gsim_end" required value="<?php echo esc_attr($to_input($f_end)); ?>">
 
-        <label for="gsim_image">Event-Bild <?php echo $editing ? '(optional ersetzen)' : '(optional)'; ?></label>
+        <label>Sichtbarkeit</label>
+        <?php
+          $vis = $editing ? (get_post_meta($editing->ID, GSIM_EVENTS_META_VISIBILITY, true) ?: 'public') : 'public';
+        ?>
+        <div style="display:flex;gap:16px;margin-top:6px">
+          <label style="display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer">
+            <input type="radio" name="gsim_visibility" value="public" <?php checked($vis, 'public'); ?>>
+            <strong>Oeffentlich</strong> — erscheint im Kalender auf gsimulations.de/events
+          </label>
+        </div>
+        <div style="display:flex;gap:16px;margin-top:4px">
+          <label style="display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer">
+            <input type="radio" name="gsim_visibility" value="private" <?php checked($vis, 'private'); ?>>
+            <strong>Privat</strong> — nur per Direkt-Link erreichbar, nicht im Kalender
+          </label>
+        </div>
+
+        <label for="gsim_image" style="margin-top:20px">Event-Bild <?php echo $editing ? '(optional ersetzen)' : '(optional)'; ?></label>
         <?php if ($editing && has_post_thumbnail($editing->ID)): ?>
           <div style="margin-bottom:6px;"><?php echo get_the_post_thumbnail($editing->ID, 'medium', ['style'=>'max-height:120px;border-radius:6px']); ?></div>
         <?php endif; ?>
@@ -1186,6 +1216,44 @@ function gsim_render_organizers_page() {
     </div>
     <?php
 }
+
+// -----------------------------------------------------------------------------
+// Private Events: aus TEC-Listen/Kalender filtern (sichtbar nur ueber Direkt-Link)
+// -----------------------------------------------------------------------------
+
+add_action('pre_get_posts', function ($q) {
+    if (is_admin())                                      return;
+    if (!$q->is_main_query())                            return;
+    // Betrifft TEC-Listen/Kalender/Tag-Seiten, NICHT Single-Event
+    $is_tec_list = (function_exists('tribe_is_event_query') && tribe_is_event_query() && !is_singular('tribe_events'))
+                   || is_post_type_archive('tribe_events')
+                   || is_tax('tribe_events_cat');
+    if (!$is_tec_list) return;
+    $mq = (array) $q->get('meta_query');
+    $mq[] = [
+        'relation' => 'OR',
+        [ 'key' => GSIM_EVENTS_META_VISIBILITY, 'value' => 'private', 'compare' => '!=' ],
+        [ 'key' => GSIM_EVENTS_META_VISIBILITY, 'compare' => 'NOT EXISTS' ],
+    ];
+    $q->set('meta_query', $mq);
+});
+
+// Auch die public REST-Liste respektiert die Sichtbarkeit
+add_filter('rest_tribe_events_query', function ($args, $request) {
+    if (!is_user_logged_in() || !current_user_can('manage_options')) {
+        $args['meta_query'] = $args['meta_query'] ?? [];
+        $args['meta_query'][] = [
+            'relation' => 'OR',
+            [ 'key' => GSIM_EVENTS_META_VISIBILITY, 'value' => 'private', 'compare' => '!=' ],
+            [ 'key' => GSIM_EVENTS_META_VISIBILITY, 'compare' => 'NOT EXISTS' ],
+        ];
+    }
+    return $args;
+}, 10, 2);
+
+// Auch die gsim-events/v1-Liste filtern: siehe shape_event. Wir filtern hier via
+// modify-query innerhalb der list-Callback ist einfacher — dazu nutzen wir den
+// gleichen meta_query-Trick in der listEvents-Callback. (Redundanz, aber sicher.)
 
 // -----------------------------------------------------------------------------
 // Styling: The Events Calendar + Einzelevent + Archive im Aviation-Look
