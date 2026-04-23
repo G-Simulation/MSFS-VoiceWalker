@@ -2067,14 +2067,13 @@ function spawnTestPeer() {
     p.speaking = detectSpeaking(p);
   }, 200);
 
-  // Alle 5 s: HRTF-positionierter Ton-Burst (keine TTS — die geht am
-  // Panner vorbei und klingt dadurch "komisch"/nicht raeumlich).
+  // Alle 5 s: Ton-Burst zur Richtungs-Ortung (HRTF-spatialisiert) + TTS
+  // "Hallo <Callsign>" als Sanity-Check dass der Test-Peer laeuft. Die TTS
+  // geht am Panner vorbei (Browser-API liefert keinen spatialisierten Stream),
+  // ist aber klar verstaendlich — der Ton-Burst uebernimmt die Richtung.
   const sayHello = () => {
     if (!p._synth) return;
     const t = ctx.currentTime;
-    // Kleine Tonfolge (dit-dah) damit man hoert dass "etwas passiert" und
-    // die Richtung trotzdem klar ist. Kurzer Ping auf 330 Hz, dann Pause,
-    // dann zweiter Ping auf 440 Hz.
     osc.frequency.setTargetAtTime(330, t,        0.02);
     osc.frequency.setTargetAtTime(440, t + 0.45, 0.02);
     env.gain.cancelScheduledValues(t);
@@ -2083,6 +2082,15 @@ function spawnTestPeer() {
     env.gain.linearRampToValueAtTime(0.0,  t + 0.35);
     env.gain.linearRampToValueAtTime(0.22, t + 0.50);
     env.gain.linearRampToValueAtTime(0.0,  t + 0.85);
+    try {
+      if ('speechSynthesis' in window) {
+        const u = new SpeechSynthesisUtterance(`Hallo ${state.callsign || 'PILOT'}`);
+        u.lang = 'de-DE';
+        u.rate = 1.0;
+        u.volume = 0.8;
+        window.speechSynthesis.speak(u);
+      }
+    } catch (e) { console.warn('[test] TTS failed:', e); }
   };
   sayHello();
   _testPeerSayTimer = setInterval(sayHello, 5000);

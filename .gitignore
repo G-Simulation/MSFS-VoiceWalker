@@ -14,9 +14,13 @@ dist/
 *.spec
 *.manifest
 
-# --- Runtime data ---
+# --- Runtime data (per-user, never checked in) ---
 ptt_config.json
+config.json
+license_cache.json
+port.txt
 *.log
+backups/
 
 # --- IDEs ---
 .vscode/

@@ -25,14 +25,15 @@ und im Walker-/Zu-Fuß-Modus von MSFS 2024.
 ## Inhalt dieses Dokuments
 
 1. [Für Endnutzer — Installation](#für-endnutzer)
-2. [Funktionen im Überblick](#funktionen)
-3. [Wie es unter der Haube funktioniert](#wie-es-unter-der-haube-funktioniert)
-4. [Projektstruktur](#projektstruktur)
-5. [Entwicklung](#entwicklung)
-6. [Bauen und Releasen](#bauen-und-releasen)
-7. [Debug-Modus](#debug-modus)
-8. [Deinstallieren](#deinstallieren)
-9. [Offene TODOs](#offene-todos)
+2. [Funktionen (Free + Pro)](#funktionen)
+3. [Wie das Mesh funktioniert](#wie-das-mesh-funktioniert-einfach-erklärt)
+4. [Wie es unter der Haube funktioniert](#wie-es-unter-der-haube-funktioniert)
+5. [Projektstruktur](#projektstruktur)
+6. [Entwicklung](#entwicklung)
+7. [Bauen und Releasen](#bauen-und-releasen)
+8. [Debug-Modus](#debug-modus)
+9. [Deinstallieren](#deinstallieren)
+10. [Status](#status)
 
 ---
 
@@ -57,22 +58,49 @@ Kein Account, kein Login, keine Registrierung.
 
 ## Funktionen
 
+### Free (Apache 2.0)
+
 - **Automatisches Mesh pro Region**: Andere Spieler in deiner Nähe werden
   automatisch gefunden — keine IP-Eingabe, kein Login. Piloten in Frankfurt
   und Tokio sind in komplett getrennten Meshes.
-- **Distanz-basiertes Audio**: volle Lautstärke in den ersten 50 m, linearer
-  Abfall bis Stille bei 1 km. Nach ersten Tests über eine Konstante anpassbar.
+- **3D-HRTF-Positional-Audio**: echte Richtungswahrnehmung mit Kopfhörern —
+  Stimme von links kommt aus dem linken Ohr, Kopfschatten und Ohrmuschel-Filter
+  werden vom Browser korrekt gerendert.
+- **Zwei Audio-Welten**: Walker ↔ Walker (~75 m, Stimme im Nahbereich),
+  Cockpit ↔ Cockpit (~5 km, Funk-Feeling). Optionaler Crossover-Radius für
+  Mixed-Mode-Szenarien. Alle Reichweiten per Slider einstellbar.
 - **Alle Kameramodi**: Cockpit, Außenansicht, Drone-Kamera und MSFS 2024
   Walker/Zu-Fuß-Modus. Beim Walker folgt die "Stimme" dem Avatar statt dem Flugzeug.
 - **Optionaler USB-PTT**: Joystick, HOTAS, Yoke, Rudder-Pedale, Button-Boxes
   werden automatisch erkannt. Bindung per Klick auf "Taste zuweisen" →
   beliebigen Knopf drücken. Funktioniert dann auch, wenn MSFS im Vordergrund ist.
-- **"Wer hört dich gerade"-Liste**: zwei Bereiche — "in Hörweite" und
-  "im Mesh, aber zu weit weg".
+- **Piloten-Mesh-Liste**: "in Hörweite" / "anderer Modus" / "außer Reichweite",
+  mit Distanz-Anzeige und Live-Sprech-Indikator.
 - **Sprech-Indikator am Bildschirmrand**: eine Leiste oben zeigt live, wer
   gerade redet, per Voice-Activity-Detection (VAD).
-- **MSFS-Toolbar-Addon**: optional, blendet eine kompakte Übersicht im Sim selbst ein.
+- **MSFS-Toolbar-Addon**: blendet eine kompakte Übersicht im Sim selbst ein
+  (Radar + Peer-Liste im MSFS-Panel).
 - **Auto-Launch mit dem Sim**: einmal installiert, startet die App automatisch mit MSFS.
+- **Tracking-Toggle**: Sichtbarkeit im Mesh mit einem Klick aus-/anschalten —
+  bleibt persistent über Neustart hinweg.
+- **Peer-Limit**: bis zu 20 Peers gleichzeitig sichtbar.
+
+### Pro (7,99 € einmalig)
+
+- **Unlimited Peers** (Hard-Cap 200 aus Safety-Gründen).
+- **Private Rooms**: Passphrase eingeben → eigenes Mesh, unabhängig von
+  Position. Ideal für Fly-Ins und geschlossene Gruppen. Alle mit derselben
+  Passphrase landen weltweit im gleichen Raum (Trystero-Key =
+  `sha256(passphrase + app_salt)`, keine zentrale Registrierung).
+- **Supporter-Badge** (★ PRO) neben dem Callsign.
+- **Priorität-Support** (E-Mail innerhalb 24 h).
+- **Zukünftige Features** eingeschlossen (lifetime).
+
+Pro-Key erhältst du nach Kauf auf
+[gsimulations.de/msfsvoicewalker](https://www.gsimulations.de/msfsvoicewalker)
+per E-Mail. Im UI unter **"Pro freischalten"** eintragen → sofort aktiv.
+Validation läuft über die eigene LMFWC-Instanz auf gsimulations.de; 7 Tage
+Offline-Grace-Period falls der Server mal nicht erreichbar ist.
 
 ---
 
@@ -205,8 +233,12 @@ Das Projekt besteht aus **drei Prozessen** auf dem Rechner des Spielers:
 
 ### MSFS-Toolbar-Integration
 
-- Das Community-Folder-Paket (`msfs-addon/msfsvoicewalker/`) registriert ein
-  HTML-Panel in der Sim-Toolbar.
+- Das MSFS-SDK-Projekt (`msfs-project/`) wird mit dem offiziellen
+  Package-Compiler zu einem Community-Folder-Paket kompiliert und enthält:
+  - **WASM-Bridge** (`PackageSources/wasm/MSFSVoiceWalkerBridge.cpp`) die
+    Avatar-Position via SimConnect ClientData an die Python-App publisht.
+  - **HTML-Panel** das in der Sim-Toolbar erscheint und per `<iframe>` die
+    Overlay-Seite der lokal laufenden App lädt.
 - Das Panel lädt per `<iframe>` die Seite `http://127.0.0.1:7801/overlay.html`
   der lokal laufenden App — also eine kompakte Version der Peer-Liste und
   Sprech-Indikatoren direkt im Sim.
@@ -231,38 +263,37 @@ C:\MSFSVoiceWalker\
 ├── main.py                        ← App-Einstiegspunkt, SimConnect + HTTP/WS
 ├── debug.py                       ← Logging, Self-Test, Ring-Buffer
 ├── ptt_backend.py                 ← USB-PTT-Polling via pygame
+├── license_client.py              ← Pro-Key-Validation (LMFWC + 7d Offline-Grace)
+├── updater.py                     ← Auto-Update-Checker + Installer-Launch
 ├── installer.py                   ← Python-Integrator (Community-Folder + exe.xml)
 │
 ├── requirements.txt               ← Python-Dependencies
-├── install.bat / start.bat        ← Dev-Modus-Launcher
-├── build.bat                      ← baut dist\MSFSVoiceWalker.exe + Setup.exe via PyInstaller
+├── build.bat / build-all.bat      ← baut dist\MSFSVoiceWalker.exe + Setup.exe via PyInstaller
+├── tools/build-wasm.bat           ← baut MSFSVoiceWalkerBridge.wasm (MSFS-SDK)
 │
 ├── web/                           ← Browser-UI (HTML/JS/CSS)
-│   ├── index.html                 ← Haupt-UI
-│   ├── app.js                     ← Trystero-Mesh + WebRTC + Web Audio + VAD
+│   ├── index.html                 ← Haupt-UI (Radar, Peer-Liste, Pro-Settings)
+│   ├── app.js                     ← Trystero-Mesh + WebRTC + Web Audio + VAD + Pro-Gates
 │   ├── debug.js                   ← Debug-Overlay (Strg+Shift+D)
-│   └── overlay.html               ← kompaktes Overlay für MSFS-Toolbar
+│   ├── overlay.html / overlay.js  ← kompaktes Overlay für MSFS-Toolbar
 │
 ├── brand/                         ← Logo-Assets
 │   └── voicewalker-logo.svg
 │
-├── msfs-addon/
-│   ├── README.md                  ← wie das MSFS-Addon funktioniert
-│   └── msfsvoicewalker/           ← MSFS-Community-Folder-Paket
-│       ├── manifest.json
-│       ├── layout.json
-│       └── html_ui/
-│           ├── Toolbar/Assets/MSFSVoiceWalker.svg    ← Toolbar-Icon
-│           └── InGamePanels/MSFSVoiceWalker/
-│               ├── panel.html     ← In-Sim-Panel (iframed die App-Overlay-Seite)
-│               ├── panel.js
-│               └── panel.css
+├── msfs-project/                  ← MSFS-SDK-Projekt (WASM-Bridge + Toolbar-Panel)
+│   ├── MSFSVoiceWalkerProject.xml
+│   ├── PackageDefinitions/        ← Package-Metadaten für MSFS-Compiler
+│   ├── PackageSources/            ← HTML/CSS/JS + WASM-Source für den In-Sim-Panel
+│   │   ├── wasm/MSFSVoiceWalkerBridge.cpp   ← SimConnect-ClientData-Publisher
+│   │   └── html_ui/InGamePanels/MSFSVoiceWalker/   ← Toolbar-Panel-Source
+│   └── Sources/wasm/              ← WASM-Build-Projekt (Visual Studio)
+│
+├── MSFS/Release/MSFSVoiceWalkerBridge.wasm   ← kompilierte WASM-Bridge
 │
 └── installer/                     ← WiX-v7-MSI-Installer-Projekt
     ├── MSFSVoiceWalker.Installer.wixproj
     ├── Package.wxs                ← WiX-Source (Komponenten, UI, Custom Actions)
-    ├── gen-license-rtf.py         ← Pre-Build: LICENSE → License.rtf
-    └── README.md
+    └── build-exes.bat             ← PyInstaller-Launcher für Installer-EXEs
 ```
 
 ---
@@ -416,35 +447,35 @@ d.h. selbst wenn etwas schiefgeht, kannst du manuell zurückrollen.
 
 ---
 
-## Status — was ist wann gekommen
+## Status
 
-**Erledigt (v0.1.0 Alpha):**
+**Erledigt:**
 
-- [x] **TURN-Relay-Unterstützung** — konfigurierbar via
-  Umgebungsvariablen `VOICEWALKER_TURN_URL`, `VOICEWALKER_TURN_USER`,
-  `VOICEWALKER_TURN_PASS`. App reicht den TURN-Server an WebRTC
-  weiter. Nötig fürs Laufen durch Symmetric NAT. Eigenen TURN betreiben
-  (coturn auf VPS) oder Dritt-Anbieter-Credentials reingeben.
-- [x] **Konfigurierbare Keyboard-PTT-Taste** — Standard Leertaste,
-  User kann auf jede andere Taste umbinden (persistiert via localStorage).
-- [x] **Finales Toolbar-Icon** — `MSFSVoiceWalker.png` im Toolbar-Asset-Pfad
-  registriert; Build-Script regeneriert `layout.json` automatisch.
-- [x] **MSFS-2024-Walker-Fallback** — `CAMERA_POS_*` mit Fallback auf
-  `PLANE_LATITUDE/LONGITUDE`. Funktional, nicht in allen Edge-Cases
-  verifiziert. Sobald Asobo offizielle Walker-SimVars dokumentiert, dort
-  umstellen.
+- [x] **WASM-Bridge** `MSFSVoiceWalkerBridge.wasm` publisht Avatar-Position via
+  SimConnect ClientData direkt an die Python-App (ersetzt die alte HTTP-Probe).
+- [x] **MSFS-Toolbar-Panel** rendert Radar + Peer-Liste direkt im Sim.
+- [x] **3D-HRTF-Positional-Audio** mit Kardioid-Richtcharakteristik.
+- [x] **Zwei-Welten-Audio** (Walker 75 m / Cockpit 5 km + Crossover).
+- [x] **TURN-Relay-Unterstützung** für Symmetric-NAT-Fälle, konfigurierbar
+  über Umgebungsvariablen.
+- [x] **Pro-System** (License-Client mit LMFWC-Backend, 7-Tage-Offline-Grace,
+  Dev-Mode-Keys für lokale Tests).
+- [x] **Private Rooms** via `sha256(passphrase + salt)` als Trystero-Room-Key.
+- [x] **Peer-Limit-Gate** (20 Free / 200 Pro) mit Upgrade-Modal.
+- [x] **Tracking-Toggle** mit Persistenz in `config.json`.
+- [x] **Auto-Updater** mit Release-Channel + Installer-Chain.
 
-**Bleibt offen:**
+**In Arbeit / offen:**
 
-- [ ] **Code-Signing-Zertifikat** — derzeit warnt Windows SmartScreen vor
-  "unbekanntem Herausgeber". Kostenlose Optionen zum Evaluieren:
-  - [SignPath Foundation](https://signpath.org/) — für Open-Source,
-    OV-Cert + HSM, automatischer CI-Flow
-  - [Certum Open-Source Code Signing](https://certum.store/open-source-code-signing-code.html)
-    — polnische CA, von Microsoft anerkannt
-  - Microsoft Store-Veröffentlichung — signiert automatisch
+- [ ] **Event-Plattform** (The Events Calendar + PDF-Briefing-Hook):
+  Veranstalter bucht → Room-ID + Passphrase + PDF automatisch generiert.
+- [ ] **Code-Signing-Zertifikat** — aktuell warnt Windows SmartScreen vor
+  "unbekanntem Herausgeber". Evaluiert werden SignPath Foundation (Open-Source
+  CI-Flow) und Certum (polnische CA, von Microsoft anerkannt).
 - [ ] **Radio-Sound-Effekt** (Funkgeräusche, Squelch-Rauschen) — aktuell
-  ist die Stimme "clean". Wäre der Sahnehäubchen-Effekt für Aviation-Feeling.
+  ist die Stimme "clean". Aviation-Feeling-Sahne.
+- [ ] **Session-Recording** (Pro-Feature, langfristig).
+- [ ] **Landing-Page** `gsimulations.de/msfsvoicewalker` + Press-Kit.
 
 ---
 
