@@ -110,25 +110,36 @@ def _lmfwc_validate(key: str, api_url: str, ck: str, cs: str) -> dict:
     except Exception as e:
         raise  # let caller fall back to cache
 
-    # LMFWC response shape: {"success": true, "data": {"status": 2, ...}}
-    # status=2 == active; status=3 == sold but inactive; others = inactive.
+    # LMFWC /validate/{key} response shape:
+    #   active:    {"success": true,  "data": {"timesActivated": n,
+    #                                          "timesActivatedMax": m,
+    #                                          "remainingActivations": r, ...}}
+    #   inactive:  {"success": false, "data": {...}}
+    # Der /validate-Endpoint bestaetigt implizit aktiv — status-Feld gibt es
+    # nur am /licenses/{key}-Endpoint.
     ok = bool(data.get("success"))
     inner = data.get("data") or {}
-    status = inner.get("status")
-    is_pro = ok and status in (2, 3)
+    # Activation-Limit hart durchsetzen: wenn max>0 und 0 uebrig → stumpf abgelehnt.
+    act_max = inner.get("timesActivatedMax") or 0
+    act_now = inner.get("timesActivated") or 0
+    if ok and act_max and act_now >= act_max:
+        ok = False
+        reason = f"activation limit reached ({act_now}/{act_max})"
+    else:
+        reason = "ok" if ok else "invalid or inactive"
     exp_raw = inner.get("expiresAt")
     expires = now + GRACE_SECONDS
     try:
         if exp_raw:
             import datetime as _dt
-            dt = _dt.datetime.fromisoformat(exp_raw.replace("Z", "+00:00"))
+            dt = _dt.datetime.fromisoformat(str(exp_raw).replace("Z", "+00:00"))
             expires = min(expires, dt.timestamp())
     except Exception:
         pass
     return {
-        "is_pro":       is_pro,
+        "is_pro":       bool(ok),
         "key":          key,
-        "reason":       "ok" if is_pro else f"lmfwc status={status}",
+        "reason":       reason,
         "mode":         "backend",
         "validated_at": now,
         "expires_at":   expires,
