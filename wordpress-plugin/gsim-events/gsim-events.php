@@ -1271,12 +1271,52 @@ add_action('wp_head', function () {
     if (!$is_tec) return;
     ?>
     <style id="gsim-tec-fixes">
-      /* Weisses Band vom View-Selector + Top-Bar wegmachen */
+      /* Dark Background für alle TEC-Views + lesbare Texte */
+      .tribe-events-view,
+      .tribe-events-calendar-list,
+      .tribe-events-calendar-month,
+      .tribe-events-calendar-day,
+      .tribe-events-single,
       .tribe-events-c-view-selector,
       .tribe-events-c-view-selector__content,
       .tribe-events-c-top-bar,
-      .tribe-events-header {
+      .tribe-events-header,
+      .tribe-events-c-search,
+      .tribe-events-c-search__wrapper {
         background: transparent !important;
+      }
+      .tribe-events-view * {
+        color: #eaf0ff !important;
+      }
+      .tribe-events-view a,
+      .tribe-events-view .tribe-common-anchor-alt {
+        color: #6aa5ff !important;
+      }
+      .tribe-events-view .tribe-events-c-search__input,
+      .tribe-events-view input[type="search"],
+      .tribe-events-view input[type="text"] {
+        background: #15213a !important;
+        color: #eaf0ff !important;
+        border: 1px solid rgba(106,165,255,0.2) !important;
+      }
+      .tribe-events-view .tribe-events-c-search__button,
+      .tribe-events-view .tribe-events-button {
+        background: #6aa5ff !important;
+        color: #0b1220 !important;
+      }
+      /* "Kalender abonnieren" komplett ausblenden — überlappt sonst Pagination */
+      .tribe-events-c-subscribe-dropdown,
+      .tribe-events-c-subscribe-dropdown__container,
+      .tribe-events-c-subscribe-dropdown__wrapper {
+        display: none !important;
+      }
+      /* Event-Cards */
+      .tribe-events-calendar-list__event-row,
+      .tribe-events-calendar-list__event {
+        background: #15213a !important;
+        border: 1px solid rgba(106,165,255,0.2) !important;
+        border-radius: 10px !important;
+        padding: 16px !important;
       }
     </style>
     <?php
