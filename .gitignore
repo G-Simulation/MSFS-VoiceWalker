@@ -43,6 +43,7 @@ package-lock.json
 *.tmp
 .env
 .env.local
+.secrets/
 
 # --- Installer build output ---
 installer/bin/

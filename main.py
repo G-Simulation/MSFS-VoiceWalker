@@ -62,6 +62,27 @@ import updater
 import license_client
 
 
+def _load_env_file(path: pathlib.Path) -> None:
+    """Minimaler .env-Reader — liest KEY=VALUE-Zeilen und exportiert sie, falls
+    nicht bereits in os.environ gesetzt (echte env-vars haben Vorrang).
+    Kommentare mit # werden ignoriert, quotes um Werte entfernt."""
+    try:
+        if not path.is_file():
+            return
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if k and k not in os.environ:
+                os.environ[k] = v
+    except Exception as e:
+        import logging as _l
+        _l.getLogger("root").warning("env file load failed (%s): %s", path, e)
+
+
 # -----------------------------------------------------------------------------
 # Pfade (PyInstaller-aware)
 # -----------------------------------------------------------------------------
@@ -1276,6 +1297,15 @@ async def main():
     # PTT-Config-Pfad auf persistentes Data-Dir zeigen (wichtig beim exe-Build)
     import ptt_backend as _ptt_mod
     _ptt_mod.CONFIG_PATH = data_dir() / "ptt_config.json"
+
+    # Optionale Secrets fuer den LMFWC-Backend-Modus. Wenn .secrets/license.env
+    # existiert, werden LICENSE_API_URL/_CONSUMER_KEY/_SECRET daraus gezogen;
+    # sonst bleibt der Dev-Mode aktiv (DEV-PRO-* / DEV-FREE). Gitignored.
+    _load_env_file(data_dir() / ".secrets" / "license.env")
+    if os.environ.get("LICENSE_API_URL"):
+        log.info("license backend configured: %s", os.environ["LICENSE_API_URL"])
+    else:
+        log.info("license: dev-mode (no backend configured)")
 
     # User-Config (z.B. Tracking-Schalter) aus config.json laden
     _cfg = load_config()
