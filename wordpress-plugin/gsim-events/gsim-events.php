@@ -1295,13 +1295,54 @@ add_action('wp_head', function () {
         border: 1px solid var(--gsim-border);
       }
 
-      /* Titel, Texte, Labels generell heller */
+      /* ALLE Texte im TEC-Block auf hell zwingen — TEC bringt eigene
+         dunkle Farben mit, die auf unserem Dark-Theme nicht lesbar sind. */
+      .tribe-events-view,
+      .tribe-events-view *,
+      .tribe-common,
+      .tribe-common *,
       .tribe-events-calendar-list *,
       .tribe-events-calendar-month *,
       .tribe-events-calendar-day *,
       .tribe-events-single *,
-      .tribe-common * {
-        color: inherit;
+      .tribe-events-header *,
+      .tribe-events-c-top-bar *,
+      .tribe-events-c-nav *,
+      .tribe-events-c-subscribe-dropdown * {
+        color: var(--gsim-fg) !important;
+      }
+      /* Muted / Datums-Label etwas abgedunkelt */
+      .tribe-common-h8,
+      .tribe-events-calendar-list__month-separator-text,
+      .tribe-events-calendar-list__event-datetime,
+      .tribe-events-calendar-list__event-date-tag-daynum,
+      .tribe-events-calendar-list__event-date-tag-weekday,
+      .tribe-events-schedule,
+      .tribe-common-b2,
+      .tribe-events-c-nav__list-item--prev a,
+      .tribe-events-c-nav__list-item--next a {
+        color: var(--gsim-muted) !important;
+      }
+      /* Akzent fuer Links + aktive Tabs */
+      .tribe-events-view a,
+      .tribe-common a,
+      .tribe-events-c-view-selector__list-item--active .tribe-events-c-view-selector__list-item-link {
+        color: var(--gsim-accent) !important;
+      }
+      /* Search-Eingabe lesbar machen */
+      .tribe-events-c-search__input,
+      .tribe-events-view input[type="text"],
+      .tribe-events-view input[type="search"] {
+        background: var(--gsim-bg-2) !important;
+        color: var(--gsim-fg) !important;
+        border-color: var(--gsim-border) !important;
+      }
+      /* Heute-Button */
+      .tribe-events-c-top-bar__today-button,
+      .tribe-events-c-top-bar__today {
+        background: var(--gsim-bg-2) !important;
+        color: var(--gsim-fg) !important;
+        border-color: var(--gsim-accent) !important;
       }
       .tribe-events-c-top-bar,
       .tribe-events-header,
