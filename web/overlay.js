@@ -16,6 +16,17 @@
 //   { type: 'tracking_off' }                            ← Tracking im Browser deaktiviert
 // ===========================================================================
 (() => {
+  // Stream-Mode (?stream=1): OBS Browser-Source-Variante. Transparenter BG,
+  // nur sprechende Peers als Text-Pill. Radar/Status/Hint ausgeblendet via CSS.
+  // Zusaetzlich: kein localStorage-Zoom, kein Scroll-Handler — in OBS will
+  // man keine Wheel-Events.
+  const STREAM_MODE = new URLSearchParams(location.search).has('stream');
+  if (STREAM_MODE && document.body) document.body.classList.add('stream-mode');
+  else if (STREAM_MODE) {
+    document.addEventListener('DOMContentLoaded',
+      () => document.body.classList.add('stream-mode'), { once: true });
+  }
+
   const RADAR_RANGE_DEFAULT = 1000;
   const RADAR_RANGE_MIN = 50;
   const RADAR_RANGE_MAX = 20000;
@@ -63,6 +74,69 @@
   function esc(s) { return String(s).replace(/[&<>"']/g,
       c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
   function fmt(m) { return m < 1000 ? `${m.toFixed(0)} m` : `${(m/1000).toFixed(2)} km`; }
+  function fmtShort(m) {
+    if (m < 1000) return `${Math.round(m)} m`;
+    const km = m / 1000;
+    if (Math.abs(km - Math.round(km)) < 0.01) return `${Math.round(km)} km`;
+    return `${km.toFixed(2).replace(/\.?0+$/, '')} km`;
+  }
+
+  // Adaptive Schrittweite (1/2/5 * 10^n) fuer maxM/4 gerundet.
+  function niceStep(maxM) {
+    const target = maxM / 4;
+    const mag    = Math.pow(10, Math.floor(Math.log10(target)));
+    const norm   = target / mag;
+    if (norm < 1.5) return 1 * mag;
+    if (norm < 3.5) return 2 * mag;
+    if (norm < 7.5) return 5 * mag;
+    return 10 * mag;
+  }
+
+  // Top-Down-Flugzeug (gleiche Form wie in app.js, aber kompakter per scale)
+  function drawAircraftIcon(ctx, opts = {}) {
+    const s = opts.scale || 1;
+    ctx.save();
+    ctx.scale(s, s);
+    ctx.fillStyle   = opts.fill   || '#6aa5ff';
+    ctx.strokeStyle = opts.stroke || '#0b1220';
+    ctx.lineWidth   = opts.lineWidth || 1.1;
+    ctx.lineJoin    = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, -11);
+    ctx.quadraticCurveTo(2, -9, 2, -4);
+    ctx.lineTo(11, -1); ctx.lineTo(11, 2); ctx.lineTo(2, 3);
+    ctx.lineTo(2, 7);
+    ctx.lineTo(5, 9); ctx.lineTo(5, 10.5); ctx.lineTo(1, 11);
+    ctx.lineTo(1, 12); ctx.lineTo(-1, 12); ctx.lineTo(-1, 11);
+    ctx.lineTo(-5, 10.5); ctx.lineTo(-5, 9);
+    ctx.lineTo(-2, 7);
+    ctx.lineTo(-2, 3); ctx.lineTo(-11, 2); ctx.lineTo(-11, -1); ctx.lineTo(-2, -4);
+    ctx.quadraticCurveTo(-2, -9, 0, -11);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = 'rgba(11, 18, 32, 0.55)';
+    ctx.beginPath();
+    ctx.ellipse(0, -6, 1.3, 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // HiDPI-Canvas-Setup — Coherent GT / Chromium rendern sonst verwaschen
+  let _radarCSSW = 220, _radarCSSH = 220, _radarSetupDone = false;
+  function setupRadarHiDPI() {
+    const canvas = document.getElementById('radar');
+    if (!canvas) return;
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    _radarCSSW = canvas.width  || 220;
+    _radarCSSH = canvas.height || 220;
+    canvas.style.width  = _radarCSSW + 'px';
+    canvas.style.height = _radarCSSH + 'px';
+    canvas.width  = Math.round(_radarCSSW * dpr);
+    canvas.height = Math.round(_radarCSSH * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    _radarSetupDone = true;
+  }
 
   // --- WebSocket zur Python-App -----------------------------------------
   let ws = null;
@@ -130,106 +204,115 @@
   function renderRadar() {
     const canvas = document.getElementById('radar');
     if (!canvas) return;
+    if (!_radarSetupDone) setupRadarHiDPI();
     const ctx = canvas.getContext('2d');
-    const W = canvas.width, H = canvas.height;
+    const W = _radarCSSW, H = _radarCSSH;
     const cx = W / 2, cy = H / 2;
-    const r = Math.min(W, H) / 2 - 6;
+    const R  = Math.min(W, H) / 2 - 12;
 
     ctx.clearRect(0, 0, W, H);
 
-    // Rings (500 m und 1 km)
-    ctx.strokeStyle = 'rgba(106,165,255,0.25)';
+    // --- Hintergrund: dunkle Scheibe mit sanftem zentralen Glow ----------
+    const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
+    bg.addColorStop(0,   'rgba(23, 41, 74, 0.9)');
+    bg.addColorStop(0.7, 'rgba(15, 25, 48, 0.9)');
+    bg.addColorStop(1,   'rgba(11, 18, 32, 0.9)');
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.fillStyle = bg; ctx.fill();
+    // Rand
+    ctx.strokeStyle = 'rgba(106,165,255,0.4)';
     ctx.lineWidth = 1;
-    for (let i = 1; i <= 2; i++) {
-      ctx.beginPath();
-      ctx.arc(cx, cy, (r * i) / 2, 0, Math.PI * 2);
-      ctx.stroke();
-    }
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
 
-    // Crosshair
-    ctx.strokeStyle = 'rgba(106,165,255,0.15)';
+    // --- Adaptive Range-Ringe (1/2/5 * 10^n) ---------------------------
+    const step  = niceStep(radarRangeM);
+    const rings = [];
+    for (let d = step; d <= radarRangeM + 1; d += step) rings.push(d);
+    rings.forEach((m, i) => {
+      const frac    = m / radarRangeM;
+      const isOuter = i === rings.length - 1;
+      ctx.strokeStyle = isOuter
+        ? 'rgba(106,165,255,0.45)' : 'rgba(106,165,255,0.15)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(cx, cy, R * frac, 0, Math.PI * 2); ctx.stroke();
+    });
+
+    // --- Cross durch Mitte --------------------------------------------
+    ctx.strokeStyle = 'rgba(106,165,255,0.1)';
     ctx.beginPath();
-    ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy + r);
-    ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy);
+    ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R);
+    ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy);
     ctx.stroke();
+
+    // --- Heading-Up-Indikator (kleiner Pfeil oben) --------------------
+    ctx.fillStyle = 'rgba(106,165,255,0.9)';
+    ctx.beginPath();
+    ctx.moveTo(cx,     cy - R - 2);
+    ctx.lineTo(cx - 4, cy - R - 9);
+    ctx.lineTo(cx + 4, cy - R - 9);
+    ctx.closePath();
+    ctx.fill();
 
     const selfHeading = (state.mySim && Number.isFinite(+state.mySim.heading_deg))
       ? +state.mySim.heading_deg : 0;
 
-    // Hörbarkeits-Kreis (Audio-Bubble)
+    // --- Hörbarkeits-Kreis (Audio-Bubble) -----------------------------
     if (state.mySim && state.myRange > 0) {
-      const rAudioPx = r * Math.min(1, state.myRange / radarRangeM);
+      const rAudioPx = R * Math.min(1, state.myRange / radarRangeM);
       if (rAudioPx > 3) {
         const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, rAudioPx);
         grad.addColorStop(0, 'rgba(63,220,138,0.22)');
         grad.addColorStop(1, 'rgba(63,220,138,0.00)');
         ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(cx, cy, rAudioPx, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(63,220,138,0.5)';
-        ctx.setLineDash([3, 4]);
-        ctx.beginPath();
-        ctx.arc(cx, cy, rAudioPx, 0, Math.PI * 2);
-        ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx, cy, rAudioPx, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = 'rgba(63,220,138,0.55)';
+        ctx.setLineDash([2, 3]);
+        ctx.beginPath(); ctx.arc(cx, cy, rAudioPx, 0, Math.PI * 2); ctx.stroke();
         ctx.setLineDash([]);
       }
     }
 
-    // DU im Zentrum — Kreis bei zu Fuß, Dreieck im Flugzeug
+    // --- DU im Zentrum (Walker-Kreis oder Flugzeug-Icon) --------------
+    ctx.save();
+    ctx.translate(cx, cy);
     if (state.mySim && state.mySim.on_foot) {
       ctx.fillStyle = '#3fdc8a';
-      ctx.beginPath();
-      ctx.arc(cx, cy, 5, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      // Blickrichtungs-Dot oben
+      ctx.fillStyle = '#0b1220';
+      ctx.beginPath(); ctx.arc(0, -2.5, 1.2, 0, Math.PI * 2); ctx.fill();
     } else {
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.fillStyle = '#6aa5ff';
-      ctx.strokeStyle = '#0b1220';
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(0, -8);
-      ctx.lineTo(5, 5);
-      ctx.lineTo(0, 3);
-      ctx.lineTo(-5, 5);
-      ctx.closePath();
-      ctx.fill(); ctx.stroke();
-      ctx.restore();
+      drawAircraftIcon(ctx, { fill: '#6aa5ff', stroke: '#0b1220', lineWidth: 1.1, scale: 0.75 });
     }
+    ctx.restore();
 
-    // Zurueckgelassenes Flugzeug als blauer Dreieck-Punkt (nur wenn zu Fuss
-    // UND Aircraft-Pos vorhanden UND nennenswert entfernt).
+    // --- Zurueckgelassenes Flugzeug (wenn Walker + Aircraft weg) -----
     if (state.mySim && state.mySim.on_foot
         && state.mySim.aircraft
         && Number.isFinite(state.mySim.aircraft.lat)
         && Number.isFinite(state.mySim.aircraft.lon)) {
       const dAc = dist(state.mySim, state.mySim.aircraft);
       if (Number.isFinite(dAc) && dAc > 1) {
-        const brgAc = bearing(state.mySim, state.mySim.aircraft);
-        const relAc = ((brgAc - selfHeading) + 360) % 360;
-        const thetaAc = toRad(relAc) - Math.PI / 2;
-        const scaleAc = Math.min(1, dAc / radarRangeM);
-        const axAc = cx + Math.cos(thetaAc) * (r * scaleAc);
-        const ayAc = cy + Math.sin(thetaAc) * (r * scaleAc);
+        const brgAc  = bearing(state.mySim, state.mySim.aircraft);
+        const relAc  = ((brgAc - selfHeading) + 360) % 360;
+        const theta  = toRad(relAc) - Math.PI / 2;
+        const scale  = Math.min(1, dAc / radarRangeM);
+        const axAc = cx + Math.cos(theta) * (R * scale);
+        const ayAc = cy + Math.sin(theta) * (R * scale);
         ctx.save();
         ctx.translate(axAc, ayAc);
         const acHead = state.mySim.aircraft.heading_deg || 0;
         ctx.rotate(((acHead - selfHeading + 360) % 360) * Math.PI / 180);
-        ctx.fillStyle = '#6aa5ff';
-        ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(0, -6);
-        ctx.lineTo(4, 4);
-        ctx.lineTo(0, 2);
-        ctx.lineTo(-4, 4);
-        ctx.closePath();
-        ctx.fill(); ctx.stroke();
+        drawAircraftIcon(ctx, {
+          fill:   'rgba(106,165,255,0.85)',
+          stroke: '#0b1220', lineWidth: 1, scale: 0.55,
+        });
         ctx.restore();
       }
     }
 
-    // Peers
+    // --- Peers --------------------------------------------------------
     if (state.mySim) {
       for (const p of state.peers.values()) {
         if (!p.sim) continue;
@@ -241,25 +324,43 @@
         const rel = ((brg - selfHeading) + 360) % 360;
         const theta = toRad(rel) - Math.PI / 2;
         const scale = Math.min(1, d / radarRangeM);
-        const px = cx + Math.cos(theta) * (r * scale);
-        const py = cy + Math.sin(theta) * (r * scale);
+        const px = cx + Math.cos(theta) * (R * scale);
+        const py = cy + Math.sin(theta) * (R * scale);
 
-        const color = p.speaking ? '#ffe066'
+        const isSpeaking = !!p.speaking;
+        // Speaking-Pulse
+        if (isSpeaking) {
+          const grd = ctx.createRadialGradient(px, py, 0, px, py, 12);
+          grd.addColorStop(0, 'rgba(255,224,102,0.7)');
+          grd.addColorStop(1, 'rgba(255,224,102,0)');
+          ctx.fillStyle = grd;
+          ctx.beginPath(); ctx.arc(px, py, 12, 0, Math.PI * 2); ctx.fill();
+        }
+        const color = isSpeaking ? '#ffe066'
                     : d <= state.myRange ? '#6aa5ff' : '#556582';
         ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(px, py, 3.5, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(px, py, 3.2, 0, Math.PI * 2);
+        ctx.fill(); ctx.stroke();
       }
     }
 
-    // Skala-Label (dynamisch je nach Zoom-Level)
-    ctx.fillStyle = 'rgba(150,170,200,0.7)';
-    ctx.font = '9px "Segoe UI", system-ui, sans-serif';
-    const rangeLabel = radarRangeM < 1000
-      ? `${radarRangeM.toFixed(0)} m`
-      : `${(radarRangeM / 1000).toFixed(2)} km`;
-    ctx.fillText(rangeLabel, cx + r - 32, cy - 4);
+    // --- Distanz-Labels auf 45°-Diagonale mit Pill-Background --------
+    const diagX = Math.cos(Math.PI / 4);
+    const diagY = Math.sin(Math.PI / 4);
+    ctx.font = '600 9px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    rings.forEach((m) => {
+      const ringR = R * (m / radarRangeM);
+      const lx = cx + (ringR + 4) * diagX;
+      const ly = cy + (ringR + 4) * diagY;
+      const text = fmtShort(m);
+      const w = ctx.measureText(text).width;
+      ctx.fillStyle = 'rgba(11,18,32,0.85)';
+      ctx.fillRect(lx - 2, ly - 7, w + 4, 14);
+      ctx.fillStyle = 'rgba(160,190,225,0.95)';
+      ctx.fillText(text, lx, ly);
+    });
   }
 
   function render() {

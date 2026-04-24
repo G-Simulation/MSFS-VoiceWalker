@@ -1,11 +1,12 @@
 <?php
 /**
  * Plugin Name:       G-Sim Events (MSFSVoiceWalker)
- * Description:       Event-Hosting-Plattform für MSFSVoiceWalker. Ermöglicht Veranstaltern, öffentliche Fly-Ins / Air-Races / Formation-Flights anzulegen, Tickets zu verkaufen (via WooCommerce) und Teilnehmer mit Join-Link/Passphrase zu versorgen. Ersatz für Event Tickets Plus (rein kostenlos).
+ * Description:       Event-Hosting-Plattform für MSFSVoiceWalker. Ermöglicht Veranstaltern, öffentliche Fly-Ins / Air-Races / Formation-Flights anzulegen, Tickets zu verkaufen (via WooCommerce) und Teilnehmer mit Join-Link/Passphrase zu versorgen. Event-Ticketing-Lösung auf WooCommerce-Basis.
  * Version:           0.1.0
  * Author:            G-Simulation
  * Author URI:        https://www.gsimulations.de
- * License:           Apache-2.0
+ * License:           GPL-2.0-or-later
+ * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       gsim-events
  * Requires Plugins:  woocommerce, the-events-calendar
  */
@@ -24,6 +25,12 @@ define('GSIM_EVENTS_META_TICKET_EVENT', '_gsim_ticket_event_id');
 define('GSIM_EVENTS_META_PASSPHRASE',   '_gsim_event_passphrase');
 define('GSIM_EVENTS_META_JOIN_URL',     '_gsim_event_join_url');
 define('GSIM_EVENTS_META_VISIBILITY',   '_gsim_event_visibility');  // 'public' | 'private'
+// Optionale Event-spezifische Audio-Ranges (Event-Organizer-Override).
+// Leer/0 = App-Default nutzen. Werte greifen nur waehrend der Teilnehmer im
+// privaten Event-Raum ist, werden clientseitig nicht persistiert.
+define('GSIM_EVENTS_META_RANGE_WALKER',  '_gsim_event_range_walker');   // Meter
+define('GSIM_EVENTS_META_RANGE_COCKPIT', '_gsim_event_range_cockpit');  // Meter
+define('GSIM_EVENTS_META_CROSSOVER',     '_gsim_event_crossover_m');    // Meter
 
 // WC-Produkt-ID des "Fly-In Event Hosting"-Produkts. Beim Kauf dieses Produkts
 // wird der Käufer zum event_organizer. Kann via Filter überschrieben werden.
@@ -130,16 +137,46 @@ add_action('add_meta_boxes_tribe_events', function () {
         'gsim_events_voicewalker',
         'MSFSVoiceWalker — Event-Details',
         function ($post) {
-            $pass = get_post_meta($post->ID, GSIM_EVENTS_META_PASSPHRASE, true);
-            $join = get_post_meta($post->ID, GSIM_EVENTS_META_JOIN_URL, true);
+            $pass     = get_post_meta($post->ID, GSIM_EVENTS_META_PASSPHRASE, true);
+            $join     = get_post_meta($post->ID, GSIM_EVENTS_META_JOIN_URL, true);
+            $rngWalk  = get_post_meta($post->ID, GSIM_EVENTS_META_RANGE_WALKER, true);
+            $rngCpt   = get_post_meta($post->ID, GSIM_EVENTS_META_RANGE_COCKPIT, true);
+            $rngCross = get_post_meta($post->ID, GSIM_EVENTS_META_CROSSOVER, true);
+            wp_nonce_field('gsim_events_meta_save', 'gsim_events_meta_nonce');
             ?>
             <p><strong>Passphrase</strong> (auto-generiert, wird beim ersten Speichern gesetzt):<br>
                <code><?php echo esc_html($pass ?: '—'); ?></code></p>
-            <p><strong>Direkt-Join-Link</strong> — dieser Link landet im PDF-Briefing und in der Event-Ankündigung:<br>
+            <p><strong>Direkt-Join-Link</strong>:<br>
                <code><?php echo esc_html($join ?: '—'); ?></code></p>
-            <p style="color:#888;font-size:12px">
-               Teilnehmer klickt auf den Link → MSFSVoiceWalker-App öffnet sich → tritt automatisch dem privaten Raum bei.
-               Voraussetzung: Teilnehmer hat Pro (oder Event-Gast-Code, später).
+
+            <hr style="margin:12px 0;border:0;border-top:1px solid #ddd">
+            <p style="font-weight:600;margin-bottom:4px">Audio-Reichweiten (optional)</p>
+            <p style="color:#888;font-size:11px;margin:0 0 8px 0;line-height:1.4">
+                Leer lassen für die App-Defaults (Walker 10 m, Cockpit 5000 m,
+                Crossover 0 m). Nur setzen wenn das Event spezielle Werte
+                braucht — z.B. großes Vorfeld → Walker-Range auf 50 m.
+                Alle Teilnehmer im privaten Raum bekommen diese Werte automatisch.
+            </p>
+            <p style="margin:4px 0"><label>
+                Walker (m):
+                <input type="number" name="gsim_range_walker" min="0" max="1000" step="1"
+                       value="<?php echo esc_attr($rngWalk); ?>" style="width:80px">
+            </label></p>
+            <p style="margin:4px 0"><label>
+                Cockpit (m):
+                <input type="number" name="gsim_range_cockpit" min="0" max="50000" step="100"
+                       value="<?php echo esc_attr($rngCpt); ?>" style="width:80px">
+            </label></p>
+            <p style="margin:4px 0"><label>
+                Crossover (m):
+                <input type="number" name="gsim_range_crossover" min="0" max="500" step="5"
+                       value="<?php echo esc_attr($rngCross); ?>" style="width:80px">
+            </label></p>
+
+            <p style="color:#888;font-size:12px;margin-top:12px">
+               Teilnehmer klickt auf den Join-Link → MSFSVoiceWalker-App öffnet sich →
+               tritt automatisch dem privaten Raum bei + übernimmt (falls gesetzt)
+               die Event-Ranges.
             </p>
             <?php
         },
@@ -148,6 +185,29 @@ add_action('add_meta_boxes_tribe_events', function () {
         'default'
     );
 });
+
+// Meta-Save: die drei Range-Felder aus der Metabox persistieren
+add_action('save_post_tribe_events', function ($post_id) {
+    if (!isset($_POST['gsim_events_meta_nonce'])) return;
+    if (!wp_verify_nonce($_POST['gsim_events_meta_nonce'], 'gsim_events_meta_save')) return;
+    if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) return;
+    if (!current_user_can('edit_post', $post_id)) return;
+
+    $save = function ($field, $meta_key, $min, $max) use ($post_id) {
+        if (!isset($_POST[$field])) return;
+        $raw = trim((string) $_POST[$field]);
+        if ($raw === '' || !is_numeric($raw)) {
+            delete_post_meta($post_id, $meta_key);
+            return;
+        }
+        $val = max($min, min($max, (int) $raw));
+        if ($val <= 0) { delete_post_meta($post_id, $meta_key); return; }
+        update_post_meta($post_id, $meta_key, $val);
+    };
+    $save('gsim_range_walker',    GSIM_EVENTS_META_RANGE_WALKER,  0, 1000);
+    $save('gsim_range_cockpit',   GSIM_EVENTS_META_RANGE_COCKPIT, 0, 50000);
+    $save('gsim_range_crossover', GSIM_EVENTS_META_CROSSOVER,     0, 500);
+}, 15, 1);
 
 // -----------------------------------------------------------------------------
 // WC-Produkt: Meta-Feld "Verknüpft mit Event" (verwandelt Produkt in "Ticket")
@@ -249,6 +309,87 @@ add_action('woocommerce_order_status_completed', function ($order_id) {
         }
     }
 }, 20);
+
+// -----------------------------------------------------------------------------
+// WC Order completed: Add-on-Anleitungen senden (OBS-Stream / Live-Tech-Support)
+// Nur bei Varianten des Hosting-Produkts. Erkennt anhand des pa_paket-Attributs:
+//   "Basis + OBS Stream-Integration"   → OBS-Setup-Mail
+//   "Basis + Live-Tech-Support"        → Tech-Support-Terminabstimmungs-Mail
+//   "Komplett (Stream + Tech-Support)" → beide Mails
+// Laeuft nach dem User-Anlage-Hook (priority 25 > 20).
+// -----------------------------------------------------------------------------
+
+add_action('woocommerce_order_status_completed', function ($order_id) {
+    $order = wc_get_order($order_id);
+    if (!$order) return;
+    $hosting_id = gsim_events_hosting_product_id();
+
+    $has_obs  = false;
+    $has_tech = false;
+    foreach ($order->get_items() as $item) {
+        if ((int) $item->get_product_id() !== $hosting_id) continue;
+        $var_id = (int) $item->get_variation_id();
+        if (!$var_id) continue;
+        $variation = wc_get_product($var_id);
+        if (!$variation) continue;
+        $paket = $variation->get_attribute('pa_paket');
+        if (!$paket) continue;
+        if (stripos($paket, 'OBS')     !== false || stripos($paket, 'Komplett') !== false) $has_obs  = true;
+        if (stripos($paket, 'Tech')    !== false || stripos($paket, 'Komplett') !== false) $has_tech = true;
+    }
+    if (!$has_obs && !$has_tech) return;
+
+    $email = $order->get_billing_email();
+    if (!$email) return;
+    $name = trim($order->get_billing_first_name() . ' ' . $order->get_billing_last_name());
+    $greet = $name ? "Hallo $name," : "Hallo,";
+
+    if ($has_obs) {
+        wp_mail(
+            $email,
+            'Setup-Anleitung: OBS Stream-Integration',
+            "$greet\n\n"
+            . "danke fuer den Kauf des Stream-Integration-Add-ons. So richtest du es ein:\n\n"
+            . "1) MSFSVoiceWalker-App starten wie gewohnt.\n\n"
+            . "2) Im Browser http://localhost:7801/ oeffnen.\n\n"
+            . "3) Oben rechts neben dem VOX-Schalter die Checkbox 'Ducking' aktivieren.\n"
+            . "   → Das senkt andere Pilot-Stimmen automatisch, sobald du ins Mic sprichst\n"
+            . "   → im Stream hoeren deine Zuschauer dich klar, die Piloten im Hintergrund.\n\n"
+            . "4) OBS starten → Quellen → '+' → Browser → Hinzufuegen.\n"
+            . "   URL:     http://localhost:7801/overlay.html?stream=1\n"
+            . "   Breite:  400\n"
+            . "   Hoehe:   600\n"
+            . "   Haken 'Hintergrund steuern' setzen (transparenter Hintergrund).\n\n"
+            . "5) Im Overlay erscheinen nur Piloten die gerade sprechen — als Text-Pill\n"
+            . "   mit gelber Kante. Keiner sagt was → Overlay ist unsichtbar. Perfekt\n"
+            . "   fuer saubere Stream-Optik.\n\n"
+            . "Bei Problemen einfach auf diese Mail antworten.\n\n"
+            . "Viel Erfolg beim Streamen!\n"
+            . "— G-Simulation"
+        );
+    }
+
+    if ($has_tech) {
+        wp_mail(
+            $email,
+            'Setup: Live-Tech-Support waehrend deines Events',
+            "$greet\n\n"
+            . "du hast den Live-Tech-Support fuer dein MSFSVoiceWalker-Event gebucht.\n"
+            . "So geht's weiter:\n\n"
+            . "1) Antworte auf diese Mail mit folgenden Angaben:\n"
+            . "   - Event-Datum + Uhrzeit (mit Zeitzone, z.B. 'Sa 2026-05-20, 18:00 CEST')\n"
+            . "   - Geplante Dauer (typ. 2-4h)\n"
+            . "   - Dein Discord-Tag (z.B. patrick#1234)\n\n"
+            . "2) Wir bestaetigen den Slot per Mail + schicken einen Discord-Invite.\n\n"
+            . "3) Waehrend des Events sind wir im Discord-Voice-Channel erreichbar:\n"
+            . "   - Hotline-Kanal fuer schnelle Fragen\n"
+            . "   - Eskalations-Support falls Piloten nicht in den Raum kommen\n"
+            . "   - Live-Debug ueber voicewalker.log falls irgendwas ungewoehnliches\n\n"
+            . "Bei Fragen vorab: diese Mail direkt beantworten.\n\n"
+            . "— G-Simulation"
+        );
+    }
+}, 25);
 
 // -----------------------------------------------------------------------------
 // WC Order completed: Attendee-Datensatz anlegen + Mail mit Join-Link
@@ -407,6 +548,9 @@ function gsim_events_shape_event($event) {
         'fields'      => 'ids',
         'nopaging'    => true,
     ]))->found_posts;
+    $rngWalk  = (int) get_post_meta($event->ID, GSIM_EVENTS_META_RANGE_WALKER, true);
+    $rngCpt   = (int) get_post_meta($event->ID, GSIM_EVENTS_META_RANGE_COCKPIT, true);
+    $rngCross = (int) get_post_meta($event->ID, GSIM_EVENTS_META_CROSSOVER, true);
     return [
         'id'             => $event->ID,
         'title'          => $event->post_title,
@@ -422,6 +566,13 @@ function gsim_events_shape_event($event) {
         'tickets'        => $tickets,
         'attendee_count' => $attendee_count,
         'url'            => get_permalink($event->ID),
+        // Optionale Event-spezifische Audio-Ranges (0/leer = App-Defaults).
+        // Client wendet diese waehrend der Raum-Mitgliedschaft an.
+        'ranges'         => ($rngWalk || $rngCpt || $rngCross) ? [
+            'walker_m'    => $rngWalk  ?: null,
+            'cockpit_m'   => $rngCpt   ?: null,
+            'crossover_m' => $rngCross ?: null,
+        ] : null,
     ];
 }
 
@@ -490,6 +641,32 @@ add_action('rest_api_init', function () {
                 return new WP_Error('not_found', 'Event nicht gefunden', ['status' => 404]);
             }
             return gsim_events_shape_event($event);
+        },
+        'permission_callback' => '__return_true',
+    ]);
+
+    // GET /events/by-passphrase/{pass} — Event via Passphrase finden.
+    // Genutzt vom Client beim ?join=<passphrase>-Flow um die event-spezifischen
+    // Audio-Ranges (falls gesetzt) zu laden. Public, weil jeder mit dem
+    // Join-Link das Event auch so einsehen koennen muss.
+    register_rest_route($ns, '/events/by-passphrase/(?P<pass>[a-zA-Z0-9._-]+)', [
+        'methods'  => 'GET',
+        'callback' => function ($req) {
+            $pass = sanitize_text_field($req['pass']);
+            if (!$pass || strlen($pass) < 3) {
+                return new WP_Error('bad_request', 'Passphrase zu kurz', ['status' => 400]);
+            }
+            $events = get_posts([
+                'post_type'   => 'tribe_events',
+                'post_status' => 'publish',
+                'numberposts' => 1,
+                'meta_key'    => GSIM_EVENTS_META_PASSPHRASE,
+                'meta_value'  => $pass,
+            ]);
+            if (empty($events)) {
+                return new WP_Error('not_found', 'Kein Event mit dieser Passphrase', ['status' => 404]);
+            }
+            return gsim_events_shape_event($events[0]);
         },
         'permission_callback' => '__return_true',
     ]);
@@ -1260,6 +1437,39 @@ add_filter('rest_tribe_events_query', function ($args, $request) {
 // (TEC-v6 hat zu viele interne Layout-Abhaengigkeiten die !important-Regeln
 // durcheinanderbringen — stattdessen lassen wir TEC nativ rendern).
 // -----------------------------------------------------------------------------
+
+// Events-Seiten (Archiv + Single): Revelance-Theme-Sidebar ausblenden, Content fullwidth.
+add_action('wp_head', function () {
+    $is_tec = is_singular('tribe_events')
+           || is_post_type_archive('tribe_events')
+           || is_tax('tribe_events_cat')
+           || (function_exists('tribe_is_event_query') && tribe_is_event_query());
+    if (!$is_tec) return;
+    ?>
+    <style id="gsim-tec-fullwidth">
+      body.post-type-archive-tribe_events aside.sidebar,
+      body.single-tribe_events aside.sidebar,
+      body.tax-tribe_events_cat aside.sidebar { display: none !important; }
+      body.post-type-archive-tribe_events .content_with_right_sidebar,
+      body.single-tribe_events .content_with_right_sidebar,
+      body.tax-tribe_events_cat .content_with_right_sidebar {
+        width: 100% !important;
+        float: none !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+      }
+      body.post-type-archive-tribe_events #content .span8,
+      body.single-tribe_events #content .span8,
+      body.tax-tribe_events_cat #content .span8 { width: 100% !important; }
+
+      /* Subscribe-Dropdown auf Archiv-Views ausblenden (ueberlappt Navigation) */
+      body.post-type-archive-tribe_events .tribe-events-c-subscribe-dropdown,
+      body.tax-tribe_events_cat .tribe-events-c-subscribe-dropdown {
+        display: none !important;
+      }
+    </style>
+    <?php
+});
 
 // Nur der Join-CTA auf Single-Events wird gestyled. TEC rendert sonst nativ.
 add_action('wp_head', function () {

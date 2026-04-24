@@ -278,13 +278,17 @@ function initDebugPanel() {
   $('#dbg-refresh').addEventListener('click', refresh);
   $('#dbg-export').addEventListener('click', exportLog);
 
-  // Tabs
+  // Tabs — Wechsel auf Log-Tab triggert sofortiges Rendern (sonst sieht der
+  // User die bisher gesammelten Log-Einträge erst beim naechsten push()).
+  // Das war der Grund warum das Log-Tab "leer wirkte".
   panel.querySelectorAll('.dbg-tab').forEach(btn => {
     btn.addEventListener('click', () => {
       panel.querySelectorAll('.dbg-tab').forEach(b => b.classList.remove('active'));
       panel.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
       btn.classList.add('active');
       panel.querySelector('#pane-' + btn.dataset.pane).classList.add('active');
+      if (btn.dataset.pane === 'log') renderLog();
+      if (btn.dataset.pane === 'state') refresh();
     });
   });
 
@@ -376,7 +380,10 @@ function initDebugPanel() {
     osc.connect(g).connect(pan).connect(ctx.destination);
     osc.start();
     osc.stop(t0 + 1.55);
-    console.info(`[debug] test tone from ${dir} (heading=${heading.toFixed(0)}°)`);
+    // Heading in Grad ausgeben (nicht Rad) und die richtige Variable nutzen —
+    // vorher war `heading` undefined → ReferenceError pro Klick.
+    const headingDeg = headingRad * 180 / Math.PI;
+    console.info(`[debug] test tone from ${dir} (heading=${headingDeg.toFixed(0)}°)`);
   }
 
 

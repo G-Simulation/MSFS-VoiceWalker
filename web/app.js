@@ -25,9 +25,33 @@ const HEARTBEAT_MS = 2000;
 const PROBE_WAIT_MS = 350;
 let _isPrimaryTab = false;
 
-function showInstanceBlocker() {
-  // Blocker-UI ueber das gesamte Fenster. User muss diesen Tab schliessen
-  // oder auf "Dieser Tab" klicken um die Kontrolle zu uebernehmen.
+// Blocker-UI. Zwei Modi:
+//   'blocked'     = dieser Tab ist neu geoeffnet, primary laeuft woanders
+//                   → Button "Aktivieren" schickt Takeover
+//   'deactivated' = dieser Tab WAR primary, aber ein anderer hat uebernommen
+//                   → Button "Tab schliessen" (window.close Best-Effort)
+// Wichtig: Browser erlauben window.close() nur auf Tabs, die per Script
+// geoeffnet wurden. Bei user-geoeffneten Tabs wird der Close-Versuch ignoriert;
+// in dem Fall bleibt der Blocker mit dem Schliess-Hinweis stehen.
+function showInstanceBlocker(mode) {
+  // Falls schon sichtbar (z.B. bei doppeltem Takeover): nicht nochmal rendern
+  if (document.getElementById('vw-instance-blocker')) return;
+
+  mode = mode || 'blocked';
+  const isDeact = mode === 'deactivated';
+  const title   = isDeact
+    ? 'Tab deaktiviert'
+    : 'MSFSVoiceWalker läuft bereits';
+  const body    = isDeact
+    ? 'Ein anderer Tab hat die Kontrolle übernommen. Diesen Tab bitte schließen — er ist nicht mehr aktiv.'
+    : 'Die App ist schon in einem anderen Browser-Fenster oder Tab geöffnet. Um Ghost-Peers im Mesh zu vermeiden, darf nur eine Instanz gleichzeitig laufen.';
+  const btnText = isDeact
+    ? 'Diesen Tab schließen'
+    : 'In diesem Tab übernehmen';
+  const hint    = isDeact
+    ? 'Falls der Close-Button nicht reagiert, schließe den Tab bitte per Strg+W oder Tab-X.'
+    : 'Der andere Tab wird dabei deaktiviert — er bleibt offen, bis du ihn manuell schließt (Browser-Einschränkung).';
+
   const overlay = document.createElement('div');
   overlay.id = 'vw-instance-blocker';
   overlay.style.cssText = `
@@ -38,38 +62,43 @@ function showInstanceBlocker() {
     backdrop-filter: blur(6px);
   `;
   overlay.innerHTML = `
-    <div style="max-width:420px; padding:32px; text-align:center;
+    <div style="max-width:460px; padding:32px; text-align:center;
                 border:1px solid #233457; border-radius:12px;
                 background:#0b1220;">
-      <div style="font-size:36px; margin-bottom:12px;">⚠</div>
-      <h2 style="margin:0 0 12px 0; font-size:18px;">
-        MSFSVoiceWalker läuft bereits
-      </h2>
+      <div style="font-size:36px; margin-bottom:12px;">${isDeact ? '🚫' : '⚠'}</div>
+      <h2 style="margin:0 0 12px 0; font-size:18px;">${title}</h2>
       <p style="color:#8696b8; font-size:13px; line-height:1.5; margin:0 0 20px 0;">
-        Die App ist schon in einem anderen Browser-Fenster oder Tab geöffnet.
-        Um Ghost-Peers im Mesh zu vermeiden, darf nur eine Instanz gleichzeitig
-        laufen.
+        ${body}
       </p>
-      <button id="vw-takeover-btn" style="
-        background:#6aa5ff; color:#0b1220; border:none; border-radius:6px;
+      <button id="vw-action-btn" style="
+        background:${isDeact ? '#ff6b6b' : '#6aa5ff'}; color:#0b1220; border:none; border-radius:6px;
         padding:10px 18px; font-weight:600; cursor:pointer; font-size:13px;">
-        Diesen Tab aktivieren (anderen schließen)
+        ${btnText}
       </button>
-      <p style="color:#556582; font-size:11px; margin:14px 0 0 0;">
-        oder einfach diesen Tab schließen
+      <p style="color:#556582; font-size:11px; margin:14px 0 0 0; line-height:1.5;">
+        ${hint}
       </p>
     </div>
   `;
   document.body.appendChild(overlay);
-  document.getElementById('vw-takeover-btn')?.addEventListener('click', () => {
-    // Sende "takeover" — der aktuelle primary-Tab hoert das und zeigt
-    // SELBER einen Blocker, dieser Tab wird dann primary bei nächstem Reload.
-    try {
-      const ch = new BroadcastChannel(LOCK_CHANNEL);
-      ch.postMessage({ type: 'takeover' });
-      ch.close();
-    } catch {}
-    setTimeout(() => location.reload(), 200);
+
+  document.getElementById('vw-action-btn')?.addEventListener('click', () => {
+    if (isDeact) {
+      // Best-effort close. Funktioniert nur wenn Tab per Script geoeffnet wurde.
+      try { window.close(); } catch {}
+      // Fallback-Nachricht: Button schraffiert, damit User merkt "Browser laesst's nicht zu"
+      const btn = document.getElementById('vw-action-btn');
+      if (btn) { btn.textContent = 'Browser erlaubt kein Auto-Close — Tab manuell schließen'; btn.disabled = true; btn.style.opacity = '0.6'; btn.style.cursor = 'not-allowed'; }
+    } else {
+      // Takeover: dem aktiven Tab signalisieren dass er sich deaktivieren soll,
+      // dann reloaden damit dieser Tab primary wird.
+      try {
+        const ch = new BroadcastChannel(LOCK_CHANNEL);
+        ch.postMessage({ type: 'takeover' });
+        ch.close();
+      } catch {}
+      setTimeout(() => location.reload(), 200);
+    }
   });
 }
 
@@ -118,12 +147,15 @@ function becomePrimary(ch) {
       ch.postMessage({ type: 'i-am-primary' });
     } else if (e.data?.type === 'takeover') {
       // Anderer Tab will uebernehmen — wir deaktivieren uns, dieser Tab
-      // wird zum Blocker und der andere uebernimmt nach Reload.
+      // zeigt "deactivated"-Blocker und versucht sich zu schliessen.
       clearInterval(heartbeatTimer);
       try { for (const { room } of state.rooms.values()) room.leave(); } catch {}
       try { ch.postMessage({ type: 'goodbye' }); } catch {}
       _isPrimaryTab = false;
-      showInstanceBlocker();
+      // Best-effort close — klappt nur bei script-geoeffneten Tabs. Sonst
+      // faellt's durch auf den Blocker mit manuellem Close-Hinweis.
+      try { window.close(); } catch {}
+      showInstanceBlocker('deactivated');
     }
   });
 
@@ -209,6 +241,15 @@ const audioConfig = {
   // im Cockpit ist noch hoerbar). Default 0 = Welten streng getrennt.
   crossoverM: 0,
 
+  // Ducking (Stream-Feature): wenn der lokale User spricht, werden alle
+  // Peer-Stimmen leiser geregelt, damit die eigene Stimme im Stream-Mic
+  // dominiert. Discord-artig. Default aus, damit normale Flug-Sessions
+  // nicht ploetzlich "Half-Duplex" anfuehlen. Im UI als Toggle schaltbar.
+  //   enabled:     on/off
+  //   attenuation: verbleibende Peer-Lautstaerke wenn du sprichst (0.3 = 30%)
+  //   threshold:   RMS-Schwelle ab der dein Mic als "spricht" gilt
+  ducking: { enabled: false, attenuation: 0.3, threshold: 0.02 },
+
   // Backward-Compat-Getter+Setter: alter Code (z.B. debug.js) liest/schreibt
   // .maxRangeM direkt. Wir mappen auf das AKTUELLE Modus-Profil (Walker
   // wenn on_foot, sonst Cockpit). Neuer Code sollte lieber getAudioProfile()
@@ -250,6 +291,7 @@ function loadAudioConfig() {
     if (j.walker)  Object.assign(audioConfig.walker,  j.walker);
     if (j.cockpit) Object.assign(audioConfig.cockpit, j.cockpit);
     if (Number.isFinite(+j.crossoverM)) audioConfig.crossoverM = +j.crossoverM;
+    if (j.ducking) Object.assign(audioConfig.ducking, j.ducking);
   } catch {}
 }
 function saveAudioConfig() {
@@ -258,6 +300,7 @@ function saveAudioConfig() {
       walker:     audioConfig.walker,
       cockpit:    audioConfig.cockpit,
       crossoverM: audioConfig.crossoverM,
+      ducking:    audioConfig.ducking,
     }));
   } catch {}
 }
@@ -317,6 +360,13 @@ const state = {
   mySim: null,
   micStream: null,
   micTrack: null,
+  // Lokale VAD fuer Ducking: Analyser auf state.micStream. Wenn imSpeakingLocal
+  // true wird, reduziert updateAudioFor() alle Peer-Gains um audioConfig.ducking.
+  // Setup in ensureMic(), Teardown beim Mic-Wechsel. Dient NICHT fuer PTT —
+  // PTT wird weiterhin per track.enabled gemacht. VAD ist nur "hoere ich mich?".
+  imSpeakingLocal:  false,
+  localVadAnalyser: null,
+  _localVadBuf:     null,
   voxMode: false,
   showFar: true,
   rooms: new Map(),   // cell → { room, peers:Map, posTimer }
@@ -345,20 +395,42 @@ function currentMaxPeers() {
 }
 
 // --- Tracking an/aus -------------------------------------------------------
-function applyTrackingState(enabled) {
-  state.trackingEnabled = !!enabled;
+// UI-Zustaende des Tracking-Buttons:
+//   "Sichtbar" (gruen) — User hat Tracking an UND Flug ist aktiv (Cockpit/Walker)
+//   "Standby"  (grau)  — Flug ist inaktiv (Menu/Worldmap/Ladebildschirm)
+//                        → auch wenn User-Toggle "an" ist, wird nicht gesendet
+//   "Verborgen" (grau) — User hat Tracking manuell aus
+function renderTrackingButton() {
   const btn   = document.getElementById('trackingToggle');
   const dot   = document.getElementById('trackingDot');
   const label = document.getElementById('trackingLabel');
-  if (btn) btn.dataset.enabled = enabled ? 'true' : 'false';
-  if (label) label.textContent = enabled ? 'Sichtbar' : 'Verborgen';
-  if (dot) {
-    if (enabled) {
-      dot.className = 'w-2 h-2 rounded-full bg-[color:var(--color-good)] shadow-[0_0_8px_var(--color-good)]';
-    } else {
-      dot.className = 'w-2 h-2 rounded-full bg-[color:var(--color-muted)]';
-    }
+  // KEIN Snapshot oder Demo-Snapshot oder explizit in_menu → "Standby".
+  // Default-Annahme: wenn wir keine Sim-Daten haben, sind wir NICHT im Flug.
+  // Sonst flackert der Button beim Boot / Worldmap-Wechsel kurz auf "Sichtbar"
+  // (mySim=null → in_menu=undefined → faelschlich userWants-Branch).
+  const inMenu    = !state.mySim || !!state.mySim.in_menu || !!state.mySim.demo;
+  const userWants = !!state.trackingEnabled;
+  const effective = userWants && !inMenu;
+
+  let labelText, dotClass;
+  if (inMenu) {
+    labelText = 'Standby';
+    dotClass  = 'w-2 h-2 rounded-full bg-[color:var(--color-muted)] opacity-60';
+  } else if (userWants) {
+    labelText = 'Sichtbar';
+    dotClass  = 'w-2 h-2 rounded-full bg-[color:var(--color-good)] shadow-[0_0_8px_var(--color-good)]';
+  } else {
+    labelText = 'Verborgen';
+    dotClass  = 'w-2 h-2 rounded-full bg-[color:var(--color-muted)]';
   }
+  if (btn)   btn.dataset.enabled = effective ? 'true' : 'false';
+  if (label) label.textContent   = labelText;
+  if (dot)   dot.className       = dotClass;
+}
+
+function applyTrackingState(enabled) {
+  state.trackingEnabled = !!enabled;
+  renderTrackingButton();
   // Bei "aus": alle Mesh-Rooms verlassen — andere Piloten sehen unsere
   // Position dann nicht mehr. Bei "an": updateRooms() joint beim naechsten
   // snapshot automatisch neu (via renderSelf → updateRooms).
@@ -429,9 +501,10 @@ function renderProUi() {
   if (input && document.activeElement !== input) {
     input.value = state.licenseKey || '';
   }
-  // Private-Rooms-Card: nur fuer Pro sichtbar
-  const priv = document.getElementById('privateRoomsDetails');
-  if (priv) priv.style.display = state.isPro ? '' : 'none';
+  // Private-Rooms-Gate liegt jetzt im Mode-Pill im Peers-Panel.
+  // Der "Privater Raum…"-Action-Button zeigt bei Klick ein Upgrade-Modal
+  // wenn nicht Pro (siehe modeActionBtn-Handler). Er bleibt immer sichtbar,
+  // aber funktional gated.
   // Mesh-Chip refresh (zeigt ggf. neues Cap)
   renderMeshChip();
 }
@@ -454,6 +527,58 @@ async function sha256Hex(text) {
   return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+// Event-Organizer-Range-Override: beim Join holen wir aus dem WP-Plugin-REST
+// die optionalen Audio-Ranges fuer diese Passphrase. Werden nur temporaer auf
+// audioConfig geschrieben (nicht in localStorage). Beim Leave restaureiren
+// wir die Original-Defaults.
+const GSIM_EVENTS_API = 'https://www.gsimulations.de/wp-json/gsim-events/v1';
+let _rangeSnapshot = null;   // { walker, cockpit, crossoverM } oder null
+
+async function fetchEventRanges(passphrase) {
+  try {
+    const url = `${GSIM_EVENTS_API}/events/by-passphrase/${encodeURIComponent(passphrase)}`;
+    const r = await fetch(url, { credentials: 'omit' });
+    if (!r.ok) return null;
+    const data = await r.json();
+    return data?.ranges || null;
+  } catch (e) {
+    console.warn('[event-ranges] fetch failed:', e.message);
+    return null;
+  }
+}
+
+function applyEventRanges(ranges) {
+  // Snapshot der aktuellen Werte (vor Override) damit leave() restaureiren kann.
+  _rangeSnapshot = {
+    walker:   { ...audioConfig.walker },
+    cockpit:  { ...audioConfig.cockpit },
+    crossoverM: audioConfig.crossoverM,
+  };
+  if (ranges.walker_m && ranges.walker_m > 0) {
+    audioConfig.walker.maxRangeM   = ranges.walker_m;
+    audioConfig.walker.fullVolumeM = Math.max(1, Math.min(10, ranges.walker_m * 0.04));
+  }
+  if (ranges.cockpit_m && ranges.cockpit_m > 0) {
+    audioConfig.cockpit.maxRangeM   = ranges.cockpit_m;
+    audioConfig.cockpit.fullVolumeM = Math.max(10, Math.min(200, ranges.cockpit_m * 0.01));
+  }
+  if (ranges.crossover_m != null && ranges.crossover_m >= 0) {
+    audioConfig.crossoverM = ranges.crossover_m;
+  }
+  // WICHTIG: Nicht saveAudioConfig() aufrufen — Override ist nur fuer die
+  // Raum-Mitgliedschaft, soll nicht in localStorage landen.
+  console.info('[event-ranges] applied:', ranges);
+}
+
+function restoreRangeDefaults() {
+  if (!_rangeSnapshot) return;
+  Object.assign(audioConfig.walker,  _rangeSnapshot.walker);
+  Object.assign(audioConfig.cockpit, _rangeSnapshot.cockpit);
+  audioConfig.crossoverM = _rangeSnapshot.crossoverM;
+  _rangeSnapshot = null;
+  console.info('[event-ranges] restored defaults');
+}
+
 async function joinPrivateRoom(passphrase, { forceAllow = false } = {}) {
   const pass = (passphrase || '').trim();
   if (!pass) return;
@@ -473,6 +598,11 @@ async function joinPrivateRoom(passphrase, { forceAllow = false } = {}) {
     state.rooms.delete(cell);
   }
   state.privateRoom = { passphrase: pass, key };
+  // Event-spezifische Ranges asynchron holen (nicht blockierend — Raum-Join
+  // passiert sofort, Ranges werden angewendet sobald verfuegbar).
+  fetchEventRanges(pass).then(ranges => {
+    if (ranges && state.privateRoom?.passphrase === pass) applyEventRanges(ranges);
+  });
   // Direkt den privaten Room joinen; updateRooms() respektiert privateRoom.
   joinCellRoom(key);
   renderPrivateRoomUi();
@@ -491,6 +621,7 @@ function leavePrivateRoom() {
     state.rooms.delete(key);
   }
   state.privateRoom = null;
+  restoreRangeDefaults();
   renderPrivateRoomUi();
   // Geohash-Rooms werden beim naechsten updateRooms() automatisch gejoined.
   if (state.mySim) updateRooms();
@@ -499,31 +630,50 @@ function leavePrivateRoom() {
 }
 
 function renderPrivateRoomUi() {
-  const joinedEl  = document.getElementById('privateRoomJoined');
-  const passInput = document.getElementById('privateRoomPass');
-  const joinBtn   = document.getElementById('privateRoomJoinBtn');
-  const leaveBtn  = document.getElementById('privateRoomLeaveBtn');
-  // Peers-Card-Titel dynamisch: "Piloten im Raum 'X'" im Private-Mode,
-  // sonst "Piloten im Mesh".
-  const titleEl = document.getElementById('peersTitle');
-  if (titleEl) {
-    titleEl.textContent = state.privateRoom
-      ? `Piloten im Raum "${state.privateRoom.passphrase}"`
-      : 'Piloten im Mesh';
-  }
+  // Neues Mode-Pill-Paradigma im Peers-Panel:
+  //   Kein Private-Room → Pill "📡 Öffentliches Mesh" + Action "Privater Raum…"
+  //                       (Action oeffnet Passphrase-Inline-Form)
+  //   Private-Room aktiv → Pill "🔒 Raum: <passphrase>" + Action "Verlassen"
+  const pillIcon   = document.getElementById('peersModeIcon');
+  const pillLabel  = document.getElementById('peersModeLabel');
+  const actionBtn  = document.getElementById('peersModeAction');
+  const form       = document.getElementById('privateRoomForm');
+  const passInput  = document.getElementById('privateRoomPass');
+
   if (state.privateRoom) {
-    if (joinedEl) {
-      joinedEl.textContent = `Verbunden: "${state.privateRoom.passphrase}" (${state.privateRoom.key.slice(0, 14)}…)`;
-      joinedEl.style.display = '';
+    if (pillIcon)  pillIcon.textContent  = '🔒';
+    if (pillLabel) pillLabel.textContent =
+      `Raum: ${state.privateRoom.passphrase.length > 24
+        ? state.privateRoom.passphrase.slice(0, 22) + '…'
+        : state.privateRoom.passphrase}`;
+    if (actionBtn) {
+      actionBtn.textContent = 'Verlassen';
+      actionBtn.dataset.mode = 'leave';
+      actionBtn.style.color = 'var(--color-bad)';
     }
-    if (passInput) passInput.disabled = true;
-    if (joinBtn) joinBtn.style.display = 'none';
-    if (leaveBtn) leaveBtn.style.display = '';
+    if (form) form.classList.add('hidden');
+    if (passInput) passInput.value = '';
   } else {
-    if (joinedEl) joinedEl.style.display = 'none';
-    if (passInput) passInput.disabled = false;
-    if (joinBtn) joinBtn.style.display = '';
-    if (leaveBtn) leaveBtn.style.display = 'none';
+    if (pillIcon)  pillIcon.textContent  = '📡';
+    if (pillLabel) pillLabel.textContent = 'Öffentliches Mesh';
+    if (actionBtn) {
+      actionBtn.textContent = 'Privater Raum…';
+      actionBtn.dataset.mode = 'open-form';
+      actionBtn.style.color = '';
+    }
+    // Formular-Sichtbarkeit wird nicht hier umgeschaltet — das macht der Handler
+    // beim Klick. Hier nur sicherstellen, dass das Input leer ist wenn wir
+    // frisch rauskommen aus einem Room.
+  }
+
+  // Legacy-Title: da unser neuer Peers-Panel-Titel "Piloten" statisch ist,
+  // aktualisieren wir den noch, falls ein alter HTML-Stand da ist.
+  const titleEl = document.getElementById('peersTitle');
+  if (titleEl && state.privateRoom) {
+    // Optional: Badge hinter "Piloten"
+    titleEl.innerHTML = 'Piloten';
+  } else if (titleEl) {
+    titleEl.textContent = 'Piloten';
   }
 }
 
@@ -705,6 +855,20 @@ function connectBackendWs() {
       applyTrackingState(!!m.enabled);
     } else if (m.type === 'license_state') {
       applyLicenseState(m);
+    } else if (m.type === 'remote_action') {
+      // MSFS-Panel hat Button geklickt, Backend relayted hier → ausfuehren.
+      // toggle-tracking wird schon im Backend gemacht (kommt ueber tracking_state).
+      // Hier nur Browser-only Actions.
+      if (!_isPrimaryTab) return;  // Nur primary-Tab fuehrt aus
+      const a = m.action;
+      if (a === 'ptt-down') {
+        if (!state.voxMode) setTalking(true);
+      } else if (a === 'ptt-up') {
+        if (!state.voxMode) setTalking(false);
+      } else if (a === 'toggle-far') {
+        const box = document.getElementById('showFar');
+        if (box) { box.checked = !box.checked; box.dispatchEvent(new Event('change')); }
+      }
     }
   };
   backendWs.onclose = () => {
@@ -811,13 +975,113 @@ _appStartPromise.then(ok => { if (ok) connectBackendWs(); });
 state.audioInputId  = localStorage.getItem('vw.audioInputId')  || '';
 state.audioOutputId = localStorage.getItem('vw.audioOutputId') || '';
 
+// --- Local VAD (fuer Ducking) ------------------------------------------------
+// Wir analysieren den eigenen Mic-Stream kontinuierlich auf RMS und setzen
+// state.imSpeakingLocal. Wird in updateAudioFor() ausgewertet um bei Bedarf
+// alle Peer-Gains zu reduzieren (Ducking). Laeuft pro 200 ms im Tick unten.
+function setupLocalVAD() {
+  try {
+    // Falls schon ein Analyser existiert (z.B. Mic-Wechsel) → disconnecten,
+    // wir bauen frisch auf dem neuen Stream auf.
+    if (state.localVadAnalyser) {
+      try { state.localVadAnalyser.disconnect(); } catch {}
+      state.localVadAnalyser = null;
+    }
+    if (!state.micStream) return;
+    const ctx = ensureCtx();
+    const src = ctx.createMediaStreamSource(state.micStream);
+    const an  = ctx.createAnalyser();
+    an.fftSize = 512;
+    src.connect(an);
+    // KEIN connect zu destination — wir wollen unseren eigenen Mic nicht hoeren.
+    state.localVadAnalyser = an;
+    state._localVadBuf = new Float32Array(an.fftSize);
+  } catch (e) {
+    console.warn('[local-vad]', e);
+  }
+}
+
+// Liefert aktuellen RMS-Pegel (0..~1) vom lokalen Mikrofon. -1 wenn kein
+// Analyser verfuegbar. Wird pro Tick vom Audio-Loop gelesen (fuer Ducking +
+// Mic-Level-Meter unter dem PTT-Button).
+function currentLocalMicRms() {
+  const an  = state.localVadAnalyser;
+  const buf = state._localVadBuf;
+  if (!an || !buf) return -1;
+  // track.enabled=false (PTT-idle, kein VOX) → analyser sieht kein Signal,
+  // RMS bleibt nahe 0. Trotzdem pruefen, damit wir bei aktivem Mic reagieren.
+  an.getFloatTimeDomainData(buf);
+  let sum = 0;
+  for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+  return Math.sqrt(sum / buf.length);
+}
+
+function detectLocalSpeaking() {
+  const rms = currentLocalMicRms();
+  if (rms < 0) return false;
+  return rms > (audioConfig.ducking?.threshold ?? 0.02);
+}
+
+// Mic-Level-Meter unter dem PTT-Button: bar-width aus RMS.
+// Kalibrierung: RMS 0..0.3 → 0..100% width. Oberhalb 0.3 clippt's bei 100%.
+// Gamma-Korrektur (sqrt) macht leise Stimmen sichtbarer — linear waere die
+// Leiste bei normalem Sprechen nur ~15% gefuellt.
+let _micLevelEl = null;
+function updateMicLevelBar(rms) {
+  if (!_micLevelEl) _micLevelEl = document.getElementById('micLevel');
+  if (!_micLevelEl) return;
+  // Kein Mic (rms = -1) oder Track stumm (PTT idle, kein VOX) → Leiste leer.
+  const trackLive = !!(state.micTrack && state.micTrack.enabled);
+  if (rms < 0 || !trackLive) {
+    _micLevelEl.style.width = '0%';
+    return;
+  }
+  const norm = Math.min(1, Math.sqrt(Math.max(0, rms) / 0.3));
+  _micLevelEl.style.width = (norm * 100).toFixed(1) + '%';
+}
+
+// Helper fuer updateAudioFor(): Faktor 1.0 (normal) oder ducking.attenuation
+// (< 1, typ. 0.3) wenn ducking eingeschaltet UND ich gerade spreche.
+function currentDuckFactor() {
+  if (!audioConfig.ducking?.enabled) return 1.0;
+  if (!state.imSpeakingLocal) return 1.0;
+  const att = +audioConfig.ducking.attenuation;
+  return Number.isFinite(att) && att >= 0 && att <= 1 ? att : 0.3;
+}
+
 async function ensureMic() {
   try {
-    // Alten Stream sauber beenden wenn Device wechselt
+    // Alten Stream sauber beenden wenn Device wechselt.
+    // WICHTIG: VORHER von allen Peer-Connections detachen, sonst bleibt der
+    // tote Track bei den Peers haengen und reconcileAudioStreams() haengt
+    // den neuen Stream nicht mehr an (p._sendingAudio steht auf true).
+    // Ohne diesen Schritt hoeren alle Peers Stille bis Reload.
     if (state.micStream) {
-      for (const t of state.micStream.getTracks()) t.stop();
+      const oldStream = state.micStream;
+      for (const { room, peers } of state.rooms.values()) {
+        if (!room) continue;
+        for (const [peerId, p] of peers) {
+          if (p._sendingAudio) {
+            try {
+              if (typeof room.removeStream === 'function') {
+                room.removeStream(oldStream, peerId);
+              }
+            } catch {}
+            p._sendingAudio = false;
+          }
+        }
+      }
+      for (const t of oldStream.getTracks()) t.stop();
       state.micStream = null;
       state.micTrack  = null;
+      // Local-VAD-Analyser vom alten Stream freigeben — setupLocalVAD() unten
+      // baut auf dem neuen Stream frisch auf.
+      if (state.localVadAnalyser) {
+        try { state.localVadAnalyser.disconnect(); } catch {}
+        state.localVadAnalyser = null;
+        state._localVadBuf = null;
+      }
+      state.imSpeakingLocal = false;
     }
     const constraints = {
       audio: {
@@ -833,6 +1097,9 @@ async function ensureMic() {
     state.micTrack  = state.micStream.getAudioTracks()[0];
     state.micTrack.enabled = state.voxMode;
     setStatus('mic', 'bereit', 'good');
+    // Local-VAD-Analyser fuer Ducking aufsetzen (bleibt auch wenn ducking
+    // deaktiviert — Kosten sind minimal, dafuer kein Init-Delay beim Einschalten).
+    setupLocalVAD();
     // Audio-Streams zu Peers werden NICHT pauschal angehaengt — das macht
     // reconcileAudioStreams() nach Distanz (O(Dichte) statt O(N)).
     reconcileAudioStreams();
@@ -932,21 +1199,58 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   renderProUi();
 
-  // Private-Rooms (Pro)
+  // Private-Rooms: Mode-Pill-Paradigma. Der "Privater Raum…"-Button rechts
+  // im Peers-Panel ist der einzige Einstieg. Er macht zweierlei:
+  //   data-mode="open-form" → Inline-Form einblenden (bzw. Upgrade-Modal wenn kein Pro)
+  //   data-mode="leave"     → Raum verlassen
+  const modeActionBtn = document.getElementById('peersModeAction');
+  modeActionBtn?.addEventListener('click', () => {
+    const mode = modeActionBtn.dataset.mode || 'open-form';
+    if (mode === 'leave') {
+      leavePrivateRoom();
+      return;
+    }
+    // mode === 'open-form': Upgrade-Gate nur wenn nicht Pro + kein Event-Join
+    if (!state.isPro) {
+      showUpgradeModal('Private Rooms sind ein Pro-Feature. Event-Teilnehmer kommen über den Einladungs-Link des Veranstalters rein.');
+      return;
+    }
+    const form     = document.getElementById('privateRoomForm');
+    const passEl   = document.getElementById('privateRoomPass');
+    if (form) form.classList.toggle('hidden');
+    if (form && !form.classList.contains('hidden')) passEl?.focus();
+  });
+
   const privJoinBtn = document.getElementById('privateRoomJoinBtn');
   privJoinBtn?.addEventListener('click', () => {
     const passEl = document.getElementById('privateRoomPass');
     joinPrivateRoom(passEl?.value || '');
   });
+
+  const privCancelBtn = document.getElementById('privateRoomFormCancel');
+  privCancelBtn?.addEventListener('click', () => {
+    const form = document.getElementById('privateRoomForm');
+    const pass = document.getElementById('privateRoomPass');
+    if (form) form.classList.add('hidden');
+    if (pass) pass.value = '';
+  });
+
+  // Legacy-Leave-Button (im DOM noch als hidden Element — fuer Rueckwaertskompat)
   const privLeaveBtn = document.getElementById('privateRoomLeaveBtn');
   privLeaveBtn?.addEventListener('click', leavePrivateRoom);
+
   const privPassEl = document.getElementById('privateRoomPass');
   privPassEl?.addEventListener('keydown', e => {
     if (e.key === 'Enter') joinPrivateRoom(privPassEl.value);
+    if (e.key === 'Escape') document.getElementById('privateRoomFormCancel')?.click();
   });
   renderPrivateRoomUi();
 
-  // Audio-Reichweite Slider
+  // Audio-Reichweite-Slider sind ab jetzt NICHT mehr in der User-UI —
+  // Defaults sind fuer Piloten festgezurrt (Walker 10m, Cockpit 5km,
+  // Crossover 0). Fuer Dev-Tuning gibt es die Slider im Debug-Panel
+  // (Strg+Shift+D). Event-Organizer koennen pro Event andere Werte
+  // setzen — wird beim ?join=-Flow geladen.
   setupRangeSliders();
 
   // --- Radar-Zoom (Mausrad / Doppelklick) --------------------------------
@@ -976,6 +1280,9 @@ function fmtRange(m) {
 }
 
 function setupRangeSliders() {
+  // Graceful skip wenn die Range-Slider-DOM-Elemente nicht mehr existieren
+  // (aus der User-UI entfernt). Defaults bleiben aus loadAudioConfig().
+  if (!document.getElementById('rangeWalker')) return;
   const walkerEl    = document.getElementById('rangeWalker');
   const walkerValEl = document.getElementById('rangeWalkerVal');
   const cockpitEl   = document.getElementById('rangeCockpit');
@@ -1036,7 +1343,7 @@ function updateRooms() {
   if (!state.trackingEnabled) return;
   // Wenn MSFS im Hauptmenue: kein Mesh-Join, keine Audio-Uebertragung.
   // renderSelf() hat bestehende Rooms bei in_menu bereits verlassen.
-  if (state.mySim.in_menu) return;
+  if (state.mySim.in_menu || state.mySim.demo) return;  // kein Flug → kein Mesh-Join
   // Privater Room / Event: Mesh wird zusaetzlich per Geohash geshardet, damit
   // grosse Events (200 Leute ueber Europa verteilt) nicht in einem Full-Mesh
   // ersticken. Jeder Teilnehmer verbindet sich nur mit geografisch nahen
@@ -1293,7 +1600,10 @@ function updateAudioFor(p) {
     ? 1.0
     : (0.5 + 0.5 * Math.cos(deltaDeg * Math.PI / 180));
 
-  const v = volumeForDistance(d, profile) * mouthFactor;
+  // Ducking: wenn ich gerade spreche und Ducking aktiv ist, alle Peer-Stimmen
+  // runter (Discord-artig). Faktor = audioConfig.ducking.attenuation (typ. 0.3).
+  const duck = currentDuckFactor();
+  const v = volumeForDistance(d, profile) * mouthFactor * duck;
   p.gainNode.gain.setTargetAtTime(v, audioCtx.currentTime, 0.05);
   p.currentVolume = v;
 
@@ -1410,6 +1720,13 @@ setInterval(() => {
     setStatus('sim', 'getrennt (MSFS beendet?)', 'warn');
   }
 
+  // Lokales VAD: "spreche ich gerade?" — wird fuer Ducking in updateAudioFor()
+  // ausgewertet. Cheap: ein AnalyserNode-RMS pro Tick, ~0.01 ms CPU.
+  // Ein Read, zwei Konsumenten: Ducking-Flag + Mic-Level-Meter.
+  const _micRms = currentLocalMicRms();
+  state.imSpeakingLocal = _micRms >= 0 && _micRms > (audioConfig.ducking?.threshold ?? 0.02);
+  updateMicLevelBar(_micRms);
+
   // Listener-Orientierung aus eigenem Heading — so dreht sich die Welt
   // relativ zu deiner Nase, wenn du kurvst.
   updateListenerOrientation();
@@ -1461,6 +1778,60 @@ function bearingDeg(from, to) {
   return (toDeg(Math.atan2(y, x)) + 360) % 360;
 }
 
+// Top-Down-Flugzeug als Canvas-Path. Aufrufer muss ctx.translate/rotate selbst
+// machen, diese Funktion zeichnet im lokalen Koord-System mit Nase nach oben.
+// scale=1 → ca. 22×24 px. Form ist symmetrisch zur Y-Achse, damit die Drehung
+// um die Nase nach Heading sauber aussieht.
+function drawAircraftIcon(ctx, opts = {}) {
+  const s = opts.scale || 1;
+  ctx.save();
+  ctx.scale(s, s);
+  ctx.fillStyle  = opts.fill   || '#6aa5ff';
+  ctx.strokeStyle= opts.stroke || '#0b1220';
+  ctx.lineWidth  = opts.lineWidth || 1.2;
+  ctx.lineJoin   = 'round';
+  ctx.lineCap    = 'round';
+  ctx.beginPath();
+  // Nase oben
+  ctx.moveTo(0, -11);
+  // rechte Seite Rumpf (leicht eingezogen zur Nase hin)
+  ctx.quadraticCurveTo(2, -9, 2, -4);
+  // Hauptfluegel rechts (breit, flache Vorderkante, abgeschraegte Hinterkante)
+  ctx.lineTo(11, -1);
+  ctx.lineTo(11, 2);
+  ctx.lineTo(2, 3);
+  // Rumpf zum Heck
+  ctx.lineTo(2, 7);
+  // Heckfluegel rechts
+  ctx.lineTo(5, 9);
+  ctx.lineTo(5, 10.5);
+  ctx.lineTo(1, 11);
+  // Heckspitze
+  ctx.lineTo(1, 12);
+  ctx.lineTo(-1, 12);
+  ctx.lineTo(-1, 11);
+  // Heckfluegel links (spiegelbildlich)
+  ctx.lineTo(-5, 10.5);
+  ctx.lineTo(-5, 9);
+  ctx.lineTo(-2, 7);
+  // Rumpf linke Seite
+  ctx.lineTo(-2, 3);
+  // Hauptfluegel links
+  ctx.lineTo(-11, 2);
+  ctx.lineTo(-11, -1);
+  ctx.lineTo(-2, -4);
+  ctx.quadraticCurveTo(-2, -9, 0, -11);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // Cockpit-Fensterchen vorne (kleiner Akzent, wirkt dimensional)
+  ctx.fillStyle = 'rgba(11, 18, 32, 0.55)';
+  ctx.beginPath();
+  ctx.ellipse(0, -6, 1.4, 2.2, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 function renderRadar() {
   const canvas = document.getElementById('radar');
   if (!canvas) return;
@@ -1478,13 +1849,37 @@ function renderRadar() {
   ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.closePath();
   ctx.fillStyle = bg; ctx.fill();
 
-  // Range-Ringe bei 250 m, 500 m, 1 km, 1.25 km
-  const ringFracs = [250, 500, 1000, 1250].map(m => m / RADAR_RANGE_M);
+  // --- Range-Ringe: adaptiv gleichmaessig verteilt ------------------------
+  // 4 Ringe mit "nice" Schrittweite (1/2/5 * 10^n), basierend auf aktuellem
+  // Zoom RADAR_RANGE_M. So landen die Ringe immer auf runden Zahlen mit
+  // gleichen Abstaenden. Beispiele:
+  //   RADAR_RANGE_M = 1250   → step=250  → Ringe bei 250/500/750/1000/1250
+  //   RADAR_RANGE_M = 5000   → step=1000 → Ringe bei 1/2/3/4/5 km
+  //   RADAR_RANGE_M = 20000  → step=5000 → Ringe bei 5/10/15/20 km
+  const niceStep = (maxM) => {
+    const target = maxM / 4;
+    const mag    = Math.pow(10, Math.floor(Math.log10(target)));
+    const norm   = target / mag;
+    if (norm < 1.5) return 1 * mag;
+    if (norm < 3.5) return 2 * mag;
+    if (norm < 7.5) return 5 * mag;
+    return 10 * mag;
+  };
+  const ringStep = niceStep(RADAR_RANGE_M);
+  const rings    = [];
+  for (let d = ringStep; d <= RADAR_RANGE_M + 1; d += ringStep) rings.push(d);
+
+  // Ringe zeichnen — aeusserer Ring heller hervorgehoben
   ctx.lineWidth = 1;
-  ringFracs.forEach((f, i) => {
-    ctx.strokeStyle = i === ringFracs.length - 1
-      ? 'rgba(106, 165, 255, 0.55)' : 'rgba(106, 165, 255, 0.18)';
-    ctx.beginPath(); ctx.arc(cx, cy, R * f, 0, Math.PI * 2); ctx.stroke();
+  rings.forEach((m, i) => {
+    const frac    = m / RADAR_RANGE_M;
+    const isOuter = i === rings.length - 1;
+    ctx.strokeStyle = isOuter
+      ? 'rgba(106, 165, 255, 0.55)'
+      : 'rgba(106, 165, 255, 0.18)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, R * frac, 0, Math.PI * 2);
+    ctx.stroke();
   });
 
   // Kreuz
@@ -1503,13 +1898,32 @@ function renderRadar() {
   ctx.fillText('L', cx - R - 10, cy);
   ctx.fillText('\u25BC', cx, cy + R + 10);
 
-  // Distanz-Labels
-  ctx.fillStyle = 'rgba(134, 150, 184, 0.7)';
-  ctx.font = '9px system-ui';
-  ctx.textAlign = 'left';
-  ctx.fillText('1.25 km', cx + R * ringFracs[3] + 3, cy - 6);
-  ctx.textAlign = 'left';
-  ctx.fillText('1 km', cx + R * ringFracs[2] + 3, cy - 6);
+  // --- Distanz-Labels: auf 45°-Diagonale, aussen am Ring, mit Pill-Background.
+  // Pill garantiert Lesbarkeit wenn Ringe dicht liegen. 45° unten-rechts ist
+  // abseits der Kompass-Marker (oben/rechts/unten/links).
+  const diagX = Math.cos(Math.PI / 4);   // 0.707
+  const diagY = Math.sin(Math.PI / 4);
+  ctx.font = '600 10px ui-monospace, "SF Mono", Menlo, monospace';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+
+  const fmtRing = (m) => {
+    if (m < 1000) return `${Math.round(m)} m`;
+    const km = m / 1000;
+    if (Math.abs(km - Math.round(km)) < 0.01) return `${Math.round(km)} km`;
+    return `${km.toFixed(2).replace(/\.?0+$/, '')} km`;
+  };
+
+  rings.forEach((m) => {
+    const ringR = R * (m / RADAR_RANGE_M);
+    const lx = cx + (ringR + 6) * diagX;
+    const ly = cy + (ringR + 6) * diagY;
+    const text = fmtRing(m);
+    const w    = ctx.measureText(text).width;
+    ctx.fillStyle = 'rgba(11, 18, 32, 0.85)';
+    ctx.fillRect(lx - 3, ly - 8, w + 6, 16);
+    ctx.fillStyle = 'rgba(160, 190, 225, 0.95)';
+    ctx.fillText(text, lx, ly);
+  });
 
   // Hörbarkeits-Kreis (Audio-Bubble) um den eigenen Punkt.
   // Radius = audioConfig.maxRangeM (harte Hoergrenze). Im Gradient-Verlauf
@@ -1536,37 +1950,44 @@ function renderRadar() {
     ctx.arc(cx, cy, rRangePx, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
-    // Label "75 m" rechts oben am Ring
-    ctx.fillStyle = 'rgba(63, 220, 138, 0.75)';
-    ctx.font = '9px system-ui';
-    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-    ctx.fillText(
-      myRangeM < 1000 ? `${myRangeM.toFixed(0)} m` : `${(myRangeM/1000).toFixed(1)} km`,
-      cx + rRangePx + 4, cy - 2,
-    );
+    // Audio-Bubble-Label — unten-links der Bubble (225°-Position), mit kleinem
+    // Pill-Background fuer Lesbarkeit. Abseits der Ring-Labels (unten-rechts)
+    // und der Kompass-Marker → kein Overlap.
+    const audioLbl = myRangeM < 1000
+      ? `🔊 ${myRangeM.toFixed(0)} m`
+      : `🔊 ${(myRangeM/1000).toFixed(1)} km`;
+    const ax = cx - rRangePx * 0.707;
+    const ay = cy + rRangePx * 0.707 + 2;
+    ctx.font = '600 10px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    const lblW = ctx.measureText(audioLbl).width;
+    ctx.fillStyle = 'rgba(11, 18, 32, 0.8)';
+    ctx.fillRect(ax - lblW - 6, ay - 8, lblW + 8, 16);
+    ctx.fillStyle = 'rgba(63, 220, 138, 0.95)';
+    ctx.fillText(audioLbl, ax - 2, ay);
   }
 
-  // Eigenes Icon im Zentrum — Dreieck (Flugzeug) oder Kreis (Walker/zu Fuß)
+  // Eigenes Icon im Zentrum — Top-Down-Flugzeug oder Walker-Kreis.
+  // Immer Heading-Up orientiert (Nase oben).
   ctx.save();
   ctx.translate(cx, cy);
   if (state.mySim && state.mySim.on_foot) {
-    // Walker: kleiner gelb-grüner Kreis
+    // Walker: gelb-gruener Kreis mit Helper-Dot fuer Richtungsanzeige.
     ctx.fillStyle = '#3fdc8a';
     ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(0, 0, 5, 0, Math.PI * 2);
-    ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    // Blickrichtungs-Dot (oben)
+    ctx.fillStyle = '#0b1220';
+    ctx.beginPath(); ctx.arc(0, -3, 1.5, 0, Math.PI * 2); ctx.fill();
   } else {
-    // Flugzeug-Dreieck, zeigt nach oben (Heading-Up)
-    ctx.fillStyle = '#6aa5ff';
-    ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(0, -9);
-    ctx.lineTo(6, 6);
-    ctx.lineTo(0, 3);
-    ctx.lineTo(-6, 6);
-    ctx.closePath();
-    ctx.fill(); ctx.stroke();
+    // Top-Down-Flugzeug (Cessna-artig): Rumpf, Hauptfluegel, Heckfluegel.
+    // Groesse ca. 22 px breit × 24 px hoch, klar erkennbar auf 340 px Radar.
+    drawAircraftIcon(ctx, {
+      fill:   '#6aa5ff',
+      stroke: '#0b1220',
+      lineWidth: 1.3,
+      scale: 1.0,
+    });
   }
   ctx.restore();
 
@@ -1590,21 +2011,18 @@ function renderRadar() {
       const axAc = cx + Math.cos(thetaAc) * rAc;
       const ayAc = cy + Math.sin(thetaAc) * rAc;
 
-      // Flugzeug-Dreieck, orientiert nach Flugzeug-Heading
+      // Zurueckgelassenes Flugzeug: gleiches Icon wie Center, kleiner + blasser.
       ctx.save();
       ctx.translate(axAc, ayAc);
       const acHead = state.mySim.aircraft.heading_deg || 0;
       const acRel  = ((acHead - myHeadLocal) + 360) % 360;
       ctx.rotate(acRel * Math.PI / 180);
-      ctx.fillStyle = '#6aa5ff';
-      ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(0, -7);
-      ctx.lineTo(5, 5);
-      ctx.lineTo(0, 2);
-      ctx.lineTo(-5, 5);
-      ctx.closePath();
-      ctx.fill(); ctx.stroke();
+      drawAircraftIcon(ctx, {
+        fill:   'rgba(106, 165, 255, 0.85)',
+        stroke: '#0b1220',
+        lineWidth: 1.1,
+        scale: 0.7,
+      });
       ctx.restore();
 
       // (kein zusaetzliches Label — das Dreieck ist eindeutig das Flugzeug)
@@ -1701,6 +2119,44 @@ pttBtn.addEventListener('mouseleave', release);
 pttBtn.addEventListener('touchstart', e => { press(); e.preventDefault(); });
 pttBtn.addEventListener('touchend',   e => { release(); e.preventDefault(); });
 
+// Ducking-Toggle (im Stream-Modus-Block): wenn der lokale User spricht, werden
+// alle Peer-Stimmen leiser geregelt (audioConfig.ducking.attenuation, typ. 0.3).
+// Persistiert in localStorage ueber saveAudioConfig().
+(() => {
+  const el = document.getElementById('duckingToggle');
+  if (!el) return;
+  el.checked = !!audioConfig.ducking?.enabled;
+  el.addEventListener('change', () => {
+    audioConfig.ducking.enabled = !!el.checked;
+    saveAudioConfig();
+  });
+})();
+
+// OBS-Overlay-URL-Copy-Button. Nutzt location.origin damit die URL auch dann
+// stimmt wenn der Port mal ein anderer ist (7802..7810 Fallback).
+(() => {
+  const btn = document.getElementById('obsUrlCopyBtn');
+  const code = document.getElementById('obsUrl');
+  if (!btn || !code) return;
+  // URL basierend auf aktueller Session-Origin setzen
+  const url = `${location.origin}/overlay.html?stream=1`;
+  code.textContent = url;
+  btn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      const prev = btn.textContent;
+      btn.textContent = 'Kopiert ✓';
+      btn.disabled = true;
+      setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1500);
+    } catch {
+      // Fallback: Text auswaehlen, User drueckt Strg+C manuell
+      const r = document.createRange(); r.selectNode(code);
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(r);
+    }
+  });
+})();
+
 document.getElementById('voxToggle').addEventListener('change', e => {
   state.voxMode = e.target.checked;
   setTalking(state.voxMode);
@@ -1746,16 +2202,23 @@ function setText(id, txt) {
 function renderSelf() {
   const s = state.mySim;
   if (!s) return;
+  // Tracking-Button-Anzeige bei jedem Snapshot refreshen — so wechselt sie
+  // dynamisch zwischen "Sichtbar" (im Flug) und "Standby" (im Menu).
+  renderTrackingButton();
   const modeEl  = document.getElementById('mode');
   const posRow  = document.getElementById('posRow');
   const aglRow  = document.getElementById('aglRow');
   const cellRow = document.getElementById('cellRow');
   const acRow   = document.getElementById('acRow');
 
-  // --- Hauptmenue / kein Flug ----------------------------------------------
-  if (s.in_menu) {
-    setStatus('sim', 'Hauptmenü / kein Flug', 'warn');
-    modeEl.innerHTML = '<span class="badge external">Hauptmenü</span>';
+  // --- Hauptmenue / kein Flug / Demo-Modus --------------------------------
+  // Demo zaehlt auch als "kein Flug" — Badge zeigt das klar statt faelschlich
+  // "Cockpit" (weil demo camera_state=2 hat).
+  if (s.in_menu || s.demo) {
+    setStatus('sim', s.demo ? 'Demo (kein Sim)' : 'Hauptmenü / kein Flug', 'warn');
+    modeEl.innerHTML = s.demo
+      ? '<span class="badge external">Kein Sim</span>'
+      : '<span class="badge external">Hauptmenü</span>';
     // Nur "Ansicht" zeigen, alles andere ausblenden — die Zahlen wären
     // Default-Werte (0/90) und verwirren nur.
     if (posRow)  posRow.style.display  = 'none';
@@ -2012,6 +2475,8 @@ function publishOverlay() {
       });
     }
   }
+  // Lokaler Mic-RMS (0..~0.3 realistisch). Fuer das Panel-Mic-Level-Meter.
+  const micRms = currentLocalMicRms();
   sendBackend({
     type: 'overlay_state',
     mySim: state.mySim ? {
@@ -2020,8 +2485,6 @@ function publishOverlay() {
       heading_deg: state.mySim.heading_deg || 0,
       on_foot: !!state.mySim.on_foot,
       in_menu: !!state.mySim.in_menu,
-      // Aircraft-Position mitschicken damit der MSFS-Panel-Overlay das
-      // zurueckgelassene Flugzeug als zweiten Punkt einzeichnen kann.
       aircraft: state.mySim.aircraft ? {
         lat: state.mySim.aircraft.lat,
         lon: state.mySim.aircraft.lon,
@@ -2030,6 +2493,18 @@ function publishOverlay() {
     } : null,
     myRange: audioConfig.maxRangeM,
     peers: out,
+    // Erweiterter State fuer das MSFS-Panel (Phase 2) — alles read-only,
+    // Panel zeigt nur an, Aktionen gehen via panel_action zurueck.
+    ui: {
+      callsign:         (document.getElementById('callsign')?.value || 'PILOT').trim(),
+      isPro:            !!state.isPro,
+      privateRoom:      state.privateRoom ? state.privateRoom.passphrase : null,
+      trackingEnabled:  !!state.trackingEnabled,
+      voxMode:          !!state.voxMode,
+      showFar:          !!state.showFar,
+      imSpeaking:       !!state.imSpeakingLocal,
+      micRms:           micRms >= 0 ? micRms : 0,
+    },
   });
 }
 // 250 ms — gleich wie vorher bei BroadcastChannel, gibt fluessiges Radar.

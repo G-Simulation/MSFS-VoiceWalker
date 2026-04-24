@@ -152,12 +152,10 @@ bucht für 30–50 € und bekommt:
    Teilnehmer klickt drauf, App öffnet, Raum wird automatisch gejoint ohne
    dass jemand Passphrasen tippen muss. Link ist in Event-Ankündigung +
    Stream-Overlay + Discord-Post einbaubar
-3. **Professionelles PDF-Briefing** mit:
-   - Event-Datum + Startzeit (mit Zeitzone)
-   - Start-Coords / Route / Flughöhen (ICAO-Standard-Layout)
-   - Teilnehmer-Funkkanäle (falls mehrere Räume)
-   - Passphrase + QR-Code auf den Direkt-Join-Link
-   - Notfall-Procedures / Abbruch-Regeln
+3. ~~**Professionelles PDF-Briefing**~~ — aus dem Angebot entfernt (zu hoher
+   Composer-Setup-Aufwand auf Shared-Hosting, Veranstalter bauen ihr Briefing
+   selbst in Canva/Docs). Falls später doch: mPDF + endroid/qr-code via
+   Composer, siehe alte Planung unten.
 4. **Pro-Features für alle Teilnehmer während des Events** — jeder mit
    der Passphrase hat für die Event-Dauer Pro-Funktionalität
    (Unlimited Peers, priorisierte Audio-Qualität), muss nicht selbst
@@ -167,13 +165,19 @@ bucht für 30–50 € und bekommt:
    OBS-Browser-Plugin, Teilnehmer-Liste als Stream-Overlay verfügbar,
    Sprecher-Badges für Interviews
 
-### Streamer-spezifische Features (geplant)
+### Streamer-spezifische Features
 
-* **Stream-Overlay-URL**: `/overlay.html?stream=1` — transparente Version
-  mit nur Callsign + Sprech-Indikator, perfekt für OBS Browser-Source
-* **Ducking-Hook**: Wenn der Streamer spricht, automatisch andere Pilot-
-  Stimmen leiser (für Commentary-Qualität)
-* **Twitch-Chat-Bridge** (Idee für später): Zuschauer können im Chat
+* ✅ **Stream-Overlay-URL**: `/overlay.html?stream=1` — transparente Version
+  mit nur Callsign + Sprech-Indikator, perfekt für OBS Browser-Source.
+  Setup in OBS: Browser Source → URL `http://localhost:7801/overlay.html?stream=1`
+  → Background auf transparent → fertig. Implementiert in `web/overlay.html`
+  (`.stream-mode` CSS) und `web/overlay.js` (Query-Param-Detection).
+* ✅ **Ducking**: Wenn der Streamer spricht, automatisch andere Pilot-Stimmen
+  leiser (für Commentary-Qualität). Toggle in der Haupt-UI neben VOX, Faktor
+  konfigurierbar über `audioConfig.ducking.attenuation` (Default 0.3 = 30%
+  verbleibend). Lokales VAD via AnalyserNode auf `state.micStream`, duck-Factor
+  in `updateAudioFor()` eingerechnet.
+* ⬜ **Twitch-Chat-Bridge** (Idee für später): Zuschauer können im Chat
   `!join` tippen → kriegen Passphrase-Link zugeschickt
 
 ### Warum The Events Calendar (TEC) + Event Tickets?

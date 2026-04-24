@@ -93,6 +93,7 @@
     }
 
     /* PTT */
+    .ptt-wrap { position: relative; }
     .ptt-btn {
       display: flex; align-items: center; justify-content: center; gap: 10px;
       width: 100%; padding: 16px;
@@ -101,6 +102,7 @@
       background: linear-gradient(180deg, rgba(106,165,255,0.08), rgba(106,165,255,0.02));
       border: 1px solid var(--color-border);
       transition: all 0.12s;
+      position: relative; overflow: hidden;
     }
     .ptt-btn:hover { background: linear-gradient(180deg, rgba(106,165,255,0.16), rgba(106,165,255,0.08)); }
     .ptt-btn.live {
@@ -109,6 +111,53 @@
       color: #06210f;
       box-shadow: 0 0 0 3px rgba(63,220,138,0.18), 0 10px 40px -10px rgba(63,220,138,0.6);
     }
+
+    /* Mic-Level-Meter: 2 px Leiste am unteren Rand des PTT-Buttons.
+       Breite = 0..100% basierend auf live RMS vom Mikrofon (via localVadAnalyser).
+       Farbe wechselt von accent (leise) ueber good (normal) zu warn (hot). */
+    #micLevel {
+      position: absolute; left: 0; bottom: 0; height: 3px;
+      width: 0%; pointer-events: none;
+      background: linear-gradient(90deg, var(--color-accent) 0%, var(--color-good) 50%, var(--color-warn) 100%);
+      transition: width 80ms linear;
+      border-radius: 0 0 12px 12px;
+    }
+    .ptt-btn.live #micLevel { background: rgba(255,255,255,0.55); }
+
+    /* Toggle-Pills (VOX) — Aktiv-Zustand via data-active=true.
+       Checkbox wird zum iOS-Style-Toggle-Switch statt Radio-Dot. */
+    .toggle-pill input[type=checkbox] {
+      appearance: none; -webkit-appearance: none;
+      width: 30px; height: 17px; border-radius: 999px;
+      border: 1px solid var(--color-border);
+      background: rgba(106,165,255,0.08);
+      cursor: pointer;
+      transition: all 0.15s;
+      position: relative;
+      flex-shrink: 0;
+    }
+    .toggle-pill input[type=checkbox]::after {
+      content: '';
+      position: absolute; top: 1px; left: 1px;
+      width: 13px; height: 13px;
+      border-radius: 50%;
+      background: var(--color-muted);
+      transition: all 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.1);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    }
+    .toggle-pill input[type=checkbox]:checked {
+      background: var(--color-accent);
+      border-color: var(--color-accent);
+    }
+    .toggle-pill input[type=checkbox]:checked::after {
+      left: 14px;
+      background: #0b1220;
+    }
+    .toggle-pill:has(input:checked) {
+      border-color: var(--color-accent);
+      background: rgba(106,165,255,0.08);
+    }
+    .toggle-pill:has(input:checked) span { color: var(--color-fg); }
 
     /* Peer-Rows */
     .peer-row {
@@ -239,28 +288,27 @@
       </div>
     </header>
 
-    <!-- ================= STATUS STRIP ================= -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
-      <div class="glass rounded-xl px-4 py-3 flex items-center gap-3">
-        <div id="simDot" class="w-2.5 h-2.5 rounded-full bg-[color:var(--color-muted)] shrink-0"></div>
-        <div>
-          <div class="text-[10px] uppercase tracking-wider text-[color:var(--color-muted)]">Sim</div>
-          <div id="simStatus" class="text-sm font-semibold">verbinde…</div>
-        </div>
+    <!-- ================= STATUS STRIP =================
+         Kompakte einzeilige Variante: alle drei Kern-Stati (Sim / Mikrofon /
+         Mesh) in einer glass-Pill mit Trennern. Spart ~50 px vertikal gegenueber
+         der 3-Karten-Variante und hat trotzdem alle Farben/Dots. -->
+    <div class="glass rounded-xl px-5 py-3 mb-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm">
+      <div class="flex items-center gap-2">
+        <div id="simDot" class="w-2 h-2 rounded-full bg-[color:var(--color-muted)] shrink-0"></div>
+        <span class="text-[10px] uppercase tracking-wider text-[color:var(--color-muted)]">Sim</span>
+        <span id="simStatus" class="font-semibold tabular-nums">verbinde…</span>
       </div>
-      <div class="glass rounded-xl px-4 py-3 flex items-center gap-3">
-        <div id="micDot" class="w-2.5 h-2.5 rounded-full bg-[color:var(--color-muted)] shrink-0"></div>
-        <div>
-          <div class="text-[10px] uppercase tracking-wider text-[color:var(--color-muted)]">Mikrofon</div>
-          <div id="micStatus" class="text-sm font-semibold">initialisiere…</div>
-        </div>
+      <div class="h-4 w-px bg-[color:var(--color-border)] hidden md:block"></div>
+      <div class="flex items-center gap-2">
+        <div id="micDot" class="w-2 h-2 rounded-full bg-[color:var(--color-muted)] shrink-0"></div>
+        <span class="text-[10px] uppercase tracking-wider text-[color:var(--color-muted)]">Mikro</span>
+        <span id="micStatus" class="font-semibold tabular-nums">initialisiere…</span>
       </div>
-      <div class="glass rounded-xl px-4 py-3 flex items-center gap-3">
-        <div id="meshDot" class="w-2.5 h-2.5 rounded-full bg-[color:var(--color-muted)] shrink-0"></div>
-        <div>
-          <div class="text-[10px] uppercase tracking-wider text-[color:var(--color-muted)]">Mesh</div>
-          <div id="meshStatus" class="text-sm font-semibold">0 Peers</div>
-        </div>
+      <div class="h-4 w-px bg-[color:var(--color-border)] hidden md:block"></div>
+      <div class="flex items-center gap-2">
+        <div id="meshDot" class="w-2 h-2 rounded-full bg-[color:var(--color-muted)] shrink-0"></div>
+        <span class="text-[10px] uppercase tracking-wider text-[color:var(--color-muted)]">Mesh</span>
+        <span id="meshStatus" class="font-semibold tabular-nums">0 Peers</span>
       </div>
     </div>
 
@@ -356,27 +404,31 @@
             <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zm5 9a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/>
           </svg>
           <span id="pttLabel">Leertaste halten zum Sprechen</span>
+          <!-- Live-Level-Bar: width wird aus mic-RMS via updateMicLevel() in app.js
+               animiert. Immer im Button vorhanden, nur leer wenn mic stumm. -->
+          <div id="micLevel"></div>
         </button>
 
+        <!-- Callsign-Zeile: allein, damit auch lange Namen Platz haben.
+             Pro-Badge rechts in derselben Zeile (erscheint nur bei is_pro). -->
         <div class="mt-4 flex items-center gap-3">
           <label for="callsign" class="text-xs text-[color:var(--color-muted)] shrink-0">Callsign</label>
           <input id="callsign" maxlength="16" value="PILOT"
-                 class="flex-1 min-w-0 bg-[color:var(--color-bg-soft)] border border-[color:var(--color-border)] rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--color-ring)] transition">
-          <!-- Pro-Supporter-Badge — nur sichtbar wenn state.isPro -->
+                 class="flex-1 min-w-0 bg-[color:var(--color-bg-soft)] border border-[color:var(--color-border)] rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[color:var(--color-ring)] transition">
           <span id="proBadge" style="display:none"
-                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full
+                class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full
                        text-[10px] font-bold uppercase tracking-widest
                        bg-gradient-to-r from-[color:var(--color-accent)] to-[color:var(--color-good)]
-                       text-[#0b1220]"
+                       text-[#0b1220] shadow-lg shadow-blue-500/20"
                 title="Pro-Supporter — danke!">
             ★ PRO
           </span>
-          <label class="text-xs text-[color:var(--color-muted)] inline-flex items-center gap-1.5 cursor-pointer">
-            <input id="voxToggle" type="checkbox" class="accent-[color:var(--color-accent)]">
-            VOX
-          </label>
         </div>
 
+        <!-- Default ist Push-to-Talk (Leertaste halten). Der VOX-Modus
+             (offenes Mikro) ist fuer Power-User — z.B. VR mit beiden Haenden
+             am Yoke — hinter einem Details-Block versteckt. Normale Piloten
+             sollen den Standardflow "Leertaste halten" unmittelbar sehen. -->
         <div class="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 items-center text-xs">
           <label for="audioInput" class="text-[color:var(--color-muted)]">Mikrofon</label>
           <select id="audioInput"
@@ -390,62 +442,39 @@
           </select>
         </div>
 
-        <!-- Audio-Reichweite (zwei Welten: zu Fuß vs. Cockpit) -->
-        <details id="rangeDetails" class="mt-3 text-xs">
+        <!-- Mikrofon-Optionen: versteckt, weil fuer 95 % der User der Default
+             (Push-to-Talk via Leertaste) genau richtig ist. Hier fuer Power-User
+             die mit VR / HOTAS / Yoke beide Haende gebunden haben. -->
+        <details id="micOptionsDetails" class="mt-3 text-xs">
           <summary class="cursor-pointer text-[color:var(--color-muted)] select-none py-1">
-            Audio-Reichweite anpassen
+            Mikrofon-Optionen
           </summary>
-          <div class="mt-3 space-y-4">
-
-            <!-- Walker-Reichweite -->
-            <div>
-              <div class="flex justify-between items-baseline mb-1">
-                <label for="rangeWalker" class="text-[color:var(--color-muted)]">
-                  Zu Fuß <span class="opacity-70">(Walker ↔ Walker)</span>
-                </label>
-                <span id="rangeWalkerVal" class="tabular-nums font-semibold">10 m</span>
+          <div class="mt-3 space-y-2">
+            <label class="flex items-center justify-between gap-3 cursor-pointer
+                          px-3 py-2 rounded-lg border border-[color:var(--color-border)]
+                          hover:bg-white/5 transition">
+              <div class="flex-1 min-w-0">
+                <div class="text-[color:var(--color-fg)] font-semibold">Offenes Mikrofon</div>
+                <div class="text-[10px] text-[color:var(--color-muted)] leading-snug mt-0.5">
+                  Sendet automatisch, sobald du sprichst — ohne Taste drücken.
+                  Praktisch mit VR oder wenn beide Hände am Yoke / HOTAS sind.
+                  Standard bleibt <em>Leertaste halten</em>.
+                </div>
               </div>
-              <input type="range" id="rangeWalker"
-                     min="5" max="500" step="5" value="10"
-                     class="w-full accent-[color:var(--color-accent)]">
-            </div>
-
-            <!-- Cockpit-Reichweite -->
-            <div>
-              <div class="flex justify-between items-baseline mb-1">
-                <label for="rangeCockpit" class="text-[color:var(--color-muted)]">
-                  Im Cockpit <span class="opacity-70">(Funk-ähnlich)</span>
-                </label>
-                <span id="rangeCockpitVal" class="tabular-nums font-semibold">5.0 km</span>
-              </div>
-              <input type="range" id="rangeCockpit"
-                     min="500" max="20000" step="500" value="5000"
-                     class="w-full accent-[color:var(--color-accent)]">
-            </div>
-
-            <!-- Crossover -->
-            <div>
-              <div class="flex justify-between items-baseline mb-1">
-                <label for="rangeCrossover" class="text-[color:var(--color-muted)]">
-                  Welten-Crossover <span class="opacity-70">(Walker ↔ Cockpit)</span>
-                </label>
-                <span id="rangeCrossoverVal" class="tabular-nums font-semibold">aus</span>
-              </div>
-              <input type="range" id="rangeCrossover"
-                     min="0" max="100" step="5" value="0"
-                     class="w-full accent-[color:var(--color-accent)]">
-              <p class="text-[10px] text-[color:var(--color-muted)] mt-1 leading-snug">
-                0 m = strikt getrennt. &gt; 0 m = Walker und Cockpit-Piloten
-                hören sich innerhalb dieses Radius (z. B. am eigenen Flugzeug).
-              </p>
-            </div>
-
-            <button id="rangeReset" type="button"
-                    class="text-[10px] text-[color:var(--color-muted)] hover:text-[color:var(--color-accent)] underline decoration-dotted">
-              Auf Standardwerte zurücksetzen
-            </button>
+              <input id="voxToggle" type="checkbox"
+                     class="accent-[color:var(--color-accent)] w-4 h-4 cursor-pointer shrink-0">
+            </label>
           </div>
         </details>
+
+        <!-- Audio-Reichweite: bewusst nicht pro User einstellbar.
+             Defaults sind event-tauglich (Walker 10m, Cockpit 5km, Crossover 0).
+             Inviduelle User-Sliders fuehrten zu asymmetrischen Wahrnehmungen
+             im Mesh ("ich hoere keinen"). Falls Event-Organizer pro Event
+             andere Werte brauchen, kommt das spaeter als Event-Meta von
+             gsim-events via API.
+             Fuer Entwickler: Strg+Shift+D → Debug-Panel hat Audio-Tuning-
+             Slider (debug.js), reichen zum lokalen Testen. -->
 
         <!-- Pro freischalten -->
         <details id="licenseDetails" class="mt-4 text-xs">
@@ -467,38 +496,70 @@
             </div>
             <p class="text-[10px] text-[color:var(--color-muted)] leading-relaxed">
               Noch kein Key? Pro (7,99 € einmalig) gibt es auf
-              <a href="https://gsimulations.com/msfsvoicewalker" target="_blank" rel="noopener"
-                 class="underline decoration-dotted">gsimulations.com/msfsvoicewalker</a>.
+              <a href="https://www.gsimulations.de/produkt/voicewalker/" target="_blank" rel="noopener"
+                 class="underline decoration-dotted">gsimulations.de</a>.
               Unlimitierte Peers, Private Rooms, Supporter-Badge.
             </p>
           </div>
         </details>
 
-        <!-- Private Rooms (nur Pro) -->
-        <details id="privateRoomsDetails" class="mt-4 text-xs" style="display:none">
+        <!-- Der frueher hier stehende "Privater Raum"-Details-Block wurde
+             ins Peers-Panel integriert (Mode-Pill + Inline-Form) — siehe
+             rechte Card "Piloten im Mesh". -->
+
+        <!-- Stream-Modus (fuer Streamer auf Twitch/YouTube).
+             Versteckt hinter einem Details-Block, weil normale Piloten mit
+             "Ducking" / "Overlay" / "Browser-Source" nichts anfangen koennen.
+             Streamer finden das aktiv, alle anderen sehen nur die Ueberschrift. -->
+        <details id="streamDetails" class="mt-4 text-xs">
           <summary class="cursor-pointer text-[color:var(--color-muted)] select-none py-1">
-            Privater Raum
+            Stream-Modus (für Twitch / YouTube)
           </summary>
-          <div class="mt-3 space-y-2">
+          <div class="mt-3 space-y-3">
             <p class="text-[10px] text-[color:var(--color-muted)] leading-relaxed">
-              Passphrase eingeben — alle mit derselben Passphrase landen im
-              gleichen privaten Mesh (kein Geohash, weltweit verbunden). Ideal
-              für Fly-Ins und geschlossene Gruppen.
+              Für Streamer: automatisches Leiser-Regeln anderer Pilot-Stimmen
+              wenn du sprichst (wie Discord-Ducking) plus ein transparentes
+              Browser-Overlay für OBS.
             </p>
-            <p id="privateRoomJoined" style="display:none"
-               class="text-xs text-[color:var(--color-good)]"></p>
-            <div class="flex gap-2 items-center">
-              <input id="privateRoomPass" type="text" maxlength="80"
-                     placeholder="Passphrase (mind. 6 Zeichen)"
-                     class="flex-1 min-w-0 bg-[color:var(--color-bg-soft)] border border-[color:var(--color-border)] rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[color:var(--color-ring)] transition">
-              <button id="privateRoomJoinBtn" type="button"
-                      class="px-3 py-1.5 rounded-lg bg-[color:var(--color-accent)] text-[#0b1220] font-semibold hover:bg-blue-300 transition">
-                Betreten
-              </button>
-              <button id="privateRoomLeaveBtn" type="button" style="display:none"
-                      class="px-3 py-1.5 rounded-lg border border-[color:var(--color-border)] text-[color:var(--color-muted)] hover:bg-white/5 transition">
-                Verlassen
-              </button>
+
+            <!-- Ducking-Toggle -->
+            <label class="flex items-center justify-between gap-3 cursor-pointer
+                          px-3 py-2 rounded-lg border border-[color:var(--color-border)]
+                          hover:bg-white/5 transition">
+              <div class="flex-1 min-w-0">
+                <div class="text-[color:var(--color-fg)] font-semibold">Auto-Ducking</div>
+                <div class="text-[10px] text-[color:var(--color-muted)] leading-snug mt-0.5">
+                  Andere Piloten werden auf ~30 % runtergeregelt, solange du ins Mikro sprichst.
+                  Dein Kommentar dominiert im Stream-Mic.
+                </div>
+              </div>
+              <input id="duckingToggle" type="checkbox"
+                     class="accent-[color:var(--color-accent)] w-4 h-4 cursor-pointer shrink-0">
+            </label>
+
+            <!-- OBS-Browser-Source-Anleitung -->
+            <div class="px-3 py-2 rounded-lg border border-[color:var(--color-border)] space-y-1.5">
+              <div class="text-[color:var(--color-fg)] font-semibold">OBS Browser-Source</div>
+              <div class="text-[10px] text-[color:var(--color-muted)] leading-snug">
+                In OBS: <em>Quellen → + → Browser → Hinzufügen</em>, als URL diese einfügen:
+              </div>
+              <div class="flex gap-2 items-center">
+                <code id="obsUrl"
+                      class="flex-1 min-w-0 text-[11px] bg-[color:var(--color-bg-soft)] px-2 py-1 rounded
+                             border border-[color:var(--color-border)] truncate select-all">
+                  http://127.0.0.1:7801/overlay.html?stream=1
+                </code>
+                <button id="obsUrlCopyBtn" type="button"
+                        class="px-2.5 py-1 rounded-md bg-[color:var(--color-accent)] text-[#0b1220]
+                               font-semibold text-[11px] hover:bg-blue-300 transition shrink-0">
+                  Kopieren
+                </button>
+              </div>
+              <div class="text-[10px] text-[color:var(--color-muted)] leading-snug">
+                Breite 400 × Höhe 600 empfohlen. Im OBS-Browser-Dialog
+                <em>„Hintergrund steuern"</em> anhaken (transparent) — dann
+                erscheinen im Stream nur die gerade sprechenden Piloten als Pill-Tags.
+              </div>
             </div>
           </div>
         </details>
@@ -541,15 +602,67 @@
 
       <!-- PEERS -->
       <div class="glass rounded-2xl p-5">
-        <div class="flex items-baseline justify-between mb-3">
-          <h2 id="peersTitle" class="text-[11px] font-bold tracking-widest uppercase text-[color:var(--color-muted)]">
-            Piloten im Mesh
+        <!-- Mode-Header: zeigt aktuellen Modus (Oeffentliches Mesh / Privater Raum)
+             und enthaelt die zugehoerige Action (Raum betreten / Raum verlassen).
+             Ersetzt den frueher separaten "Privater Raum"-Details-Block. -->
+        <div class="flex items-center justify-between gap-2 mb-3 flex-wrap">
+          <div id="peersModePill"
+               class="inline-flex items-center gap-2 px-3 py-1 rounded-full
+                      bg-[color:var(--color-bg-soft)] border border-[color:var(--color-border)]
+                      text-[11px] font-semibold tracking-wider">
+            <span id="peersModeIcon" aria-hidden="true">📡</span>
+            <span id="peersModeLabel" class="text-[color:var(--color-fg)]">Öffentliches Mesh</span>
+          </div>
+          <button id="peersModeAction" type="button"
+                  class="text-[11px] font-semibold text-[color:var(--color-accent)]
+                         hover:underline cursor-pointer">
+            Privater Raum…
+          </button>
+        </div>
+
+        <!-- Inline-Form: Passphrase eingeben um einen privaten Raum zu betreten.
+             Sichtbar nur bei Klick auf "Privater Raum…" und wenn nicht bereits
+             gejoint. Pro-Gate passiert in app.js (joinPrivateRoom). -->
+        <div id="privateRoomForm" class="hidden mb-3 space-y-2">
+          <p class="text-[10px] text-[color:var(--color-muted)] leading-relaxed">
+            Passphrase eingeben — alle Piloten mit derselben Passphrase landen
+            im gleichen privaten Mesh (weltweit verbunden, kein Geohash).
+          </p>
+          <div class="flex gap-2 items-center">
+            <input id="privateRoomPass" type="text" maxlength="80"
+                   placeholder="Passphrase (mind. 6 Zeichen)"
+                   class="flex-1 min-w-0 bg-[color:var(--color-bg-soft)] border border-[color:var(--color-border)]
+                          rounded-lg px-3 py-1.5 text-xs font-mono
+                          focus:outline-none focus:ring-2 focus:ring-[color:var(--color-ring)] transition">
+            <button id="privateRoomJoinBtn" type="button"
+                    class="px-3 py-1.5 rounded-lg bg-[color:var(--color-accent)] text-[#0b1220]
+                           font-semibold text-xs hover:bg-blue-300 transition">
+              Betreten
+            </button>
+            <button id="privateRoomFormCancel" type="button"
+                    class="px-2 py-1.5 rounded-lg text-[color:var(--color-muted)] text-xs
+                           hover:bg-white/5 transition">
+              Abbrechen
+            </button>
+          </div>
+        </div>
+
+        <!-- Hidden: bleibt fuers bestehende app.js renderPrivateRoomUi() kompatibel.
+             Wird nicht mehr angezeigt, aber DOM-Ref darf nicht null sein. -->
+        <p id="privateRoomJoined" class="hidden"></p>
+        <button id="privateRoomLeaveBtn" type="button" class="hidden"></button>
+
+        <!-- Filter: weit entfernte Peers einblenden -->
+        <div class="flex items-center justify-between mb-2">
+          <h2 id="peersTitle" class="text-[10px] font-bold tracking-widest uppercase text-[color:var(--color-muted)]">
+            Piloten
           </h2>
           <label class="text-[11px] text-[color:var(--color-muted)] inline-flex items-center gap-1.5 cursor-pointer">
             <input id="showFar" type="checkbox" checked class="accent-[color:var(--color-accent)]">
             auch außer Reichweite
           </label>
         </div>
+
         <div id="peers">
           <p class="text-center text-xs text-[color:var(--color-muted)] py-4">
             Warte auf andere Piloten in deiner Nähe…
@@ -639,7 +752,7 @@
       </ul>
 
       <div class="flex flex-col sm:flex-row gap-3 items-center justify-end">
-        <a href="https://www.gsimulation.com/datenschutz" target="_blank" rel="noopener"
+        <a href="https://www.gsimulations.de/datenschutzerklaerung/" target="_blank" rel="noopener"
            class="text-xs text-[color:var(--color-muted)] hover:text-[color:var(--color-accent)] underline decoration-dotted">
           Vollständige Datenschutzerklärung
         </a>

@@ -166,20 +166,35 @@ START_TIME = time.time()
 # MSFS camera states:
 #  2  = Cockpit
 #  3  = External/Chase
+#  4  = Drone Camera (Showcase/Top-Down)  — Flug aktiv, Kamera frei
+#  5  = Fly-By / Tower-Camera             — Flug aktiv
+#  6  = Runway-Camera                     — Flug aktiv
+#  9  = Main Menu
+#  10 = Credits / Ready-Screen
+#  11 = Ready / Prepare-to-Fly
 #  12 = Worldmap (MSFS 2024, live verifiziert 22.04.2026 — cam=12 zeigt
 #       waehrend Worldmap-Browsing typ. Seattle-Default-Position 47.518932/
 #       -122.294505; NICHT als Walker werten!)
 #  13..19 = diverse 2020 Walker / EFB-Zustaende
-#  26, 30 = MSFS 2024 Walker (bestaetigt aus Live-Probe)
-#  27..29, 31..35 = weitere vermutete Walker-/EFB-Varianten
-WALKER_CAMERA_STATES = {13, 14, 15, 16, 17, 18, 19,
-                        26, 27, 28, 29, 30, 31, 32, 33, 34, 35}
-# CAMERA STATE Werte im Hauptmenue / Worldmap / Ladebildschirmen —
-# in diesen Zustaenden ist KEIN Flug aktiv; on_foot=False erzwingen.
-#   9  = Main Menu
-#   10 = Credits / Ready-Screen
-#   11 = Ready / Prepare-to-Fly
-#   12 = Worldmap  (MSFS 2024)
+#  16     = MSFS 2024 Walker (live verifiziert 24.04.2026 — on_foot=True
+#           wenn Avatar > 2m vom Aircraft entfernt)
+#  26     = MSFS 2024 Walker (laut altem Live-Probe-Vermerk)
+#  WICHTIG: 27..35 sind NICHT verifiziert. Live-Log vom 24.04.2026 zeigt:
+#    cam=30, 32 treten waehrend des Flug-Loading-Screens auf (kein Walker,
+#    on_foot=False, aber Position schon korrekt). Wenn diese in der Whitelist
+#    sind, zeigt die UI faelschlich "Sichtbar" waehrend des Loadings.
+#  → 27..35 raus aus der Whitelist. Falls ein User in einem dieser States
+#    trotzdem walkt, wuerde das im Log auffallen (cam=2X mit on_foot-faehiger
+#    Position) und wir koennen es nachpflegen.
+WALKER_CAMERA_STATES = {13, 14, 15, 16, 17, 18, 19, 26}
+# Camera-States in denen die App aktiv sein DARF — Whitelist-Ansatz:
+# nur bei eindeutig bekannten Flug-Zustaenden (Cockpit/External/Drone-Cam)
+# UND im Walker-Modus. Alle anderen Werte (Menu, Credits, Worldmap,
+# unbekannte neue States) gelten als "nicht aktiv" → in_menu=True.
+# Sicherer als Blacklist: wenn MSFS einen neuen camera_state einfuehrt,
+# bleibt die App standardmaessig stumm statt versehentlich zu senden.
+FLIGHT_CAMERA_STATES = {2, 3, 4, 5, 6} | WALKER_CAMERA_STATES
+# (Legacy-Blacklist behalten fuer Logging/Debug, aber nicht mehr autoritativ)
 MENU_CAMERA_STATES = {9, 10, 11, 12}
 
 
@@ -618,7 +633,9 @@ class SimReader:
 
     def _demo_snapshot(self):
         """Platzhalter wenn entweder Package fehlt ODER MSFS nicht laeuft.
-        Dadurch funktionieren Mesh/Radar/Testpeer auch ohne Sim-Start."""
+        Dadurch funktionieren Mesh/Radar/Testpeer auch ohne Sim-Start.
+        WICHTIG: in_menu=True setzen — sonst wuerde die Client-UI "Cockpit"
+        zeigen (camera_state=2) obwohl gar kein Sim laeuft."""
         return {
             "t": time.time(),
             "lat": 50.0379 + (time.time() % 60) * 0.00001,
@@ -628,6 +645,7 @@ class SimReader:
             "heading_deg": (time.time() * 3) % 360,
             "camera_state": 2,
             "on_foot": False,
+            "in_menu": True,
             "demo": True,
         }
 
@@ -780,10 +798,14 @@ class SimReader:
         # die Default-Position erkennen.
         ac_for_menu_check = (aircraft_pos.get("lat", 0.0), aircraft_pos.get("lon", 0.0)) \
             if aircraft_pos else (plane_lat, plane_lon)
+        # Whitelist-basiert: aktiv nur bei eindeutig bekannten Flug-States
+        # ODER Walker-State. Plus Positions-Check als zusaetzliche Sicherung
+        # (MSFS-Default-Position ≈ lat 0, lon 90 bedeutet "kein Flug aktiv",
+        # auch wenn cam_state zufaellig einen Flug-Wert hat).
         in_menu = (
-            _is_menu_position(ac_for_menu_check[0], ac_for_menu_check[1])
+            cam not in FLIGHT_CAMERA_STATES
+            or _is_menu_position(ac_for_menu_check[0], ac_for_menu_check[1])
             or _is_menu_position(lat, lon)
-            or cam in MENU_CAMERA_STATES
         )
         if in_menu:
             on_foot = False
@@ -1022,6 +1044,10 @@ ALLOWED_INBOUND = {
     # Pro-License-Key vom UI setzen/validieren (persistiert in config.json).
     # Payload: {"type": "set_license_key", "key": "DEV-PRO-..."}
     "set_license_key",
+    # Panel-Action: MSFS-Toolbar-Panel schickt Button-Klicks hierher, Backend
+    # leitet (bei Bedarf) an Haupt-Browser-Tab weiter als "remote_action".
+    # Payload: {"type": "panel_action", "action": "ptt-down"|"ptt-up"|"toggle-far"|"toggle-tracking"}
+    "panel_action",
 }
 
 
@@ -1160,6 +1186,33 @@ async def ws_handler(ws):
                             # Panel-Overlay: leere Peer-Liste + Tracking-off-Hinweis
                             STATE.overlay_cache = None
                             asyncio.create_task(broadcast({"type": "tracking_off"}))
+                elif t == "panel_action":
+                    # MSFS-Panel-Buttons. "toggle-tracking" wird direkt im
+                    # Backend ausgefuehrt (Backend-State). PTT + show-far sind
+                    # Browser-State → per remote_action broadcasten, Primary-Tab
+                    # reagiert. Whitelist gegen unbekannte Actions.
+                    action = str(m.get("action", ""))
+                    if action == "toggle-tracking":
+                        new_val = not STATE.tracking_enabled
+                        STATE.tracking_enabled = new_val
+                        cfg = load_config()
+                        cfg["tracking_enabled"] = new_val
+                        save_config(cfg)
+                        log.info("panel: tracking_enabled toggled to %s", new_val)
+                        asyncio.create_task(broadcast({
+                            "type": "tracking_state",
+                            "enabled": new_val,
+                        }))
+                        if not new_val:
+                            STATE.overlay_cache = None
+                            asyncio.create_task(broadcast({"type": "tracking_off"}))
+                    elif action in ("ptt-down", "ptt-up", "toggle-far"):
+                        asyncio.create_task(broadcast({
+                            "type": "remote_action",
+                            "action": action,
+                        }))
+                    else:
+                        log.debug("panel_action: unknown action=%r", action)
                 elif t == "set_license_key":
                     new_key = str(m.get("key", "")).strip()
                     async def _do_license(k: str):

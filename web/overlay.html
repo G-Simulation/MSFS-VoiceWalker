@@ -59,6 +59,37 @@
     color: var(--warn); font-size: 11px; line-height: 1.4;
   }
   .offline .big { font-size: 13px; font-weight: 600; margin-bottom: 4px; color: var(--fg); }
+
+  /* OBS Stream-Overlay-Mode: /overlay.html?stream=1
+     Transparenter Background, minimale UI, nur sprechende Peers sichtbar.
+     Browser-Source in OBS: URL setzen, Breite/Hoehe nach Geschmack, Background
+     transparent, "Refresh browser when scene becomes active" anschalten. */
+  body.stream-mode { background: transparent !important; padding: 6px; }
+  body.stream-mode .panel {
+    background: transparent !important;
+    border: none !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+    min-width: 0 !important;
+  }
+  body.stream-mode .title,
+  body.stream-mode .radar-wrap,
+  body.stream-mode .me,
+  body.stream-mode .hint,
+  body.stream-mode .offline { display: none !important; }
+  body.stream-mode #list .empty { display: none; }
+  body.stream-mode #list .row {
+    display: none;
+    background: rgba(11, 18, 32, 0.72);
+    border-left: 3px solid var(--speaking);
+    border-radius: 6px;
+    padding: 6px 10px;
+    margin-bottom: 4px;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  }
+  body.stream-mode #list .row.speaking { display: flex; }
+  body.stream-mode #list .row .d { display: none; }
+  body.stream-mode #list .row .nm { color: var(--fg); font-size: 14px; }
 </style>
 </head>
 <body>

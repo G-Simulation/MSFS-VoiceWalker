@@ -21,44 +21,205 @@
     <link rel="import" href="/templates/ingameUiHeader/ingameUiHeader.html" />
 
     <style>
+      /* NotoEmoji-Regular.ttf — SIL Open Font License 1.1
+         Lizenz-Datei liegt unter ./fonts/LICENSE_OFL.txt
+         Coherent GT hat keine Emoji-Glyphen in der Default-Font, deswegen
+         laden wir Noto Emoji als Fallback-Familie. Pattern verifiziert aus
+         steffieth-autopilot-panel/MyPanel.css (Digital-7 wird genauso geladen). */
+      @font-face {
+        font-family: "VW Emoji";
+        src: url("/InGamePanels/MSFSVoiceWalker/fonts/NotoEmoji-Regular.ttf") format("truetype"),
+             url("./fonts/NotoEmoji-Regular.ttf") format("truetype");
+        font-weight: normal;
+        font-style: normal;
+        font-display: swap;
+      }
+      /* Emojis ISOLIERT in NotoEmoji rendern — nicht als Fallback-Chain, sonst
+         springt der Coherent-Renderer auf NotoEmoji weil er "Segoe UI" nicht
+         kennt und alle Buchstaben werden Tofu. Stattdessen: jedes Emoji in
+         <span class="vw-emoji"> einwickeln. */
+      .vw-emoji { font-family: "VW Emoji"; font-style: normal; }
+
       * { margin: 0; padding: 0; box-sizing: border-box; }
       html, body { width: 100%; height: 100%; overflow: hidden; }
 
       .ingameUiContent, .ingameUiWrapper {
-        flex: 1 1 auto;
-        overflow: auto;
-        display: flex;
-        flex-direction: column;
-        min-height: 0;
-        min-width: 0;
+        flex: 1 1 auto; overflow: auto;
+        display: flex; flex-direction: column;
+        min-height: 0; min-width: 0;
       }
       ingame-ui.fittedContent .ingameUiWrapper { margin: 0 !important; }
 
-      #vw-root {
-        position: relative;
-        flex: 1 1 auto;
-        min-height: 0; min-width: 0;
-        display: flex; flex-direction: column;
-        background: #0b1220; color: #e9eefc;
-        font-family: "Segoe UI", system-ui, sans-serif; font-size: 13px;
-        padding: 12px; gap: 8px; align-items: center;
+      :root {
+        --bg:      #0b1220;
+        --fg:      #e9eefc;
+        --muted:   #8696b8;
+        --border:  #233457;
+        --accent:  #6aa5ff;
+        --good:    #3fdc8a;
+        --warn:    #ffb454;
+        --bad:     #ff6b6b;
+        --speak:   #ffe066;
       }
 
-      .vw-header { display: flex; align-items: center; gap: 8px;
-                   align-self: flex-start; flex-shrink: 0; }
-      .vw-dot { width: 9px; height: 9px; border-radius: 50%; background: #ff6b6b;
-                flex-shrink: 0; }
-      .vw-dot.good { background: #3fdc8a; box-shadow: 0 0 8px #3fdc8a; }
-      .vw-dot.warn { background: #ffb454; box-shadow: 0 0 8px #ffb454; }
-      .vw-label  { font-size: 11px; color: #8696b8; text-transform: uppercase;
-                   letter-spacing: 0.08em; }
+      #vw-root {
+        position: relative; flex: 1 1 auto;
+        min-height: 0; min-width: 0;
+        display: flex; flex-direction: column;
+        background: var(--bg); color: var(--fg);
+        font-family: "Segoe UI", system-ui, sans-serif;
+        font-size: 13px; padding: 10px; gap: 8px;
+      }
 
-      #vw-radar-wrap { flex: 1 1 auto; width: 100%;
-                       display: flex; align-items: center; justify-content: center;
-                       min-height: 0; }
-      canvas#radar { display: block; max-width: 100%; max-height: 100%; }
-      #vw-status { font-size: 13px; color: #e9eefc; text-align: center; flex-shrink: 0; }
-      #vw-peers  { font-size: 12px; color: #8696b8; text-align: center; flex-shrink: 0; }
+      /* HEADER: Connection-Dot + Callsign + Pro-Badge + Zoom-Label */
+      .vw-header {
+        display: flex; align-items: center; gap: 8px;
+        flex-shrink: 0;
+      }
+      .vw-dot {
+        width: 9px; height: 9px; border-radius: 50%;
+        background: var(--bad); flex-shrink: 0;
+      }
+      .vw-dot.good { background: var(--good); box-shadow: 0 0 8px var(--good); }
+      .vw-dot.warn { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+      #vw-label {
+        font-size: 10px; color: var(--muted);
+        text-transform: uppercase; letter-spacing: 0.08em;
+      }
+      #vw-callsign {
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 13px; font-weight: 600; color: var(--fg);
+        margin-left: 4px;
+      }
+      #vw-probadge {
+        display: none;
+        padding: 1px 6px; border-radius: 999px;
+        font-size: 9px; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.1em;
+        background: linear-gradient(90deg, var(--accent), var(--good));
+        color: #0b1220;
+      }
+      #vw-probadge.visible { display: inline-block; }
+      #vw-zoom {
+        margin-left: auto;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 10px; color: var(--muted);
+        padding: 2px 6px; border-radius: 4px;
+        background: rgba(106,165,255,0.08);
+        border: 1px solid var(--border);
+      }
+
+      /* ROOM-BADGE: privates Room-Label, nur sichtbar wenn gejoint */
+      #vw-room {
+        display: none;
+        align-items: center; gap: 6px; flex-shrink: 0;
+        padding: 3px 8px; border-radius: 999px;
+        font-size: 10px; font-weight: 600;
+        background: rgba(106,165,255,0.12);
+        border: 1px solid var(--border);
+        color: var(--fg);
+      }
+      #vw-room.visible { display: inline-flex; }
+
+      /* RADAR */
+      #vw-radar-wrap {
+        flex: 1 1 auto; width: 100%;
+        display: flex; align-items: center; justify-content: center;
+        min-height: 0;
+      }
+      canvas#radar {
+        display: block; max-width: 100%; max-height: 100%;
+        cursor: ns-resize;
+      }
+
+      /* SPEAKING-BANNER: prominenter Hinweis wer gerade spricht */
+      #vw-speaking {
+        display: none; flex-shrink: 0;
+        padding: 4px 10px; border-radius: 6px;
+        background: rgba(255, 224, 102, 0.14);
+        border-left: 3px solid var(--speak);
+        font-size: 12px; font-weight: 600; color: var(--fg);
+        text-align: center;
+      }
+      #vw-speaking.visible { display: block; }
+
+      /* MIC-LEVEL: kompakte 3-Pixel-Bar ueber den Action-Buttons */
+      #vw-miclevel-wrap {
+        height: 3px; width: 100%; flex-shrink: 0;
+        background: rgba(106,165,255,0.08);
+        border-radius: 2px; overflow: hidden;
+      }
+      #vw-miclevel {
+        height: 100%; width: 0%;
+        background: linear-gradient(90deg, var(--accent), var(--good), var(--warn));
+        transition: width 80ms linear;
+      }
+
+      /* ACTION-BUTTONS */
+      .vw-actions {
+        display: flex; gap: 6px; flex-shrink: 0;
+      }
+      .vw-btn {
+        flex: 1; padding: 6px 8px;
+        background: rgba(106,165,255,0.08);
+        border: 1px solid var(--border); border-radius: 6px;
+        color: var(--fg); font-size: 11px; font-weight: 600;
+        cursor: pointer; text-align: center;
+        transition: all 0.12s;
+        user-select: none;
+      }
+      .vw-btn:hover { background: rgba(106,165,255,0.18); }
+      .vw-btn.active {
+        background: var(--accent); color: #0b1220;
+        border-color: var(--accent);
+      }
+      .vw-btn.ptt.live {
+        background: var(--good); color: #0b1220;
+        border-color: var(--good);
+        box-shadow: 0 0 12px rgba(63,220,138,0.4);
+      }
+
+      /* PEER-LISTE */
+      #vw-peers {
+        flex-shrink: 0; display: flex; flex-direction: column; gap: 3px;
+        max-height: 95px; overflow: hidden;
+      }
+      .vw-peer {
+        display: flex; align-items: center; gap: 6px;
+        padding: 2px 6px; border-radius: 4px;
+        font-size: 11px;
+      }
+      .vw-peer.speaking {
+        background: rgba(255,224,102,0.10);
+        border-left: 2px solid var(--speak);
+      }
+      .vw-peer .pn {
+        flex: 1; color: var(--fg);
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .vw-peer .pd {
+        color: var(--muted); font-size: 10px;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        flex-shrink: 0;
+      }
+      .vw-peer.far .pn, .vw-peer.far .pd { color: #556582; }
+
+      #vw-peers-empty {
+        font-size: 11px; color: var(--muted);
+        text-align: center; padding: 4px 0;
+      }
+      #vw-peers-more {
+        font-size: 10px; color: var(--muted);
+        text-align: center; padding: 2px 0;
+      }
+
+      /* STATUS-ZEILE unten */
+      #vw-status {
+        font-size: 10px; color: var(--muted);
+        text-align: center; flex-shrink: 0;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      }
     </style>
 
     <script type="text/javascript" src="panel.js"></script>
@@ -72,15 +233,43 @@
       content-fit="true"
     >
       <div id="vw-root">
+        <!-- Header-Zeile: conn-dot, callsign, pro-badge, zoom-label -->
         <div class="vw-header">
           <span class="vw-dot" id="vw-conn"></span>
-          <span class="vw-label" id="vw-label">offline</span>
+          <span id="vw-label">offline</span>
+          <span id="vw-callsign">—</span>
+          <span id="vw-probadge"><span class="vw-emoji">★</span> PRO</span>
+          <span id="vw-zoom">1 km</span>
         </div>
+
+        <!-- Optionales Room-Badge (nur bei privatem Raum sichtbar) -->
+        <div id="vw-room"><span class="vw-emoji">🔒</span><span id="vw-room-label"></span></div>
+
+        <!-- Radar-Canvas -->
         <div id="vw-radar-wrap">
           <canvas id="radar" width="340" height="340"></canvas>
         </div>
-        <div id="vw-status">-</div>
-        <div id="vw-peers">wartet auf Mesh ...</div>
+
+        <!-- Speaking-Banner (nur sichtbar wenn jemand spricht) -->
+        <div id="vw-speaking"><span class="vw-emoji">🎙</span> <span id="vw-speaking-name"></span></div>
+
+        <!-- Mic-Level -->
+        <div id="vw-miclevel-wrap"><div id="vw-miclevel"></div></div>
+
+        <!-- Action-Buttons -->
+        <div class="vw-actions">
+          <div class="vw-btn ptt" id="vw-ptt" title="Halten zum Sprechen"><span class="vw-emoji">🎤</span> PTT</div>
+          <div class="vw-btn" id="vw-track" title="Tracking an/aus"><span class="vw-emoji">📡</span> Tracking</div>
+          <div class="vw-btn" id="vw-far" title="Weit entfernte Peers einblenden"><span class="vw-emoji">👁</span> Weit</div>
+        </div>
+
+        <!-- Peer-Liste (top 5 in Reichweite + Rest-Counter) -->
+        <div id="vw-peers">
+          <div id="vw-peers-empty">niemand in der Naehe</div>
+        </div>
+
+        <!-- Status-Koordinaten unten -->
+        <div id="vw-status">—</div>
       </div>
     </ingame-ui>
   </body>

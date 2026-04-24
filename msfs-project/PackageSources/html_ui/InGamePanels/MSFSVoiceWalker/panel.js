@@ -1,64 +1,78 @@
-// MSFSVoiceWalker — MSFS Toolbar Panel (FINAL v3)
+// MSFSVoiceWalker — MSFS Toolbar Panel (v4)
 // ==========================================================================
-// Single-file. Logs JEDEN Schritt ans Backend damit wir im voicewalker.log
-// sehen was passiert. Probiert WebSocket zu localhost:7801/ui und
-// 127.0.0.1:7801/ui. Bei Erfolg: Radar-Canvas wird per WS-Nachrichten
-// aktualisiert.
+// Phase 1+2+3 Panel-Rewrite:
+//  - HiDPI-Canvas, Top-Down-Flugzeug, adaptive Range-Ringe, Heading-Up-Pfeil,
+//    Compass-Marker, Speaking-Pulse, Pill-Labels, Audio-Bubble-Label
+//  - Erweiterter State: Callsign, Pro-Badge, Private-Room, Mic-Level, Peer-Liste
+//  - Action-Buttons: Tracking / Show-Far / PTT → Backend via panel_action
+//  - Smooth-Zoom + Doppelklick-Reset + sichtbares Zoom-Label
+//
+// Coherent-GT-Constraints die wir respektieren:
+//  - CSP: externes Script ok, keine inline-Scripts
+//  - ResizeObserver fehlt → 500 ms Polling auf Wrap-Groesse
+//  - wheel-Events werden vom Toolbar-Wrapper in der Capture-Phase abgefangen
+//    → capture:true + preventDefault auf window
+//  - localStorage: in manchen MSFS-Builds eingeschraenkt → Zoom nur in-memory
+//  - devicePixelRatio typ. 1, aber HiDPI-Setup kostet nichts
 // ==========================================================================
 (function () {
   'use strict';
 
-  // Singleton-Schutz gegen Doppel-Load
+  // Singleton-Schutz gegen Doppel-Load (Panel-Neuoeffnen triggert reload)
   if (window.__vw) {
     try { window.__vw.ws && window.__vw.ws.close(); } catch (e) {}
     try { clearTimeout(window.__vw.reconnectTimer); } catch (e) {}
     try { cancelAnimationFrame(window.__vw.rafId); } catch (e) {}
     try { clearTimeout(window.__vw.wsTimeout); } catch (e) {}
+    try { clearInterval(window.__vw.resizeTimer); } catch (e) {}
   }
   const VW = window.__vw = {
     ws: null, reconnectTimer: null, rafId: null, wsTimeout: null,
-    hostIdx: 0, tryCount: 0,
+    resizeTimer: null, hostIdx: 0, tryCount: 0,
   };
 
   const HOSTS = ['localhost:7801', '127.0.0.1:7801'];
+  const DEBUG = false;  // true = HTTP-Log-Forwarding an /debug/log anschalten
 
-  // Radar-Zoom-Stufen (Meter). Mausrad zoomt durch.
-  const RANGE_STEPS_M = [200, 500, 1000, 2000, 5000, 10000, 20000];
-  let rangeIdx = 2; // Default: 1000m
-  let RADAR_RANGE_M = RANGE_STEPS_M[rangeIdx];
+  // Zoom: smooth, Faktor 1.25 pro Wheel-Tick. Clamp [200 m, 20 km].
+  const RADAR_RANGE_DEFAULT = 1000;
+  const RADAR_RANGE_MIN = 200;
+  const RADAR_RANGE_MAX = 20000;
+  let radarRangeM = RADAR_RANGE_DEFAULT;
 
   function fmtRange(m) {
-    return m >= 1000 ? (m / 1000) + ' km' : m + ' m';
+    if (m < 1000) return Math.round(m) + ' m';
+    const km = m / 1000;
+    if (Math.abs(km - Math.round(km)) < 0.01) return Math.round(km) + ' km';
+    return km.toFixed(2).replace(/\.?0+$/, '') + ' km';
   }
 
   const state = {
-    mySim: null, peers: new Map(), myRange: RADAR_RANGE_M, trackingOff: false,
+    mySim: null,
+    peers: new Map(),   // id → { id, callsign, sim, on_foot, speaking, distance }
+    myRange: RADAR_RANGE_DEFAULT,
+    trackingOff: false,
+    ui: null,           // erweiterter UI-State vom Browser (callsign, isPro, ...)
   };
 
-  // --- Log zum Backend (HTTP GET /debug/log) -----------------------------
-  function _host() { return HOSTS[VW.hostIdx % HOSTS.length]; }
+  // --- Log-Helpers ------------------------------------------------------
   function plog(level, msg) {
-    // Probiert beide Hosts damit logging auf keinen Fall blockt
+    if (!DEBUG) return;
     HOSTS.forEach(function (h) {
       try {
-        const url = 'http://' + h + '/debug/log?level=' + encodeURIComponent(level)
-                  + '&msg=' + encodeURIComponent('[panel-v3] ' + msg);
-        fetch(url, { method: 'GET', cache: 'no-cache' }).catch(function () {});
+        fetch('http://' + h + '/debug/log?level=' + encodeURIComponent(level)
+              + '&msg=' + encodeURIComponent('[panel-v4] ' + msg),
+              { method: 'GET', cache: 'no-cache' }).catch(function () {});
       } catch (e) {}
     });
   }
-  function L(m)  { try { console.log(m);   } catch(e){} plog('info',    m); }
-  function W(m)  { try { console.warn(m);  } catch(e){} plog('warning', m); }
-  function E(m)  { try { console.error(m); } catch(e){} plog('error',   m); }
+  function L(m) { try { console.log(m); } catch(e){} plog('info', m); }
+  function W(m) { try { console.warn(m); } catch(e){} plog('warning', m); }
+  function E(m) { try { console.error(m); } catch(e){} plog('error', m); }
 
   window.addEventListener('error', function (ev) {
-    try { E('uncaught: ' + ev.message + ' @ ' + ev.filename + ':' + ev.lineno + ':' + ev.colno); } catch(e){}
+    try { E('uncaught: ' + ev.message + ' @ ' + ev.filename + ':' + ev.lineno); } catch(e){}
   });
-  window.addEventListener('unhandledrejection', function (ev) {
-    try { E('unhandled-promise: ' + (ev.reason && (ev.reason.message || ev.reason))); } catch(e){}
-  });
-
-  L('=== panel-v3 file loaded ===');
 
   // --- Geo --------------------------------------------------------------
   const R_EARTH = 6371000;
@@ -66,9 +80,9 @@
   function dist(a, b) {
     if (!a || !b) return null;
     const dLat = toRad(b.lat - a.lat), dLon = toRad(b.lon - a.lon);
-    const h = Math.sin(dLat/2)*Math.sin(dLat/2)
-            + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))
-              *Math.sin(dLon/2)*Math.sin(dLon/2);
+    const h = Math.sin(dLat/2) * Math.sin(dLat/2)
+            + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat))
+              * Math.sin(dLon/2) * Math.sin(dLon/2);
     return 2 * R_EARTH * Math.asin(Math.sqrt(h));
   }
   function bearing(from, to) {
@@ -79,52 +93,204 @@
             - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLon);
     return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
   }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+    });
+  }
 
-  // --- UI ---------------------------------------------------------------
+  // Adaptive Schrittweite (1/2/5 * 10^n) fuer maxM/4 — matched Browser-Overlay.
+  function niceStep(maxM) {
+    const target = maxM / 4;
+    const mag    = Math.pow(10, Math.floor(Math.log10(target)));
+    const norm   = target / mag;
+    if (norm < 1.5) return 1 * mag;
+    if (norm < 3.5) return 2 * mag;
+    if (norm < 7.5) return 5 * mag;
+    return 10 * mag;
+  }
+
+  // Top-Down-Flugzeug-Icon (gleiche Form wie app.js + overlay.js)
+  function drawAircraftIcon(ctx, opts) {
+    opts = opts || {};
+    const s = opts.scale || 1;
+    ctx.save();
+    ctx.scale(s, s);
+    ctx.fillStyle   = opts.fill   || '#6aa5ff';
+    ctx.strokeStyle = opts.stroke || '#0b1220';
+    ctx.lineWidth   = opts.lineWidth || 1.1;
+    ctx.lineJoin    = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, -11);
+    ctx.quadraticCurveTo(2, -9, 2, -4);
+    ctx.lineTo(11, -1); ctx.lineTo(11, 2); ctx.lineTo(2, 3);
+    ctx.lineTo(2, 7);
+    ctx.lineTo(5, 9); ctx.lineTo(5, 10.5); ctx.lineTo(1, 11);
+    ctx.lineTo(1, 12); ctx.lineTo(-1, 12); ctx.lineTo(-1, 11);
+    ctx.lineTo(-5, 10.5); ctx.lineTo(-5, 9);
+    ctx.lineTo(-2, 7);
+    ctx.lineTo(-2, 3); ctx.lineTo(-11, 2); ctx.lineTo(-11, -1); ctx.lineTo(-2, -4);
+    ctx.quadraticCurveTo(-2, -9, 0, -11);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = 'rgba(11, 18, 32, 0.55)';
+    ctx.beginPath();
+    ctx.ellipse(0, -6, 1.3, 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // --- UI-Refs ---------------------------------------------------------
+  function $(id) { return document.getElementById(id); }
   function setConn(kind, label) {
-    const dot = document.getElementById('vw-conn');
-    const lbl = document.getElementById('vw-label');
-    if (dot) { dot.classList.remove('good', 'warn'); if (kind === 'online') dot.classList.add('good'); else if (kind === 'retry') dot.classList.add('warn'); }
+    const dot = $('vw-conn');
+    const lbl = $('vw-label');
+    if (dot) {
+      dot.classList.remove('good', 'warn');
+      if (kind === 'online') dot.classList.add('good');
+      else if (kind === 'retry') dot.classList.add('warn');
+    }
     if (lbl) lbl.textContent = label;
   }
 
+  // --- HiDPI-Canvas-Setup ----------------------------------------------
+  // devicePixelRatio * CSS-Size = Backingstore-Size. setTransform() damit wir
+  // weiterhin in CSS-Pixeln zeichnen. Coherent GT hat typ. DPR 1, aber bei
+  // 4K-Monitoren scaled MSFS hoch → DPR kann 1.5 oder 2 sein.
+  let _cssW = 220, _cssH = 220;
+  function resizeCanvas() {
+    const canvas = $('radar');
+    const wrap   = $('vw-radar-wrap');
+    if (!canvas || !wrap) return;
+    const w = wrap.clientWidth  || 340;
+    const h = wrap.clientHeight || 340;
+    const s = Math.max(120, Math.min(w, h) - 4);
+    if (_cssW === s && _cssH === s) return;
+    _cssW = s; _cssH = s;
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    canvas.style.width  = s + 'px';
+    canvas.style.height = s + 'px';
+    canvas.width  = Math.round(s * dpr);
+    canvas.height = Math.round(s * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    scheduleRender();
+  }
+  VW.resizeTimer = setInterval(resizeCanvas, 500);
+
+  // --- Radar-Rendering -------------------------------------------------
   function renderRadar() {
-    const canvas = document.getElementById('radar');
+    const canvas = $('radar');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    const W = canvas.width, H = canvas.height;
-    const cx = W/2, cy = H/2, r = Math.min(W, H)/2 - 6;
+    const W = _cssW, H = _cssH;
+    const cx = W / 2, cy = H / 2;
+    const R  = Math.min(W, H) / 2 - 14;
 
     ctx.clearRect(0, 0, W, H);
-    ctx.strokeStyle = 'rgba(106,165,255,0.25)'; ctx.lineWidth = 1;
-    for (let i = 1; i <= 2; i++) { ctx.beginPath(); ctx.arc(cx, cy, (r*i)/2, 0, Math.PI*2); ctx.stroke(); }
-    ctx.strokeStyle = 'rgba(106,165,255,0.15)';
-    ctx.beginPath(); ctx.moveTo(cx, cy-r); ctx.lineTo(cx, cy+r); ctx.moveTo(cx-r, cy); ctx.lineTo(cx+r, cy); ctx.stroke();
 
-    const heading = (state.mySim && Number.isFinite(+state.mySim.heading_deg)) ? +state.mySim.heading_deg : 0;
+    // Dunkle Scheibe mit radialem Glow
+    const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
+    bg.addColorStop(0,   'rgba(23, 41, 74, 0.9)');
+    bg.addColorStop(0.7, 'rgba(15, 25, 48, 0.9)');
+    bg.addColorStop(1,   'rgba(11, 18, 32, 0.9)');
+    ctx.fillStyle = bg;
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
 
+    // Scheiben-Rand
+    ctx.strokeStyle = 'rgba(106,165,255,0.4)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+
+    // Adaptive Range-Ringe (1/2/5 * 10^n)
+    const step  = niceStep(radarRangeM);
+    const rings = [];
+    for (let d = step; d <= radarRangeM + 1; d += step) rings.push(d);
+    rings.forEach(function (m, i) {
+      const frac    = m / radarRangeM;
+      const isOuter = i === rings.length - 1;
+      ctx.strokeStyle = isOuter
+        ? 'rgba(106,165,255,0.45)' : 'rgba(106,165,255,0.15)';
+      ctx.beginPath();
+      ctx.arc(cx, cy, R * frac, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+
+    // Kreuz durch Mitte
+    ctx.strokeStyle = 'rgba(106,165,255,0.1)';
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R);
+    ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy);
+    ctx.stroke();
+
+    // Heading-Up-Pfeil (klein oben am Rand)
+    ctx.fillStyle = 'rgba(106,165,255,0.9)';
+    ctx.beginPath();
+    ctx.moveTo(cx,     cy - R - 2);
+    ctx.lineTo(cx - 4, cy - R - 9);
+    ctx.lineTo(cx + 4, cy - R - 9);
+    ctx.closePath();
+    ctx.fill();
+
+    // Compass-Marker N/E/S/W
+    ctx.fillStyle = 'rgba(150,170,200,0.55)';
+    ctx.font = '600 9px "Segoe UI", system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('N', cx,         cy - R + 8);
+    ctx.fillText('S', cx,         cy + R - 8);
+    ctx.fillText('E', cx + R - 8, cy);
+    ctx.fillText('W', cx - R + 8, cy);
+
+    const selfHeading = (state.mySim && Number.isFinite(+state.mySim.heading_deg))
+      ? +state.mySim.heading_deg : 0;
+
+    // Audio-Bubble (Hoerbarkeits-Kreis in gruen)
     if (state.mySim && state.myRange > 0) {
-      const rp = r * Math.min(1, state.myRange / RADAR_RANGE_M);
-      if (rp > 3) {
-        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rp);
-        g.addColorStop(0, 'rgba(63,220,138,0.22)'); g.addColorStop(1, 'rgba(63,220,138,0.00)');
-        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, rp, 0, Math.PI*2); ctx.fill();
-        ctx.strokeStyle = 'rgba(63,220,138,0.5)'; ctx.setLineDash([3,4]);
-        ctx.beginPath(); ctx.arc(cx, cy, rp, 0, Math.PI*2); ctx.stroke(); ctx.setLineDash([]);
+      const rAudio = R * Math.min(1, state.myRange / radarRangeM);
+      if (rAudio > 3) {
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, rAudio);
+        grad.addColorStop(0, 'rgba(63,220,138,0.22)');
+        grad.addColorStop(1, 'rgba(63,220,138,0.00)');
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(cx, cy, rAudio, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = 'rgba(63,220,138,0.55)';
+        ctx.setLineDash([2, 3]);
+        ctx.beginPath(); ctx.arc(cx, cy, rAudio, 0, Math.PI * 2); ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Audio-Bubble-Label
+        // Canvas-Text laeuft nicht durch Glyph-Fallback via <span>, deswegen
+        // hier kein Emoji — nur Text-Label. HTML-Elemente nutzen .vw-emoji.
+        const audioLbl = 'AUDIO ' + fmtRange(state.myRange);
+        const ax = cx - rAudio * 0.707;
+        const ay = cy + rAudio * 0.707 + 2;
+        ctx.font = '600 10px ui-monospace, "SF Mono", Menlo, monospace';
+        ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+        const lblW = ctx.measureText(audioLbl).width;
+        ctx.fillStyle = 'rgba(11, 18, 32, 0.8)';
+        ctx.fillRect(ax - lblW - 6, ay - 8, lblW + 8, 16);
+        ctx.fillStyle = 'rgba(63, 220, 138, 0.95)';
+        ctx.fillText(audioLbl, ax - 2, ay);
       }
     }
 
-    // ICH im Zentrum: grüner Kreis wenn zu Fuss, blaues Dreieck im Flugzeug
+    // DU im Zentrum
+    ctx.save();
+    ctx.translate(cx, cy);
     if (state.mySim && state.mySim.on_foot) {
-      ctx.fillStyle = '#3fdc8a'; ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#3fdc8a';
+      ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      // Blickrichtungs-Dot oben
+      ctx.fillStyle = '#0b1220';
+      ctx.beginPath(); ctx.arc(0, -3, 1.5, 0, Math.PI * 2); ctx.fill();
     } else {
-      ctx.save(); ctx.translate(cx, cy);
-      ctx.fillStyle = '#6aa5ff'; ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1.2;
-      ctx.beginPath(); ctx.moveTo(0,-9); ctx.lineTo(6,6); ctx.lineTo(0,4); ctx.lineTo(-6,6); ctx.closePath();
-      ctx.fill(); ctx.stroke(); ctx.restore();
+      drawAircraftIcon(ctx, { fill: '#6aa5ff', stroke: '#0b1220', lineWidth: 1.3, scale: 0.9 });
     }
+    ctx.restore();
 
-    // ZURUECKGELASSENES FLUGZEUG als blaues Dreieck, wenn zu Fuss + aircraft-Pos
+    // Zurueckgelassenes Flugzeug (wenn zu Fuss + aircraft-Pos vorhanden)
     if (state.mySim && state.mySim.on_foot
         && state.mySim.aircraft
         && Number.isFinite(+state.mySim.aircraft.lat)
@@ -133,25 +299,24 @@
       const dAc = dist(state.mySim, acP);
       if (Number.isFinite(dAc) && dAc > 1) {
         const brg = bearing(state.mySim, acP);
-        const rel = ((brg - heading) + 360) % 360;
-        const th  = toRad(rel) - Math.PI/2;
-        const sc  = Math.min(1, dAc / RADAR_RANGE_M);
-        const ax  = cx + Math.cos(th) * (r * sc);
-        const ay  = cy + Math.sin(th) * (r * sc);
+        const rel = ((brg - selfHeading) + 360) % 360;
+        const th  = toRad(rel) - Math.PI / 2;
+        const sc  = Math.min(1, dAc / radarRangeM);
+        const ax  = cx + Math.cos(th) * (R * sc);
+        const ay  = cy + Math.sin(th) * (R * sc);
         ctx.save();
         ctx.translate(ax, ay);
         const acHead = +state.mySim.aircraft.heading_deg || 0;
-        ctx.rotate(((acHead - heading + 360) % 360) * Math.PI / 180);
-        ctx.fillStyle = '#6aa5ff'; ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(0, -7); ctx.lineTo(5, 5); ctx.lineTo(0, 3); ctx.lineTo(-5, 5);
-        ctx.closePath();
-        ctx.fill(); ctx.stroke();
+        ctx.rotate(((acHead - selfHeading + 360) % 360) * Math.PI / 180);
+        drawAircraftIcon(ctx, {
+          fill:   'rgba(106,165,255,0.85)',
+          stroke: '#0b1220', lineWidth: 1, scale: 0.55,
+        });
         ctx.restore();
       }
     }
 
-    let inRange = 0, outRange = 0;
+    // Peers
     if (state.mySim) {
       state.peers.forEach(function (p) {
         if (!p.sim) return;
@@ -160,124 +325,262 @@
         if (Math.abs(lat) < 0.0001 && Math.abs(lon) < 0.0001) return;
         const d = dist(state.mySim, p.sim);
         if (!Number.isFinite(d)) return;
-        const brg = bearing(state.mySim, p.sim);
-        const rel = ((brg - heading) + 360) % 360;
-        const th = toRad(rel) - Math.PI/2;
-        const sc = Math.min(1, d / RADAR_RANGE_M);
-        const px = cx + Math.cos(th) * (r * sc);
-        const py = cy + Math.sin(th) * (r * sc);
-        const ok = d <= state.myRange;
-        ctx.fillStyle = p.speaking ? '#ffe066' : (ok ? '#6aa5ff' : '#556582');
-        ctx.beginPath(); ctx.arc(px, py, 3.5, 0, Math.PI*2); ctx.fill();
-        if (ok) inRange++; else outRange++;
+        const brg   = bearing(state.mySim, p.sim);
+        const rel   = ((brg - selfHeading) + 360) % 360;
+        const theta = toRad(rel) - Math.PI / 2;
+        const scale = Math.min(1, d / radarRangeM);
+        const px    = cx + Math.cos(theta) * (R * scale);
+        const py    = cy + Math.sin(theta) * (R * scale);
+
+        // Speaking-Pulse
+        if (p.speaking) {
+          const grd = ctx.createRadialGradient(px, py, 0, px, py, 12);
+          grd.addColorStop(0, 'rgba(255,224,102,0.7)');
+          grd.addColorStop(1, 'rgba(255,224,102,0)');
+          ctx.fillStyle = grd;
+          ctx.beginPath(); ctx.arc(px, py, 12, 0, Math.PI * 2); ctx.fill();
+        }
+
+        const color = p.speaking ? '#ffe066'
+                    : d <= state.myRange ? '#6aa5ff' : '#556582';
+        ctx.fillStyle = color;
+        ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(px, py, 3.3, 0, Math.PI * 2);
+        ctx.fill(); ctx.stroke();
       });
     }
 
-    ctx.fillStyle = 'rgba(150,170,200,0.7)';
-    ctx.font = '9px "Segoe UI", system-ui, sans-serif';
-    ctx.fillText('1 km', cx + r - 28, cy - 4);
+    // Distanz-Labels auf 45°-Diagonale mit Pill-Background
+    const diagX = Math.cos(Math.PI / 4);
+    const diagY = Math.sin(Math.PI / 4);
+    ctx.font = '600 9px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    rings.forEach(function (m) {
+      const ringR = R * (m / radarRangeM);
+      const lx = cx + (ringR + 4) * diagX;
+      const ly = cy + (ringR + 4) * diagY;
+      const text = fmtRange(m);
+      const w    = ctx.measureText(text).width;
+      ctx.fillStyle = 'rgba(11,18,32,0.85)';
+      ctx.fillRect(lx - 2, ly - 7, w + 4, 14);
+      ctx.fillStyle = 'rgba(160,190,225,0.95)';
+      ctx.fillText(text, lx, ly);
+    });
+  }
 
-    const st = document.getElementById('vw-status');
+  // --- Extended UI-Render ------------------------------------------------
+  function renderUI() {
+    // Callsign + Pro-Badge
+    const cs = $('vw-callsign');
+    const pb = $('vw-probadge');
+    if (state.ui) {
+      if (cs) cs.textContent = state.ui.callsign || '—';
+      if (pb) pb.classList.toggle('visible', !!state.ui.isPro);
+    } else {
+      if (cs) cs.textContent = '—';
+      if (pb) pb.classList.remove('visible');
+    }
+
+    // Zoom-Label
+    const zl = $('vw-zoom');
+    if (zl) zl.textContent = fmtRange(radarRangeM);
+
+    // Private-Room-Badge
+    const rb = $('vw-room');
+    const rl = $('vw-room-label');
+    if (state.ui && state.ui.privateRoom) {
+      if (rb) rb.classList.add('visible');
+      if (rl) {
+        const pr = state.ui.privateRoom;
+        rl.textContent = pr.length > 24 ? pr.slice(0, 22) + '…' : pr;
+      }
+    } else {
+      if (rb) rb.classList.remove('visible');
+    }
+
+    // Speaking-Banner: welcher Peer spricht gerade laut
+    const sp = $('vw-speaking');
+    const spn = $('vw-speaking-name');
+    let speakingPeer = null;
+    state.peers.forEach(function (p) {
+      if (p.speaking && !speakingPeer) speakingPeer = p;
+    });
+    if (speakingPeer && sp && spn) {
+      sp.classList.add('visible');
+      spn.textContent = speakingPeer.callsign || speakingPeer.id.slice(0, 6);
+    } else if (sp) {
+      sp.classList.remove('visible');
+    }
+
+    // Mic-Level-Bar (RMS 0..0.3 → 0..100%, sqrt-gamma)
+    const ml = $('vw-miclevel');
+    if (ml) {
+      const rms = state.ui && state.ui.micRms ? state.ui.micRms : 0;
+      const imSpeaking = state.ui && state.ui.imSpeaking;
+      if (!imSpeaking && rms < 0.01) {
+        ml.style.width = '0%';
+      } else {
+        const norm = Math.min(1, Math.sqrt(Math.max(0, rms) / 0.3));
+        ml.style.width = (norm * 100).toFixed(1) + '%';
+      }
+    }
+
+    // PTT-Button: live-State spiegeln (Browser hat noch kein "ptt_state
+    // raw"-Broadcast, also setzen wir nur auf Mouse-Events)
+    // Tracking-Button
+    const tb = $('vw-track');
+    if (tb) tb.classList.toggle('active', !!(state.ui && state.ui.trackingEnabled));
+    // Far-Button
+    const fb = $('vw-far');
+    if (fb) fb.classList.toggle('active', !!(state.ui && state.ui.showFar));
+
+    // Peer-Liste
+    renderPeerList();
+
+    // Status-Koord-Zeile unten
+    const st = $('vw-status');
     if (st) {
-      if (state.trackingOff) st.innerHTML = '<span style="color:#ffb454">Tracking aus</span>';
-      else if (state.mySim) st.textContent = (+state.mySim.lat).toFixed(5) + ', ' + (+state.mySim.lon).toFixed(5) + (state.mySim.on_foot ? '  |  zu Fuss' : '');
-      else st.textContent = '—';
+      if (state.trackingOff) {
+        st.innerHTML = '<span style="color:var(--warn)">Tracking aus</span>';
+      } else if (state.mySim) {
+        const la = (+state.mySim.lat).toFixed(5);
+        const lo = (+state.mySim.lon).toFixed(5);
+        const mode = state.mySim.on_foot ? '  |  zu Fuss' : '';
+        st.textContent = la + ', ' + lo + mode;
+      } else {
+        st.textContent = '—';
+      }
     }
-    const pe = document.getElementById('vw-peers');
-    if (pe) {
-      if (state.trackingOff) pe.textContent = 'Im Browser aktivieren';
-      else if (state.peers.size === 0) pe.textContent = 'niemand in der Naehe';
-      else pe.textContent = inRange + ' in Reichweite  |  ' + outRange + ' ausserhalb';
+  }
+
+  function renderPeerList() {
+    const host = $('vw-peers');
+    if (!host) return;
+    if (state.trackingOff) {
+      host.innerHTML = '<div id="vw-peers-empty" style="color:var(--warn)">Im Browser aktivieren</div>';
+      return;
     }
+    const peers = [];
+    state.peers.forEach(function (p) {
+      if (!p.sim) return;
+      const d = dist(state.mySim, p.sim);
+      if (!Number.isFinite(d)) return;
+      peers.push({ p: p, d: d });
+    });
+    if (peers.length === 0) {
+      host.innerHTML = '<div id="vw-peers-empty">niemand in der Naehe</div>';
+      return;
+    }
+    peers.sort(function (a, b) { return a.d - b.d; });
+    const MAX = 5;
+    const inRange = peers.filter(function (x) { return x.d <= state.myRange; });
+    const farCount = peers.length - inRange.length;
+    const show = (inRange.length > 0 ? inRange : peers).slice(0, MAX);
+    let html = '';
+    show.forEach(function (row) {
+      const p = row.p;
+      const name = esc(p.callsign || p.id.slice(0, 6));
+      const badge = p.on_foot ? ' <span class="vw-emoji">🚶</span>' : '';
+      const far = row.d > state.myRange;
+      const cls = 'vw-peer' + (p.speaking ? ' speaking' : '') + (far ? ' far' : '');
+      html += '<div class="' + cls + '">'
+           +   '<span class="pn">' + name + badge + '</span>'
+           +   '<span class="pd">' + fmtRange(row.d) + '</span>'
+           + '</div>';
+    });
+    if (farCount > 0 && inRange.length > 0) {
+      html += '<div id="vw-peers-more">+' + farCount + ' weiter entfernt</div>';
+    }
+    host.innerHTML = html;
+  }
+
+  function render() {
+    renderRadar();
+    renderUI();
   }
 
   function scheduleRender() {
     if (VW.rafId) return;
     VW.rafId = requestAnimationFrame(function () {
       VW.rafId = null;
-      try { renderRadar(); } catch (e) { E('render: ' + e.message); }
+      try { render(); } catch (e) { E('render: ' + e.message); }
     });
   }
 
-  // --- Canvas an Container anpassen ------------------------------------
-  function resizeCanvas() {
-    const canvas = document.getElementById('radar');
-    const wrap   = document.getElementById('vw-radar-wrap');
-    if (!canvas || !wrap) return;
-    const w = wrap.clientWidth  || 340;
-    const h = wrap.clientHeight || 340;
-    const s = Math.max(120, Math.min(w, h) - 8);
-    if (canvas.width !== s || canvas.height !== s) {
-      canvas.width = s; canvas.height = s;
-      scheduleRender();
-    }
-  }
-  // regelmaessig die Groesse pruefen (ResizeObserver kann in Coherent GT fehlen)
-  setInterval(resizeCanvas, 500);
-
   // --- WebSocket -------------------------------------------------------
+  function _host() { return HOSTS[VW.hostIdx % HOSTS.length]; }
+
+  function sendAction(action) {
+    if (!VW.ws || VW.ws.readyState !== 1) return;
+    try {
+      VW.ws.send(JSON.stringify({ type: 'panel_action', action: action }));
+    } catch (e) { W('sendAction failed: ' + e.message); }
+  }
+
   function tryConnect() {
     VW.tryCount++;
     const host = _host();
     const url = 'ws://' + host + '/ui';
-    setConn('retry', 'verbinde (#' + VW.tryCount + ' ' + host + ')');
-    L('WS try #' + VW.tryCount + ': new WebSocket(' + url + ')');
+    setConn('retry', 'verbinde #' + VW.tryCount);
 
     let ws;
     try { ws = new WebSocket(url); }
     catch (e) {
-      E('WS constructor THREW: ' + e.name + ': ' + e.message);
+      E('WS constructor threw: ' + e.message);
       VW.hostIdx++;
       scheduleReconnect();
       return;
     }
     VW.ws = ws;
-    L('WS constructed, readyState=' + ws.readyState);
 
-    // Timeout: wenn nach 4s nicht open, schliessen und anderen Host probieren
     VW.wsTimeout = setTimeout(function () {
-      if (ws.readyState !== 1 /* OPEN */) {
-        W('WS timeout after 4s (readyState=' + ws.readyState + '), aborting');
+      if (ws.readyState !== 1) {
         VW.hostIdx++;
         try { ws.close(); } catch (e) {}
       }
     }, 4000);
 
     ws.onopen = function () {
-      L('WS ONOPEN ← connected to ' + url);
+      L('WS open ' + url);
       clearTimeout(VW.wsTimeout);
       setConn('online', 'online');
     };
 
-    let msgCount = 0;
     ws.onmessage = function (evt) {
-      msgCount++;
-      if (msgCount <= 5 || msgCount % 100 === 0) {
-        const preview = (evt.data || '').substring(0, 80);
-        L('WS msg #' + msgCount + ' (' + (evt.data && evt.data.length) + 'B): ' + preview);
-      }
       let m;
       try { m = JSON.parse(evt.data); } catch (e) { return; }
       if (!m || typeof m !== 'object') return;
-      if (m.type === 'sim') { state.mySim = m.data || null; state.trackingOff = false; }
-      else if (m.type === 'overlay_state') {
+      if (m.type === 'sim') {
+        state.mySim = m.data || null;
+        state.trackingOff = false;
+      } else if (m.type === 'overlay_state') {
         state.peers.clear();
         (m.peers || []).forEach(function (p) { state.peers.set(p.id, p); });
         if (m.myRange) state.myRange = +m.myRange;
         if (!state.mySim && m.mySim) state.mySim = m.mySim;
-      } else if (m.type === 'tracking_off') { state.trackingOff = true; state.peers.clear(); }
+        // Erweiterter UI-State (optional; nur im neuen overlay_state vorhanden)
+        if (m.ui) state.ui = m.ui;
+      } else if (m.type === 'tracking_off') {
+        state.trackingOff = true;
+        state.peers.clear();
+      } else if (m.type === 'tracking_state') {
+        // Einzelupdate wenn nur der Tracking-Toggle geflippt wurde
+        if (!state.ui) state.ui = {};
+        state.ui.trackingEnabled = !!m.enabled;
+        if (!m.enabled) state.trackingOff = true;
+        else state.trackingOff = false;
+      }
       scheduleRender();
     };
 
-    ws.onclose = function (ev) {
-      W('WS ONCLOSE code=' + (ev && ev.code) + ' reason=' + JSON.stringify(ev && ev.reason) + ' clean=' + (ev && ev.wasClean));
+    ws.onclose = function () {
       clearTimeout(VW.wsTimeout);
       if (VW.ws === ws) VW.ws = null;
       setConn('offline', 'offline');
       scheduleReconnect();
     };
 
-    ws.onerror = function (ev) { E('WS ONERROR type=' + (ev && ev.type)); };
+    ws.onerror = function () { /* onclose folgt */ };
   }
 
   function scheduleReconnect() {
@@ -288,82 +591,76 @@
     }, 2000);
   }
 
-  // --- HTTP-Probe ob Backend ueberhaupt erreichbar ---------------------
-  function probeBackend() {
-    HOSTS.forEach(function (h) {
-      const url = 'http://' + h + '/debug/status';
-      const t0 = Date.now();
-      try {
-        fetch(url, { method: 'GET', cache: 'no-cache' })
-          .then(function (r) { L('HTTP probe ' + url + ' -> ' + r.status + ' (' + (Date.now()-t0) + 'ms)'); })
-          .catch(function (e) { W('HTTP probe ' + url + ' FAILED: ' + (e && e.name) + ' (' + (Date.now()-t0) + 'ms)'); });
-      } catch (e) { E('HTTP probe threw: ' + e.message); }
-    });
-  }
-
-  // --- Mausrad-Zoom ----------------------------------------------------
-  // Coherent GT's <ingame-ui>-Wrapper faengt wheel-Events in der
-  // Capture-Phase ab, bevor sie unsere Listener erreichen. Loesung
-  // analog zum gsimulation Kneeboard-Sample (MSFS 2024 SDK,
-  // Samples/sicherung.DevmodeProjects/EFB/.../Kneeboard/panel.js):
-  // stopPropagation() in der Capture-Phase auf dem Container — das
-  // verhindert dass das Toolbar-System das Event verschluckt, der
-  // Bubble-Phase-Listener auf dem Canvas bekommt es dann normal.
+  // --- Wheel-Zoom + Doppelklick-Reset ----------------------------------
+  // Coherent GT's <ingame-ui>-Wrapper faengt wheel in der Capture-Phase ab.
+  // Loesung: window-capture + preventDefault (analog Kneeboard-Sample).
   function setupWheelZoom() {
-    const wrap   = document.getElementById('vw-radar-wrap');
-    const canvas = document.getElementById('radar');
-    if (!wrap || !canvas) { W('setupWheelZoom: DOM nicht bereit (wrap=' + !!wrap + ', canvas=' + !!canvas + ')'); return; }
-    L('setupWheelZoom: attaching listeners (body capture + wrap bubble + window/canvas/doc fallbacks)');
+    const canvas = $('radar');
+    if (!canvas) return;
 
-    // Vier Listener: window/document/body capture + wrap+canvas bubble.
-    // Wenn Coherent GT das Event auf irgendeiner Ebene swallowt, sehen wir
-    // im Log welcher gefeuert hat und welcher nicht.
-    let wheelHits = 0;
-    function onWheelDiag(where) {
-      return function (e) {
-        wheelHits++;
-        if (wheelHits <= 8 || wheelHits % 20 === 0) {
-          L('wheel hit #' + wheelHits + ' from=' + where + ' deltaY=' + e.deltaY
-            + ' target=' + (e.target && e.target.id ? '#' + e.target.id : (e.target && e.target.tagName))
-            + ' phase=' + e.eventPhase);
-        }
-      };
-    }
-    window.addEventListener('wheel',   onWheelDiag('window-capture'),   { capture: true, passive: true });
-    document.addEventListener('wheel', onWheelDiag('document-capture'), { capture: true, passive: true });
-    document.body.addEventListener('wheel', onWheelDiag('body-capture'), { capture: true, passive: true });
-    wrap.addEventListener('wheel',     onWheelDiag('wrap-bubble'),      { passive: true });
-    canvas.addEventListener('wheel',   onWheelDiag('canvas-bubble'),    { passive: true });
-
-    // Eigentlicher Zoom-Handler (window-capture: greift garantiert wenn
-    // ueberhaupt ein wheel-Event durchkommt).
     window.addEventListener('wheel', function (e) {
       try { e.preventDefault(); } catch (_) {}
-      const dir = e.deltaY > 0 ? +1 : -1;
-      const next = Math.max(0, Math.min(RANGE_STEPS_M.length - 1, rangeIdx + dir));
-      if (next !== rangeIdx) {
-        rangeIdx = next;
-        RADAR_RANGE_M = RANGE_STEPS_M[rangeIdx];
-        L('zoom -> ' + fmtRange(RADAR_RANGE_M));
+      const factor = e.deltaY > 0 ? 1.25 : 1 / 1.25;
+      const next = Math.max(RADAR_RANGE_MIN,
+                   Math.min(RADAR_RANGE_MAX, radarRangeM * factor));
+      if (next !== radarRangeM) {
+        radarRangeM = next;
         scheduleRender();
       }
     }, { capture: true, passive: false });
 
-    wrap.style.cursor = 'ns-resize';
-    wrap.title = 'Mausrad zum Zoomen';
+    canvas.addEventListener('dblclick', function () {
+      radarRangeM = RADAR_RANGE_DEFAULT;
+      scheduleRender();
+    });
+
+    canvas.title = 'Mausrad = Zoom · Doppelklick = Reset';
+  }
+
+  // --- Action-Buttons --------------------------------------------------
+  function setupButtons() {
+    const pttBtn   = $('vw-ptt');
+    const trackBtn = $('vw-track');
+    const farBtn   = $('vw-far');
+
+    // PTT: down = press, up/leave = release
+    if (pttBtn) {
+      const press = function () {
+        pttBtn.classList.add('live');
+        sendAction('ptt-down');
+      };
+      const release = function () {
+        pttBtn.classList.remove('live');
+        sendAction('ptt-up');
+      };
+      pttBtn.addEventListener('mousedown',  press);
+      pttBtn.addEventListener('mouseup',    release);
+      pttBtn.addEventListener('mouseleave', release);
+      pttBtn.addEventListener('touchstart', function (e) { press();   e.preventDefault(); });
+      pttBtn.addEventListener('touchend',   function (e) { release(); e.preventDefault(); });
+    }
+
+    if (trackBtn) {
+      trackBtn.addEventListener('click', function () {
+        sendAction('toggle-tracking');
+      });
+    }
+
+    if (farBtn) {
+      farBtn.addEventListener('click', function () {
+        sendAction('toggle-far');
+      });
+    }
   }
 
   // --- Boot ------------------------------------------------------------
   function boot() {
-    L('boot() START  location=' + location.href + '  readyState=' + document.readyState);
-    const canvas = document.getElementById('radar');
-    const conn = document.getElementById('vw-conn');
-    L('DOM: canvas=' + !!canvas + '  conn-dot=' + !!conn + '  status=' + !!document.getElementById('vw-status'));
+    L('panel-v4 boot, readyState=' + document.readyState);
     setConn('offline', 'offline');
     resizeCanvas();
     setupWheelZoom();
+    setupButtons();
     scheduleRender();
-    probeBackend();
     setTimeout(tryConnect, 300);
   }
 
@@ -378,5 +675,6 @@
     try { clearTimeout(VW.reconnectTimer); } catch (e) {}
     try { clearTimeout(VW.wsTimeout); } catch (e) {}
     try { cancelAnimationFrame(VW.rafId); } catch (e) {}
+    try { clearInterval(VW.resizeTimer); } catch (e) {}
   });
 })();
