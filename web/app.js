@@ -874,9 +874,9 @@ function connectBackendWs() {
     } else if (m.type === 'license_state') {
       applyLicenseState(m);
     } else if (m.type === 'remote_action') {
-      // MSFS-Panel hat Button geklickt, Backend relayted hier → ausfuehren.
-      // toggle-tracking wird schon im Backend gemacht (kommt ueber tracking_state).
-      // Hier nur Browser-only Actions.
+      // MSFS-Panel hat Button/Slider/Select bedient, Backend relayted hier
+      // → ausfuehren. toggle-tracking wird schon im Backend gemacht (kommt
+      // ueber tracking_state). Hier nur Browser-only Actions.
       if (!_isPrimaryTab) return;  // Nur primary-Tab fuehrt aus
       const a = m.action;
       if (a === 'ptt-down') {
@@ -886,6 +886,41 @@ function connectBackendWs() {
       } else if (a === 'toggle-far') {
         const box = document.getElementById('showFar');
         if (box) { box.checked = !box.checked; box.dispatchEvent(new Event('change')); }
+      } else if (a === 'select-mic' && typeof m.deviceId === 'string') {
+        const inEl = document.getElementById('audioInput');
+        state.audioInputId = m.deviceId;
+        try { localStorage.setItem('vw.audioInputId', state.audioInputId); } catch {}
+        if (inEl) inEl.value = m.deviceId;
+        ensureMic();
+      } else if (a === 'select-speaker' && typeof m.deviceId === 'string') {
+        const outEl = document.getElementById('audioOutput');
+        state.audioOutputId = m.deviceId;
+        try { localStorage.setItem('vw.audioOutputId', state.audioOutputId); } catch {}
+        if (outEl) outEl.value = m.deviceId;
+        applyAudioOutput();
+      } else if (a === 'set-master-volume' && typeof m.value === 'number') {
+        // Slider im Panel ist 0..1.5; UI-Slider in index.html ist 0..150 %.
+        setMasterVolume(m.value);
+        const slider = document.getElementById('masterVolume');
+        const lbl    = document.getElementById('masterVolumeVal');
+        const pct    = Math.round(m.value * 100);
+        if (slider) slider.value = String(pct);
+        if (lbl)    lbl.textContent = pct + '%';
+      } else if (a === 'toggle-vox') {
+        state.voxMode = !state.voxMode;
+        try { saveAudioConfig?.(); } catch {}
+        const cb = document.getElementById('voxToggle');
+        if (cb) { cb.checked = state.voxMode; cb.dispatchEvent(new Event('change')); }
+      } else if (a === 'set-callsign' && typeof m.value === 'string') {
+        const cs = document.getElementById('callsign');
+        if (cs) { cs.value = m.value.slice(0, 16); cs.dispatchEvent(new Event('input')); }
+      } else if (a === 'open-browser-license') {
+        try { window.focus(); } catch {}
+        const lk = document.getElementById('licenseKey');
+        if (lk && typeof lk.scrollIntoView === 'function') {
+          lk.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          setTimeout(() => { try { lk.focus(); } catch {} }, 300);
+        }
       }
     }
   };
@@ -1143,6 +1178,17 @@ async function populateAudioDevices() {
     const devices = await navigator.mediaDevices.enumerateDevices();
     const inEl  = document.getElementById('audioInput');
     const outEl = document.getElementById('audioOutput');
+
+    // In den state cachen, damit publishOverlay() die Listen ins MSFS-Panel
+    // mitschicken kann (Setup-Tab dort dupliziert die Auswahl). Felder mit
+    // {deviceId, label} sind klein genug fuer 1-Hz-Broadcast.
+    const ins  = devices.filter(d => d.kind === 'audioinput')
+                       .map(d => ({ deviceId: d.deviceId, label: d.label || '' }));
+    const outs = devices.filter(d => d.kind === 'audiooutput')
+                       .map(d => ({ deviceId: d.deviceId, label: d.label || '' }));
+    state.audioInputs  = ins;
+    state.audioOutputs = outs;
+
     if (!inEl || !outEl) return;
 
     const fill = (sel, list, savedId) => {
@@ -2568,8 +2614,8 @@ function publishOverlay() {
     } : null,
     myRange: audioConfig.maxRangeM,
     peers: out,
-    // Erweiterter State fuer das MSFS-Panel (Phase 2) — alles read-only,
-    // Panel zeigt nur an, Aktionen gehen via panel_action zurueck.
+    // Erweiterter State fuer das MSFS-Panel — alles read-only, Panel zeigt
+    // an + steuert Settings via panel_action zurueck zum primary Browser.
     ui: {
       callsign:         (document.getElementById('callsign')?.value || 'PILOT').trim(),
       isPro:            !!state.isPro,
@@ -2579,6 +2625,15 @@ function publishOverlay() {
       showFar:          !!state.showFar,
       imSpeaking:       !!state.imSpeakingLocal,
       micRms:           micRms >= 0 ? micRms : 0,
+      // Setup-Tab im Panel: Mic/Speaker-Auswahl, Master-Volume, PTT-Bind
+      audioInputs:      state.audioInputs  || [],
+      audioOutputs:     state.audioOutputs || [],
+      audioInputId:     state.audioInputId  || '',
+      audioOutputId:    state.audioOutputId || '',
+      masterVolume:     (typeof masterGain !== 'undefined' && masterGain)
+                          ? masterGain.gain.value : loadMasterVolume(),
+      pttBinding:       state.ptt?.binding || null,
+      bindingInProgress: !!state.ptt?.binding_mode,
     },
   });
 }
