@@ -306,8 +306,10 @@ function initDebugPanel() {
       cfg[configKey] = v;
       // Backward-compat-Setter schreibt audioConfig.walker/cockpit.* je nach
       // state.mySim.on_foot. Ohne Reconcile greift die neue Range erst beim
-      // naechsten 1-Hz-Tick — mit Reconcile sofort.
+      // naechsten 1-Hz-Tick — mit Reconcile sofort. renderRadar zusaetzlich,
+      // damit die Audio-Bubble live mitwaechst beim Slidern.
       try { window.__voicewalker?.reconcileAudioStreams?.(); } catch {}
+      try { window.__voicewalker?.renderRadar?.(); } catch {}
     };
     fmt();
     inp.addEventListener('input', fmt);

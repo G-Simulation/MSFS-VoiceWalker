@@ -34,11 +34,27 @@
   const HOSTS = ['localhost:7801', '127.0.0.1:7801'];
   const DEBUG = false;  // true = HTTP-Log-Forwarding an /debug/log anschalten
 
-  // Zoom: smooth, Faktor 1.25 pro Wheel-Tick. Clamp [200 m, 20 km].
+  // Zoom: rastet auf RADAR_SNAP_VALUES ein. Clamp [2.5 m, 25 km].
   const RADAR_RANGE_DEFAULT = 1000;
-  const RADAR_RANGE_MIN = 200;
-  const RADAR_RANGE_MAX = 20000;
+  const RADAR_RANGE_MIN = 2.5;
+  const RADAR_RANGE_MAX = 25000;
   let radarRangeM = RADAR_RANGE_DEFAULT;
+  // Identisch zu app.js + overlay.js, damit alle drei Radars konsistent zoomen.
+  const RADAR_SNAP_VALUES = [
+    2.5, 5, 10, 15, 25, 50, 75, 100, 150, 250,
+    500, 750, 1000, 1500, 2500, 5000, 7500, 10000, 15000, 25000,
+  ];
+  function snapRange(currentM, zoomOut) {
+    var bestIdx = 0, bestDist = Infinity;
+    for (var i = 0; i < RADAR_SNAP_VALUES.length; i++) {
+      var d = Math.abs(RADAR_SNAP_VALUES[i] - currentM);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+    var targetIdx = zoomOut
+      ? Math.min(bestIdx + 1, RADAR_SNAP_VALUES.length - 1)
+      : Math.max(bestIdx - 1, 0);
+    return RADAR_SNAP_VALUES[targetIdx];
+  }
 
   function fmtRange(m) {
     if (m < 1000) return Math.round(m) + ' m';
@@ -99,14 +115,18 @@
     });
   }
 
-  // Adaptive Schrittweite (1/2/5 * 10^n) fuer maxM/4 — matched Browser-Overlay.
+  // 1-1.5-2-2.5-5-7.5-10er Pattern — identisch zu app.js und overlay.js.
+  // Feiner als klassisches 1-2-5er, gibt visuell angenehme Ring-Stufen.
   function niceStep(maxM) {
     const target = maxM / 4;
     const mag    = Math.pow(10, Math.floor(Math.log10(target)));
     const norm   = target / mag;
-    if (norm < 1.5) return 1 * mag;
-    if (norm < 3.5) return 2 * mag;
-    if (norm < 7.5) return 5 * mag;
+    if (norm < 1.25) return 1   * mag;
+    if (norm < 1.75) return 1.5 * mag;
+    if (norm < 2.25) return 2   * mag;
+    if (norm < 3.5)  return 2.5 * mag;
+    if (norm < 6)    return 5   * mag;
+    if (norm < 8.5)  return 7.5 * mag;
     return 10 * mag;
   }
 
@@ -223,34 +243,18 @@
     ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy);
     ctx.stroke();
 
-    // Heading-Up-Pfeil (klein oben am Rand)
-    ctx.fillStyle = 'rgba(106,165,255,0.9)';
-    ctx.beginPath();
-    ctx.moveTo(cx,     cy - R - 2);
-    ctx.lineTo(cx - 4, cy - R - 9);
-    ctx.lineTo(cx + 4, cy - R - 9);
-    ctx.closePath();
-    ctx.fill();
-
     const selfHeading = (state.mySim && Number.isFinite(+state.mySim.heading_deg))
       ? +state.mySim.heading_deg : 0;
 
-    // Compass-Marker N/E/S/W — Heading-Up: Labels wandern um den Rand,
-    // wenn man sich dreht. Bei heading=0 ist N oben; bei heading=90 (Ost)
-    // wandert N nach links, E nach oben, S nach rechts, W nach unten.
+    // Compass-Marker N/E/S/W — North-Up: Labels stehen fest an Rand-Positionen.
+    // Norden ist immer oben; das Flugzeug-Symbol im Zentrum rotiert mit Heading.
     ctx.fillStyle = 'rgba(150,170,200,0.55)';
     ctx.font = '600 9px "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    const compassOffset = R - 8;
-    const compassMarkers = [['N', 0], ['E', 90], ['S', 180], ['W', 270]];
-    for (let i = 0; i < compassMarkers.length; i++) {
-      const label = compassMarkers[i][0];
-      const rel = ((compassMarkers[i][1] - selfHeading) + 360) % 360;
-      const theta = rel * Math.PI / 180;
-      const x = cx + Math.sin(theta) * compassOffset;
-      const y = cy - Math.cos(theta) * compassOffset;
-      ctx.fillText(label, x, y);
-    }
+    ctx.fillText('N', cx,         cy - R + 8);
+    ctx.fillText('S', cx,         cy + R - 8);
+    ctx.fillText('E', cx + R - 8, cy);
+    ctx.fillText('W', cx - R + 8, cy);
 
     // Audio-Bubble (Hoerbarkeits-Kreis in gruen)
     if (state.mySim && state.myRange > 0) {
@@ -282,15 +286,17 @@
       }
     }
 
-    // DU im Zentrum
+    // DU im Zentrum — North-Up: das Symbol rotiert mit dem Heading,
+    // damit der User sieht in welche Richtung er gerade schaut/fliegt.
     ctx.save();
     ctx.translate(cx, cy);
+    ctx.rotate(toRad(selfHeading));
     if (state.mySim && state.mySim.on_foot) {
       ctx.fillStyle = '#3fdc8a';
       ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1.2;
       ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2);
       ctx.fill(); ctx.stroke();
-      // Blickrichtungs-Dot oben
+      // Blickrichtungs-Dot — zeigt nach Vorausrichtung (im rotierten Frame oben)
       ctx.fillStyle = '#0b1220';
       ctx.beginPath(); ctx.arc(0, -3, 1.5, 0, Math.PI * 2); ctx.fill();
     } else {
@@ -306,16 +312,16 @@
       const acP = { lat: +state.mySim.aircraft.lat, lon: +state.mySim.aircraft.lon };
       const dAc = dist(state.mySim, acP);
       if (Number.isFinite(dAc) && dAc > 1) {
+        // North-Up: bearing direkt als Welt-Winkel verwenden, kein Heading-Subtract.
         const brg = bearing(state.mySim, acP);
-        const rel = ((brg - selfHeading) + 360) % 360;
-        const th  = toRad(rel) - Math.PI / 2;
+        const th  = toRad(brg) - Math.PI / 2;
         const sc  = Math.min(1, dAc / radarRangeM);
         const ax  = cx + Math.cos(th) * (R * sc);
         const ay  = cy + Math.sin(th) * (R * sc);
         ctx.save();
         ctx.translate(ax, ay);
         const acHead = +state.mySim.aircraft.heading_deg || 0;
-        ctx.rotate(((acHead - selfHeading + 360) % 360) * Math.PI / 180);
+        ctx.rotate(toRad(acHead));
         drawAircraftIcon(ctx, {
           fill:   'rgba(106,165,255,0.85)',
           stroke: '#0b1220', lineWidth: 1, scale: 0.55,
@@ -333,9 +339,9 @@
         if (Math.abs(lat) < 0.0001 && Math.abs(lon) < 0.0001) return;
         const d = dist(state.mySim, p.sim);
         if (!Number.isFinite(d)) return;
+        // North-Up: bearing direkt als Welt-Winkel, oben = Norden.
         const brg   = bearing(state.mySim, p.sim);
-        const rel   = ((brg - selfHeading) + 360) % 360;
-        const theta = toRad(rel) - Math.PI / 2;
+        const theta = toRad(brg) - Math.PI / 2;
         const scale = Math.min(1, d / radarRangeM);
         const px    = cx + Math.cos(theta) * (R * scale);
         const py    = cy + Math.sin(theta) * (R * scale);
@@ -515,6 +521,30 @@
     });
   }
 
+  // --- Walker-Auto-Zoom -------------------------------------------------
+  // Walker-Reichweite ist nur 10 m — auf 1 km Default ist die Audio-Bubble
+  // unsichtbar. Wenn der User aussteigt (on_foot wechselt false→true),
+  // springt der Radar auf 50 m. Beim Wieder-Einsteigen zurueck auf den
+  // letzten Cockpit-Wert. Manuell zoomen geht trotzdem jederzeit per
+  // Mausrad — die Auto-Logik triggert nur beim Modus-Wechsel.
+  let prevOnFoot = false;
+  let lastCockpitRangeM = RADAR_RANGE_DEFAULT;
+  const WALKER_AUTO_RANGE_M = 50;
+  function applyWalkerAutoZoom() {
+    const onFoot = !!(state.mySim && state.mySim.on_foot);
+    if (onFoot === prevOnFoot) return;
+    if (onFoot) {
+      // Cockpit → Walker: aktuelle Range merken, dann auf 50 m
+      lastCockpitRangeM = radarRangeM;
+      radarRangeM = WALKER_AUTO_RANGE_M;
+    } else {
+      // Walker → Cockpit: zurueck auf gemerkten Wert
+      radarRangeM = lastCockpitRangeM;
+    }
+    prevOnFoot = onFoot;
+    scheduleRender();
+  }
+
   // --- WebSocket -------------------------------------------------------
   function _host() { return HOSTS[VW.hostIdx % HOSTS.length]; }
 
@@ -561,6 +591,7 @@
       if (m.type === 'sim') {
         state.mySim = m.data || null;
         state.trackingOff = false;
+        applyWalkerAutoZoom();
       } else if (m.type === 'overlay_state') {
         state.peers.clear();
         (m.peers || []).forEach(function (p) { state.peers.set(p.id, p); });
@@ -568,6 +599,7 @@
         if (!state.mySim && m.mySim) state.mySim = m.mySim;
         // Erweiterter UI-State (optional; nur im neuen overlay_state vorhanden)
         if (m.ui) state.ui = m.ui;
+        applyWalkerAutoZoom();
       } else if (m.type === 'tracking_off') {
         state.trackingOff = true;
         state.peers.clear();
@@ -608,9 +640,7 @@
 
     window.addEventListener('wheel', function (e) {
       try { e.preventDefault(); } catch (_) {}
-      const factor = e.deltaY > 0 ? 1.25 : 1 / 1.25;
-      const next = Math.max(RADAR_RANGE_MIN,
-                   Math.min(RADAR_RANGE_MAX, radarRangeM * factor));
+      const next = snapRange(radarRangeM, e.deltaY > 0);
       if (next !== radarRangeM) {
         radarRangeM = next;
         scheduleRender();

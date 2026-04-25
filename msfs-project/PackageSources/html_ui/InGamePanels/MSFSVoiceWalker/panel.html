@@ -80,6 +80,9 @@
       .vw-dot {
         width: 9px; height: 9px; border-radius: 50%;
         background: var(--bad); flex-shrink: 0;
+        /* Coherent GT respektiert flex `gap` nicht zuverlaessig; explizites
+           margin damit der Dot nicht direkt am Status-Text klebt. */
+        margin-right: 6px;
       }
       .vw-dot.good { background: var(--good); box-shadow: 0 0 8px var(--good); }
       .vw-dot.warn { background: var(--warn); box-shadow: 0 0 8px var(--warn); }

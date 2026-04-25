@@ -1277,9 +1277,9 @@ document.addEventListener('DOMContentLoaded', () => {
     radar.addEventListener('wheel', e => {
       e.preventDefault();
       // scroll up (negative deltaY) → reinzoomen (kleinere Range)
-      // scroll down → rauszoomen (groessere Range). Faktor 1.25 je Tick.
-      const factor = e.deltaY > 0 ? 1.25 : 1 / 1.25;
-      setRadarRange(RADAR_RANGE_M * factor);
+      // scroll down → rauszoomen (groessere Range). Mausrad rastet auf
+      // RADAR_SNAP_VALUES ein.
+      setRadarRange(snapRange(RADAR_RANGE_M, e.deltaY > 0));
     }, { passive: false });
     // Doppelklick: Reset auf Default
     radar.addEventListener('dblclick', () => setRadarRange(RADAR_RANGE_DEFAULT));
@@ -1792,8 +1792,25 @@ let RADAR_RANGE_M = (() => {
   } catch {}
   return RADAR_RANGE_DEFAULT;
 })();
-const RADAR_RANGE_MIN = 100;
-const RADAR_RANGE_MAX = 20000;
+const RADAR_RANGE_MIN = 2.5;
+const RADAR_RANGE_MAX = 25000;
+// Diskrete Zoom-Stufen — Mausrad rastet ein. 1-1.5-2-2.5-5-7.5er Pattern,
+// passt zu klassischer ATC-Range-Ring-Skala (siehe EuroScope/VATSIM).
+const RADAR_SNAP_VALUES = [
+  2.5, 5, 10, 15, 25, 50, 75, 100, 150, 250,
+  500, 750, 1000, 1500, 2500, 5000, 7500, 10000, 15000, 25000,
+];
+function snapRange(currentM, zoomOut) {
+  let bestIdx = 0, bestDist = Infinity;
+  for (let i = 0; i < RADAR_SNAP_VALUES.length; i++) {
+    const d = Math.abs(RADAR_SNAP_VALUES[i] - currentM);
+    if (d < bestDist) { bestDist = d; bestIdx = i; }
+  }
+  const targetIdx = zoomOut
+    ? Math.min(bestIdx + 1, RADAR_SNAP_VALUES.length - 1)
+    : Math.max(bestIdx - 1, 0);
+  return RADAR_SNAP_VALUES[targetIdx];
+}
 function setRadarRange(m) {
   RADAR_RANGE_M = Math.max(RADAR_RANGE_MIN, Math.min(RADAR_RANGE_MAX, m));
   try { localStorage.setItem('vw.radarRangeM', String(RADAR_RANGE_M)); } catch {}
@@ -1896,13 +1913,18 @@ function renderRadar() {
   //   RADAR_RANGE_M = 1250   → step=250  → Ringe bei 250/500/750/1000/1250
   //   RADAR_RANGE_M = 5000   → step=1000 → Ringe bei 1/2/3/4/5 km
   //   RADAR_RANGE_M = 20000  → step=5000 → Ringe bei 5/10/15/20 km
+  // 1-1.5-2-2.5-5-7.5-10er Pattern (feiner als klassisches 1-2-5er),
+  // passt zu RADAR_SNAP_VALUES und gibt visuell angenehme Ring-Stufen.
   const niceStep = (maxM) => {
     const target = maxM / 4;
     const mag    = Math.pow(10, Math.floor(Math.log10(target)));
     const norm   = target / mag;
-    if (norm < 1.5) return 1 * mag;
-    if (norm < 3.5) return 2 * mag;
-    if (norm < 7.5) return 5 * mag;
+    if (norm < 1.25) return 1   * mag;
+    if (norm < 1.75) return 1.5 * mag;
+    if (norm < 2.25) return 2   * mag;
+    if (norm < 3.5)  return 2.5 * mag;
+    if (norm < 6)    return 5   * mag;
+    if (norm < 8.5)  return 7.5 * mag;
     return 10 * mag;
   };
   const ringStep = niceStep(RADAR_RANGE_M);
@@ -2725,6 +2747,7 @@ window.__voicewalker = {
   ensureCtx,
   ensureMic,
   reconcileAudioStreams,
+  renderRadar,
 };
 
 // --- Update-Banner -----------------------------------------------------------
