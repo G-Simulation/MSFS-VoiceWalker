@@ -60,6 +60,7 @@ except ImportError:
 from ptt_backend import PTTBackend
 import updater
 import license_client
+import tray
 
 
 def _load_env_file(path: pathlib.Path) -> None:
@@ -1481,6 +1482,15 @@ async def main():
         except Exception as e:
             log.warning("could not open browser: %s", e)
 
+    # Tray-Icon: laeuft in eigenem Thread. Beenden-Button schliesst den
+    # websockets-Server, dann faellt asyncio.gather() durch und wir landen
+    # im finally. icon.stop() macht dort den pystray-Thread sauber zu.
+    _loop = asyncio.get_event_loop()
+    def _quit_from_tray():
+        log.info("tray-quit signal: server.close + finalize")
+        _loop.call_soon_threadsafe(server.close)
+    tray_icon = tray.setup_tray(PORT, _quit_from_tray)
+
     try:
         await asyncio.gather(
             broadcast_sim(reader),
@@ -1490,6 +1500,9 @@ async def main():
             server.wait_closed(),
         )
     finally:
+        if tray_icon is not None:
+            try: tray_icon.stop()
+            except Exception as e: log.debug("tray.stop: %s", e)
         PTT.stop()
         log.info("shutdown complete")
 

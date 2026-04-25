@@ -1,10 +1,13 @@
 """License client for MSFSVoiceWalker Pro.
 
 Validates license keys against either:
-  1. DEV mode — fallback when no LICENSE_API_URL env-var is set. Accepts any
-     key starting with ``DEV-PRO-`` as Pro for 30 days, ``DEV-FREE`` as Free.
-  2. LMFWC backend — WooCommerce License Manager REST API. URL + consumer
-     key/secret come from env.
+  1. DEV mode — accepts any key starting with ``DEV-PRO-`` as Pro for 30 days,
+     ``DEV-FREE`` as Free. Used when the backend is not reachable AND no cache
+     is available, to keep local development unblocked.
+  2. Gsim-Events backend — our own WordPress plugin endpoint at
+     /wp-json/gsim-events/v1/license/validate. The endpoint talks to LMFWC
+     internally (same WordPress process), so NO consumer credentials are
+     transmitted from the client anymore — only the user license key.
 
 Validation result is cached in ``license_cache.json`` next to the exe with an
 ``expires_at`` timestamp. If the backend is unreachable the cache is used for
@@ -32,13 +35,10 @@ GRACE_SECONDS    = 7 * 24 * 3600       # offline grace
 DEV_PRO_SECONDS  = 30 * 24 * 3600      # dev keys last 30 days each validate
 HTTP_TIMEOUT     = 6.0
 
-# Defaults, damit die distributed .exe out-of-the-box gegen die LMFWC-API
-# validieren kann. Diese Consumer-Credentials haben nur read-Zugriff auf
-# /lmfwc/v2/licenses — sie koennen Keys NICHT erzeugen oder editieren.
+# Our own plugin endpoint — no credentials needed. The server-side plugin runs
+# in-process with LMFWC and looks up the license key directly via repository.
 # Override moeglich via echter env-var oder .secrets/license.env (Dev).
-DEFAULT_API_URL = "https://www.gsimulations.de/wp-json/lmfwc/v2/licenses/validate"
-DEFAULT_CK      = "ck_5c695af5ba91ffc9edcf8885c77420a8525924be"
-DEFAULT_CS      = "cs_ffd91d2fa6f5ca77644790548a1cce98e8c58867"
+DEFAULT_API_URL = "https://www.gsimulations.de/wp-json/gsim-events/v1/license/validate"
 
 
 def _cache_path(config_dir: pathlib.Path) -> pathlib.Path:
@@ -89,16 +89,16 @@ def _dev_validate(key: str) -> dict:
     }
 
 
-def _lmfwc_validate(key: str, api_url: str, ck: str, cs: str) -> dict:
-    """Real LMFWC call. Endpoint format:
-       <api_url>/<key>  (GET, Basic Auth with consumer key/secret)."""
+def _gsim_validate(key: str, api_url: str) -> dict:
+    """Our own gsim-events plugin endpoint. POST JSON body {"key": "..."},
+    response matches LMFWC v2 shape (timesActivated / timesActivatedMax /
+    remainingActivations / expires_at) plus a top-level ``is_pro`` flag.
+
+    Reason-Codes: ok, not_found, inactive, expired, limit_reached."""
     now = time.time()
-    safe_key = urllib.parse.quote(key, safe="")
-    url = api_url.rstrip("/") + "/" + safe_key
-    req = urllib.request.Request(url)
-    import base64
-    token = base64.b64encode(f"{ck}:{cs}".encode()).decode()
-    req.add_header("Authorization", "Basic " + token)
+    payload = json.dumps({"key": key}).encode("utf-8")
+    req = urllib.request.Request(api_url, data=payload, method="POST")
+    req.add_header("Content-Type", "application/json")
     req.add_header("Accept", "application/json")
     try:
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
@@ -108,30 +108,16 @@ def _lmfwc_validate(key: str, api_url: str, ck: str, cs: str) -> dict:
         return {
             "is_pro": False, "key": key, "reason": f"http {e.code}",
             "mode": "backend", "validated_at": now, "expires_at": 0,
+            "license_expires": 0.0,
         }
-    except Exception as e:
+    except Exception:
         raise  # let caller fall back to cache
 
-    # LMFWC /validate/{key} response shape:
-    #   active:    {"success": true,  "data": {"timesActivated": n,
-    #                                          "timesActivatedMax": m,
-    #                                          "remainingActivations": r, ...}}
-    #   inactive:  {"success": false, "data": {...}}
-    # Der /validate-Endpoint bestaetigt implizit aktiv — status-Feld gibt es
-    # nur am /licenses/{key}-Endpoint.
-    ok = bool(data.get("success"))
-    inner = data.get("data") or {}
-    # Activation-Limit hart durchsetzen: wenn max>0 und 0 uebrig → stumpf abgelehnt.
-    act_max = inner.get("timesActivatedMax") or 0
-    act_now = inner.get("timesActivated") or 0
-    if ok and act_max and act_now >= act_max:
-        ok = False
-        reason = f"activation limit reached ({act_now}/{act_max})"
-    else:
-        reason = "ok" if ok else "invalid or inactive"
-    # license_expires: echtes LMFWC-Ablaufdatum (0 = lifetime)
-    # cache_until:     bis wann der Cache fuer Offline-Start akzeptiert wird
-    exp_raw = inner.get("expiresAt")
+    is_pro = bool(data.get("is_pro"))
+    reason = str(data.get("reason") or ("ok" if is_pro else "invalid"))
+    act_max = int(data.get("timesActivatedMax") or 0)
+    act_now = int(data.get("timesActivated") or 0)
+    exp_raw = data.get("expires_at")
     license_expires = 0.0
     try:
         if exp_raw:
@@ -144,16 +130,37 @@ def _lmfwc_validate(key: str, api_url: str, ck: str, cs: str) -> dict:
     if license_expires:
         cache_until = min(cache_until, license_expires)
     return {
-        "is_pro":          bool(ok),
-        "key":             key,
-        "reason":           reason,
-        "mode":             "backend",
-        "validated_at":     now,
-        # expires_at = Cache-Gueltigkeit (fuer Offline-Grace). UI zeigt stattdessen
-        # license_expires wenn vorhanden, sonst "lifetime".
-        "expires_at":       cache_until,
-        "license_expires":  license_expires,   # 0 = lifetime
+        "is_pro":             is_pro,
+        "key":                key,
+        "reason":             reason,
+        "mode":               "backend",
+        "validated_at":       now,
+        # expires_at = Cache-Gueltigkeit fuer Offline-Grace. UI zeigt dagegen
+        # license_expires an (0 = lifetime).
+        "expires_at":         cache_until,
+        "license_expires":    license_expires,
+        "timesActivated":     act_now,
+        "timesActivatedMax":  act_max,
     }
+
+
+def _purge_legacy_lmfwc_url() -> None:
+    """Frueher zeigte LICENSE_API_URL auf /wp-json/lmfwc/v2/licenses/validate
+    und brauchte ck/cs Consumer-Credentials. Wenn alte env-vars hier noch
+    drinhaengen (z.B. von setx oder Dev-Profilen), zwingt das den Client
+    weiterhin auf die alte API → 401, weil die ck/cs rotiert sind. Hart
+    rauswerfen, damit DEFAULT_API_URL sicher greift."""
+    legacy = os.environ.get("LICENSE_API_URL", "").strip().lower()
+    if "lmfwc/v2" in legacy:
+        os.environ.pop("LICENSE_API_URL", None)
+        log.info("license: legacy LMFWC URL aus env entfernt — nutze DEFAULT_API_URL")
+    # Consumer-Credentials werden nicht mehr verwendet, aber falls jemand
+    # sie noch in env-vars hat: ignorieren wir sie eh in validate(); das
+    # Auf-Logging hilft beim Debugging.
+    for var in ("LICENSE_API_CONSUMER_KEY", "LICENSE_API_CONSUMER_SECRET"):
+        if os.environ.get(var):
+            os.environ.pop(var, None)
+            log.info("license: legacy %s aus env entfernt (nicht mehr genutzt)", var)
 
 
 def _reload_env_from_secrets(config_dir: pathlib.Path) -> None:
@@ -182,9 +189,8 @@ def validate(key: str, config_dir: pathlib.Path) -> dict:
        is_pro, key, reason, mode, validated_at, expires_at."""
     now = time.time()
     _reload_env_from_secrets(config_dir)
-    api_url = os.environ.get("LICENSE_API_URL", "").strip()      or DEFAULT_API_URL
-    ck      = os.environ.get("LICENSE_API_CONSUMER_KEY", "").strip()    or DEFAULT_CK
-    cs      = os.environ.get("LICENSE_API_CONSUMER_SECRET", "").strip() or DEFAULT_CS
+    _purge_legacy_lmfwc_url()
+    api_url = os.environ.get("LICENSE_API_URL", "").strip() or DEFAULT_API_URL
 
     # Dev-keys umgehen den Backend-Call auch wenn der konfiguriert ist —
     # so koennen wir Features lokal testen ohne die Prod-API zu belasten.
@@ -202,9 +208,9 @@ def validate(key: str, config_dir: pathlib.Path) -> dict:
         _save_cache(config_dir, result)
         return result
 
-    if api_url and ck and cs:
+    if api_url:
         try:
-            result = _lmfwc_validate(key, api_url, ck, cs)
+            result = _gsim_validate(key, api_url)
             _save_cache(config_dir, result)
             return result
         except Exception as e:

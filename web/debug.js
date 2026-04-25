@@ -185,7 +185,7 @@ function initDebugPanel() {
           </div>
           <div class="row">
             <label>Hörgrenze</label>
-            <input type="range" id="c-max" min="10" max="2000" step="5" value="75">
+            <input type="range" id="c-max" min="10" max="10000" step="5" value="75">
             <span class="readout" id="c-max-r">75 m</span>
           </div>
           <div class="row">
@@ -225,14 +225,14 @@ function initDebugPanel() {
         </section>
 
         <section>
-          <h4>Test-Peer (lauft im Kreis, sagt "Hallo &lt;Callsign&gt;")</h4>
+          <h4>Test-Peer (laeuft im Kreis, Ton-Burst alle 5 s)</h4>
           <div class="btnrow">
             <button id="btn-test-start">Test-Peer starten</button>
             <button id="btn-test-stop">Test-Peer stoppen</button>
           </div>
           <div class="hint">
-            Synth-Peer lauft in 100 m Radius, sagt alle 5 s via TTS
-            "Hallo &lt;dein Callsign&gt;" + spielt positionierten Ton fur Radar/VAD.
+            Synth-Peer laeuft in 100 m Radius und spielt alle 5 s einen
+            HRTF-positionierten Ton-Burst fuer Radar/VAD-Tests.
           </div>
         </section>
 
@@ -304,6 +304,10 @@ function initDebugPanel() {
       const v = parseFloat(inp.value);
       out.textContent = unit === 'm' ? `${Math.round(v)} m` : v.toFixed(1);
       cfg[configKey] = v;
+      // Backward-compat-Setter schreibt audioConfig.walker/cockpit.* je nach
+      // state.mySim.on_foot. Ohne Reconcile greift die neue Range erst beim
+      // naechsten 1-Hz-Tick — mit Reconcile sofort.
+      try { window.__voicewalker?.reconcileAudioStreams?.(); } catch {}
     };
     fmt();
     inp.addEventListener('input', fmt);

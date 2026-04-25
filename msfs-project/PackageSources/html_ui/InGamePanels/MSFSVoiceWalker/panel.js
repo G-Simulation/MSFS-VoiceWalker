@@ -232,17 +232,25 @@
     ctx.closePath();
     ctx.fill();
 
-    // Compass-Marker N/E/S/W
+    const selfHeading = (state.mySim && Number.isFinite(+state.mySim.heading_deg))
+      ? +state.mySim.heading_deg : 0;
+
+    // Compass-Marker N/E/S/W — Heading-Up: Labels wandern um den Rand,
+    // wenn man sich dreht. Bei heading=0 ist N oben; bei heading=90 (Ost)
+    // wandert N nach links, E nach oben, S nach rechts, W nach unten.
     ctx.fillStyle = 'rgba(150,170,200,0.55)';
     ctx.font = '600 9px "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('N', cx,         cy - R + 8);
-    ctx.fillText('S', cx,         cy + R - 8);
-    ctx.fillText('E', cx + R - 8, cy);
-    ctx.fillText('W', cx - R + 8, cy);
-
-    const selfHeading = (state.mySim && Number.isFinite(+state.mySim.heading_deg))
-      ? +state.mySim.heading_deg : 0;
+    const compassOffset = R - 8;
+    const compassMarkers = [['N', 0], ['E', 90], ['S', 180], ['W', 270]];
+    for (let i = 0; i < compassMarkers.length; i++) {
+      const label = compassMarkers[i][0];
+      const rel = ((compassMarkers[i][1] - selfHeading) + 360) % 360;
+      const theta = rel * Math.PI / 180;
+      const x = cx + Math.sin(theta) * compassOffset;
+      const y = cy - Math.cos(theta) * compassOffset;
+      ctx.fillText(label, x, y);
+    }
 
     // Audio-Bubble (Hoerbarkeits-Kreis in gruen)
     if (state.mySim && state.myRange > 0) {
@@ -374,10 +382,10 @@
     const cs = $('vw-callsign');
     const pb = $('vw-probadge');
     if (state.ui) {
-      if (cs) cs.textContent = state.ui.callsign || '—';
+      if (cs) cs.textContent = state.ui.callsign || '-';
       if (pb) pb.classList.toggle('visible', !!state.ui.isPro);
     } else {
-      if (cs) cs.textContent = '—';
+      if (cs) cs.textContent = '-';
       if (pb) pb.classList.remove('visible');
     }
 
@@ -392,7 +400,7 @@
       if (rb) rb.classList.add('visible');
       if (rl) {
         const pr = state.ui.privateRoom;
-        rl.textContent = pr.length > 24 ? pr.slice(0, 22) + '…' : pr;
+        rl.textContent = pr.length > 24 ? pr.slice(0, 22) + '...' : pr;
       }
     } else {
       if (rb) rb.classList.remove('visible');
@@ -448,7 +456,7 @@
         const mode = state.mySim.on_foot ? '  |  zu Fuss' : '';
         st.textContent = la + ', ' + lo + mode;
       } else {
-        st.textContent = '—';
+        st.textContent = '-';
       }
     }
   }
@@ -480,7 +488,7 @@
     show.forEach(function (row) {
       const p = row.p;
       const name = esc(p.callsign || p.id.slice(0, 6));
-      const badge = p.on_foot ? ' <span class="vw-emoji">🚶</span>' : '';
+      const badge = p.on_foot ? ' <svg class="vw-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1"/><path d="m9 20 3-6 3 6"/><path d="m6 8 6 2 6-2"/><path d="M12 10v4"/></svg>' : '';
       const far = row.d > state.myRange;
       const cls = 'vw-peer' + (p.speaking ? ' speaking' : '') + (far ? ' far' : '');
       html += '<div class="' + cls + '">'

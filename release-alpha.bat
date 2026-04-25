@@ -89,6 +89,14 @@ if errorlevel 1 (
     )
 )
 
+REM ---------- 3b. Signieren (wenn Cert vorhanden) ----------
+echo [3b] Code-Signing (falls CERT_SHA1 gesetzt)
+call sign.bat
+if errorlevel 1 (
+    echo [ERROR] Signierung fehlgeschlagen. Build abgebrochen.
+    goto :fail
+)
+
 REM ---------- 4. Push main ----------
 echo [4/6] push origin main
 git push -u origin main

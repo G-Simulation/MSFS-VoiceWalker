@@ -826,7 +826,96 @@ add_action('rest_api_init', function () {
             'description' => ['type' => 'string'],
         ],
     ]);
+
+    // -------------------------------------------------------------------------
+    // POST /license/validate — ersetzt den direkten LMFWC-REST-Aufruf vom Client.
+    // Der Client braucht damit keine Consumer-Credentials mehr — nur den
+    // User-Lizenzschluessel. Wir rufen LMFWC intern via Repository-Klasse auf
+    // (LMFWC hat keinen public Validate-Helper, also selber bauen; Logik
+    // gespiegelt aus includes/api/v2/Licenses.php::activateLicense).
+    // Antwort-Shape ist bewusst kompatibel zum vorherigen /lmfwc/v2/validate-
+    // Aufruf, damit license_client.py minimal angepasst werden muss.
+    // -------------------------------------------------------------------------
+    register_rest_route($ns, '/license/validate', [
+        'methods'  => 'POST',
+        'callback' => 'gsim_events_license_validate',
+        'permission_callback' => '__return_true',
+        'args' => [
+            'key' => ['type' => 'string', 'required' => true],
+        ],
+    ]);
 });
+
+function gsim_events_license_validate($req) {
+    $key = trim((string) $req->get_param('key'));
+    if ($key === '') {
+        return new WP_Error('no_key', 'Lizenzschluessel fehlt', ['status' => 400]);
+    }
+
+    $repo_class  = 'LicenseManagerForWooCommerce\\Repositories\\Resources\\License';
+    $enum_class  = 'LicenseManagerForWooCommerce\\Enums\\LicenseStatus';
+
+    if (!class_exists($repo_class)) {
+        return new WP_Error(
+            'lmfwc_missing',
+            'License Manager for WooCommerce ist nicht aktiv',
+            ['status' => 500]
+        );
+    }
+
+    // LMFWC speichert den Key gehasht; "lmfwc_hash" ist ein Filter, keine Funktion.
+    $hash    = apply_filters('lmfwc_hash', $key);
+    $license = call_user_func([$repo_class, 'instance'])->findBy(['hash' => $hash]);
+
+    if (!$license) {
+        return rest_ensure_response([
+            'success'       => false,
+            'is_pro'        => false,
+            'reason'        => 'not_found',
+            'key'           => $key,
+        ]);
+    }
+
+    $status_active = defined("$enum_class::ACTIVE")
+        ? constant("$enum_class::ACTIVE") : 3; // Fallback: int-Code laut Enum
+    if ((int) $license->getStatus() !== (int) $status_active) {
+        return rest_ensure_response([
+            'success' => false, 'is_pro' => false, 'reason' => 'inactive', 'key' => $key,
+        ]);
+    }
+
+    $expires_raw = $license->getExpiresAt();
+    $expires_ts  = 0;
+    if ($expires_raw) {
+        $expires_ts = strtotime($expires_raw);
+        if ($expires_ts && $expires_ts < time()) {
+            return rest_ensure_response([
+                'success' => false, 'is_pro' => false, 'reason' => 'expired',
+                'key' => $key, 'expires_at' => $expires_raw,
+            ]);
+        }
+    }
+
+    $times_max = (int) $license->getTimesActivatedMax();
+    $times_now = (int) $license->getTimesActivated();
+    if ($times_max && $times_now >= $times_max) {
+        return rest_ensure_response([
+            'success' => false, 'is_pro' => false, 'reason' => 'limit_reached',
+            'key' => $key, 'timesActivated' => $times_now, 'timesActivatedMax' => $times_max,
+        ]);
+    }
+
+    return rest_ensure_response([
+        'success'              => true,
+        'is_pro'               => true,
+        'reason'               => 'ok',
+        'key'                  => $key,
+        'expires_at'           => $expires_raw ?: null,
+        'timesActivated'       => $times_now,
+        'timesActivatedMax'    => $times_max,
+        'remainingActivations' => $times_max ? max(0, $times_max - $times_now) : null,
+    ]);
+}
 
 // -----------------------------------------------------------------------------
 // Frontend-Shortcode [gsim_organizer_form]

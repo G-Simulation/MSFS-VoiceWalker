@@ -2,9 +2,17 @@
   <img src="brand/voicewalker-logo.png" alt="MSFSVoiceWalker Logo" width="320"/>
 </p>
 
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"/></a>
+  <a href="https://github.com/G-Simulation/MSFS-VoiceWalker/releases"><img src="https://img.shields.io/github/v/release/G-Simulation/MSFS-VoiceWalker?include_prereleases&label=release" alt="Release"/></a>
+  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-informational" alt="Platform: Windows 10/11"/>
+  <img src="https://img.shields.io/badge/MSFS-2020%20%26%202024-orange" alt="MSFS 2020 & 2024"/>
+  <a href="https://www.paypal.com/donate/?hosted_button_id=F2GPDVV6BUSAQ"><img src="https://img.shields.io/badge/donate-PayPal-00457C?logo=paypal&logoColor=white" alt="Donate"/></a>
+</p>
+
 # MSFSVoiceWalker
 
-Copyright 2026 [G-Simulation](https://github.com/G-Simulation).
+Copyright 2026 Patrick Gottberg / [G-Simulation](https://www.gsimulations.de).
 Lizenziert unter der [Apache License 2.0](LICENSE) — freie, offene Software.
 Benutzen, forken, weiterentwickeln, verteilen: alles erlaubt, solange
 Copyright-Hinweis und LICENSE mitkopiert werden. Der Name "MSFSVoiceWalker"
@@ -263,7 +271,7 @@ C:\MSFSVoiceWalker\
 ├── main.py                        ← App-Einstiegspunkt, SimConnect + HTTP/WS
 ├── debug.py                       ← Logging, Self-Test, Ring-Buffer
 ├── ptt_backend.py                 ← USB-PTT-Polling via pygame
-├── license_client.py              ← Pro-Key-Validation (LMFWC + 7d Offline-Grace)
+├── license_client.py              ← Pro-Key-Validation (eigener WP-Endpoint + 7d Offline-Grace)
 ├── updater.py                     ← Auto-Update-Checker + Installer-Launch
 ├── installer.py                   ← Python-Integrator (Community-Folder + exe.xml)
 │
@@ -458,8 +466,9 @@ d.h. selbst wenn etwas schiefgeht, kannst du manuell zurückrollen.
 - [x] **Zwei-Welten-Audio** (Walker 75 m / Cockpit 5 km + Crossover).
 - [x] **TURN-Relay-Unterstützung** für Symmetric-NAT-Fälle, konfigurierbar
   über Umgebungsvariablen.
-- [x] **Pro-System** (License-Client mit LMFWC-Backend, 7-Tage-Offline-Grace,
-  Dev-Mode-Keys für lokale Tests).
+- [x] **Pro-System** (License-Client gegen eigenen WordPress-Plugin-Endpoint,
+  7-Tage-Offline-Grace, Dev-Mode-Keys für lokale Tests). Keine Consumer-
+  Credentials mehr auf dem Client — nur der User-Lizenz-Key wird übertragen.
 - [x] **Private Rooms** via `sha256(passphrase + salt)` als Trystero-Room-Key.
 - [x] **Peer-Limit-Gate** (20 Free / 200 Pro) mit Upgrade-Modal.
 - [x] **Tracking-Toggle** mit Persistenz in `config.json`.
@@ -469,9 +478,11 @@ d.h. selbst wenn etwas schiefgeht, kannst du manuell zurückrollen.
 
 - [ ] **Event-Plattform** (The Events Calendar + PDF-Briefing-Hook):
   Veranstalter bucht → Room-ID + Passphrase + PDF automatisch generiert.
-- [ ] **Code-Signing-Zertifikat** — aktuell warnt Windows SmartScreen vor
-  "unbekanntem Herausgeber". Evaluiert werden SignPath Foundation (Open-Source
-  CI-Flow) und Certum (polnische CA, von Microsoft anerkannt).
+- [ ] **Code-Signing-Zertifikat** — Certum Open Source Cert (auf Patrick Gottberg)
+  in Vorbereitung; `sign.bat` wartet auf den Thumbprint. SignPath Foundation
+  als Plan B parallel beworben. Bis dahin warnt Windows SmartScreen beim
+  Installer vor "unbekanntem Herausgeber" — das ist normal und unproblematisch,
+  "Weitere Informationen" → "Trotzdem ausführen".
 - [ ] **Radio-Sound-Effekt** (Funkgeräusche, Squelch-Rauschen) — aktuell
   ist die Stimme "clean". Aviation-Feeling-Sahne.
 - [ ] **Session-Recording** (Pro-Feature, langfristig).

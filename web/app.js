@@ -814,8 +814,26 @@ function volumeForDistance(m, profile) {
 
 // --- Audio context -----------------------------------------------------------
 let audioCtx;
+let masterGain;   // Master-Volume-Node: alle Peer-Streams routen hier durch
+function loadMasterVolume() {
+  try {
+    const v = parseFloat(localStorage.getItem('vw.masterVolume'));
+    if (Number.isFinite(v) && v >= 0 && v <= 2) return v;
+  } catch {}
+  return 1.0;
+}
+function setMasterVolume(v) {
+  const clamped = Math.max(0, Math.min(2, +v || 0));
+  if (masterGain) masterGain.gain.value = clamped;
+  try { localStorage.setItem('vw.masterVolume', String(clamped)); } catch {}
+}
 function ensureCtx() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = loadMasterVolume();
+    masterGain.connect(audioCtx.destination);
+  }
   if (audioCtx.state === 'suspended') audioCtx.resume();
   return audioCtx;
 }
@@ -1463,7 +1481,7 @@ function joinCellRoom(cell) {
     p.pannerNode.positionZ.value = -1;
 
     src.connect(p.analyserRaw);
-    src.connect(p.gainNode).connect(p.pannerNode).connect(ctx.destination);
+    src.connect(p.gainNode).connect(p.pannerNode).connect(masterGain);
   });
 
   getPos((pos, peerId) => {
@@ -1550,6 +1568,24 @@ function reconcileAudioStreams() {
 }
 setInterval(reconcileAudioStreams, 1000);  // 1 Hz reicht
 
+// --- Peer-Iteration-Helper ---------------------------------------------------
+// updateRooms() joined geohashNeighbors() = 3x3 Grid = 9 Zellen. Wenn zwei
+// Clients geografisch nah sind, ueberlappen sich ihre Zell-Sets in mehreren
+// Zellen → der gleiche Trystero-Peer steht dann in 2..9 state.rooms.*.peers
+// Maps. Fuer Rendering (Liste, Radar-Punkt, Sprech-Glow, Overlay-Payload)
+// wollen wir ihn aber nur EIN MAL sehen. Dedup per peerId ist safe, weil
+// Trystero pro Client eine stable SelfID in allen Rooms nutzt.
+function* iterAllPeersDeduped() {
+  const seen = new Set();
+  for (const { peers } of state.rooms.values()) {
+    for (const [peerId, p] of peers) {
+      if (seen.has(peerId)) continue;
+      seen.add(peerId);
+      yield [peerId, p];
+    }
+  }
+}
+
 // --- Per-peer audio routing --------------------------------------------------
 //
 // Koordinaten-Konvention:
@@ -1560,11 +1596,15 @@ setInterval(reconcileAudioStreams, 1000);  // 1 Hz reicht
 //   berechnet WebAudio-HRTF die Richtungswahrnehmung automatisch korrekt.
 // -----------------------------------------------------------------------------
 function updateAudioFor(p) {
-  if (!state.mySim || !p.sim || !p.gainNode) return;
+  if (!state.mySim || !p.sim) return;
 
-  // 1) Distanz-basierte Lautstaerke
+  // Distanz IMMER pflegen (auch ohne Audio-Pipeline), sonst kann
+  // reconcileAudioStreams() nie den initialen Stream starten und
+  // die Peers-Liste zeigt dauerhaft "—" bei jedem Peer.
   const d = distMeters(state.mySim, p.sim);
   p.currentDistance = d;
+
+  if (!p.gainNode) return;
 
   // ZWEI AUDIO-WELTEN: Mein Modus vs. Peer-Modus bestimmt das Profil.
   // Gleicher Modus → volle Hoerweite des Profils; anders + d ≤ crossover →
@@ -2034,57 +2074,55 @@ function renderRadar() {
   const myHead  = state.mySim.heading_deg || 0;
   const myRange = audioConfig.maxRangeM;
 
-  for (const { peers } of state.rooms.values()) {
-    for (const [id, p] of peers) {
-      if (!p.sim) continue;
-      const d = p.currentDistance ?? distMeters(state.mySim, p.sim);
-      if (d > RADAR_RANGE_M) continue;
+  for (const [id, p] of iterAllPeersDeduped()) {
+    if (!p.sim) continue;
+    const d = p.currentDistance ?? distMeters(state.mySim, p.sim);
+    if (d > RADAR_RANGE_M) continue;
 
-      // Bearing nach Heading-Up transformieren
-      const bear = bearingDeg(state.mySim, p.sim);
-      const rel  = ((bear - myHead) + 360) % 360;
-      const rad  = rel * Math.PI / 180;
-      const r    = (d / RADAR_RANGE_M) * R;
-      const px   = cx + Math.sin(rad) * r;
-      const py   = cy - Math.cos(rad) * r;
+    // Bearing nach Heading-Up transformieren
+    const bear = bearingDeg(state.mySim, p.sim);
+    const rel  = ((bear - myHead) + 360) % 360;
+    const rad  = rel * Math.PI / 180;
+    const r    = (d / RADAR_RANGE_M) * R;
+    const px   = cx + Math.sin(rad) * r;
+    const py   = cy - Math.cos(rad) * r;
 
-      // Hörbarkeit: du hörst ihn / er hört dich
-      const theyHearMe = d < (p.sim.hearRangeM || 1000);
-      const iHearThem  = d < myRange;
-      let color;
-      if (theyHearMe && iHearThem) color = '#3fdc8a';   // beidseitig hörbar
-      else if (iHearThem)          color = '#6aa5ff';   // nur ich höre ihn
-      else if (theyHearMe)         color = '#ffc857';   // nur er hört mich
-      else                         color = '#6b7896';   // keiner hört
+    // Hörbarkeit: du hörst ihn / er hört dich
+    const theyHearMe = d < (p.sim.hearRangeM || 1000);
+    const iHearThem  = d < myRange;
+    let color;
+    if (theyHearMe && iHearThem) color = '#3fdc8a';   // beidseitig hörbar
+    else if (iHearThem)          color = '#6aa5ff';   // nur ich höre ihn
+    else if (theyHearMe)         color = '#ffc857';   // nur er hört mich
+    else                         color = '#6b7896';   // keiner hört
 
-      const isSpeaking = p.speaking && p.currentVolume > 0.05;
+    const isSpeaking = p.speaking && p.currentVolume > 0.05;
 
-      // Glow beim Sprechen
-      if (isSpeaking) {
-        const grd = ctx.createRadialGradient(px, py, 0, px, py, 22);
-        grd.addColorStop(0, 'rgba(255, 224, 102, 0.7)');
-        grd.addColorStop(1, 'rgba(255, 224, 102, 0)');
-        ctx.fillStyle = grd;
-        ctx.beginPath(); ctx.arc(px, py, 22, 0, Math.PI * 2); ctx.fill();
-      }
-
-      // Punkt
-      ctx.fillStyle = isSpeaking ? '#ffe066' : color;
-      ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-
-      // Callsign mit kleinem Hintergrund für Lesbarkeit
-      const cs = p.sim.callsign || id.slice(0, 6);
-      ctx.font = '600 10px -apple-system, "Segoe UI", system-ui, sans-serif';
-      ctx.textBaseline = 'middle';
-      ctx.textAlign = 'left';
-      const textX = px + 9, textY = py;
-      const tw = ctx.measureText(cs).width;
-      ctx.fillStyle = 'rgba(11, 18, 32, 0.75)';
-      ctx.fillRect(textX - 2, textY - 7, tw + 4, 14);
-      ctx.fillStyle = isSpeaking ? '#ffe066' : '#e9eefc';
-      ctx.fillText(cs, textX, textY);
+    // Glow beim Sprechen
+    if (isSpeaking) {
+      const grd = ctx.createRadialGradient(px, py, 0, px, py, 22);
+      grd.addColorStop(0, 'rgba(255, 224, 102, 0.7)');
+      grd.addColorStop(1, 'rgba(255, 224, 102, 0)');
+      ctx.fillStyle = grd;
+      ctx.beginPath(); ctx.arc(px, py, 22, 0, Math.PI * 2); ctx.fill();
     }
+
+    // Punkt
+    ctx.fillStyle = isSpeaking ? '#ffe066' : color;
+    ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+    // Callsign mit kleinem Hintergrund für Lesbarkeit
+    const cs = p.sim.callsign || id.slice(0, 6);
+    ctx.font = '600 10px -apple-system, "Segoe UI", system-ui, sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    const textX = px + 9, textY = py;
+    const tw = ctx.measureText(cs).width;
+    ctx.fillStyle = 'rgba(11, 18, 32, 0.75)';
+    ctx.fillRect(textX - 2, textY - 7, tw + 4, 14);
+    ctx.fillStyle = isSpeaking ? '#ffe066' : '#e9eefc';
+    ctx.fillText(cs, textX, textY);
   }
 }
 
@@ -2129,6 +2167,25 @@ pttBtn.addEventListener('touchend',   e => { release(); e.preventDefault(); });
   el.addEventListener('change', () => {
     audioConfig.ducking.enabled = !!el.checked;
     saveAudioConfig();
+  });
+})();
+
+// Master-Volume-Regler: steuert den masterGain-Node vor audioCtx.destination.
+// 0..150 % auf Gain 0..1.5; default 100 %. Persistiert in localStorage
+// 'vw.masterVolume'. AudioCtx wird beim ersten User-Input erzeugt (siehe
+// ensureCtx) — der Slider kann schon vor der Ctx-Erstellung bewegt werden,
+// der Wert wird dann beim ensureCtx geladen.
+(() => {
+  const slider = document.getElementById('masterVolume');
+  const val    = document.getElementById('masterVolumeVal');
+  if (!slider || !val) return;
+  const initPct = Math.round(loadMasterVolume() * 100);
+  slider.value = String(initPct);
+  val.textContent = initPct + '%';
+  slider.addEventListener('input', () => {
+    const pct = parseInt(slider.value, 10) || 0;
+    val.textContent = pct + '%';
+    setMasterVolume(pct / 100);
   });
 })();
 
@@ -2312,19 +2369,17 @@ function renderPeers() {
   const host = document.getElementById('peers');
   if (!host) return;
   const all = [];
-  for (const { peers } of state.rooms.values()) {
-    for (const [id, p] of peers) {
-      // Ghost-Filter: nur Peers mit tatsaechlich gueltiger Position zeigen.
-      // Ohne Position koennen wir keine Distanz berechnen und sie sind
-      // eh nicht hoerbar — also auch nicht anzeigen.
-      const sim = p.sim;
-      if (!sim) continue;
-      const lat = +sim.lat;
-      const lon = +sim.lon;
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-      if (Math.abs(lat) < 0.0001 && Math.abs(lon) < 0.0001) continue;
-      all.push([id, p]);
-    }
+  for (const [id, p] of iterAllPeersDeduped()) {
+    // Ghost-Filter: nur Peers mit tatsaechlich gueltiger Position zeigen.
+    // Ohne Position koennen wir keine Distanz berechnen und sie sind
+    // eh nicht hoerbar — also auch nicht anzeigen.
+    const sim = p.sim;
+    if (!sim) continue;
+    const lat = +sim.lat;
+    const lon = +sim.lon;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    if (Math.abs(lat) < 0.0001 && Math.abs(lon) < 0.0001) continue;
+    all.push([id, p]);
   }
   if (all.length === 0) {
     host.innerHTML =
@@ -2458,22 +2513,20 @@ function publishOverlay() {
   if (!_isPrimaryTab) return;          // nur primary-Tab publiziert
   if (!backendWs || backendWs.readyState !== 1) return;
   const out = [];
-  for (const { peers } of state.rooms.values()) {
-    for (const [id, p] of peers) {
-      out.push({
-        id,
-        callsign: p.sim?.callsign || null,
-        sim: p.sim ? {
-          lat: p.sim.lat,
-          lon: p.sim.lon,
-          hearRangeM: p.sim.hearRangeM || 1000,
-          on_foot: !!p.sim.on_foot,
-        } : null,
-        on_foot: !!p.sim?.on_foot,
-        speaking: !!(p.speaking && p.currentVolume > 0.05),
-        distance: p.currentDistance ?? null,
-      });
-    }
+  for (const [id, p] of iterAllPeersDeduped()) {
+    out.push({
+      id,
+      callsign: p.sim?.callsign || null,
+      sim: p.sim ? {
+        lat: p.sim.lat,
+        lon: p.sim.lon,
+        hearRangeM: p.sim.hearRangeM || 1000,
+        on_foot: !!p.sim.on_foot,
+      } : null,
+      on_foot: !!p.sim?.on_foot,
+      speaking: !!(p.speaking && p.currentVolume > 0.05),
+      distance: p.currentDistance ?? null,
+    });
   }
   // Lokaler Mic-RMS (0..~0.3 realistisch). Fuer das Panel-Mic-Level-Meter.
   const micRms = currentLocalMicRms();
@@ -2559,7 +2612,7 @@ function spawnTestPeer() {
   osc.frequency.value = 280;
   osc.connect(env);
   env.connect(p.analyserRaw);
-  env.connect(p.gainNode).connect(p.pannerNode).connect(ctx.destination);
+  env.connect(p.gainNode).connect(p.pannerNode).connect(masterGain);
   osc.start();
   p._synth = { osc, env };
 
@@ -2602,10 +2655,8 @@ function spawnTestPeer() {
     p.speaking = detectSpeaking(p);
   }, 200);
 
-  // Alle 5 s: Ton-Burst zur Richtungs-Ortung (HRTF-spatialisiert) + TTS
-  // "Hallo <Callsign>" als Sanity-Check dass der Test-Peer laeuft. Die TTS
-  // geht am Panner vorbei (Browser-API liefert keinen spatialisierten Stream),
-  // ist aber klar verstaendlich — der Ton-Burst uebernimmt die Richtung.
+  // Alle 5 s: Ton-Burst zur Richtungs-Ortung (HRTF-spatialisiert). Nur Ton,
+  // keine TTS — Sprachausgabe war akustisch verwirrend und wurde entfernt.
   const sayHello = () => {
     if (!p._synth) return;
     const t = ctx.currentTime;
@@ -2617,22 +2668,13 @@ function spawnTestPeer() {
     env.gain.linearRampToValueAtTime(0.0,  t + 0.35);
     env.gain.linearRampToValueAtTime(0.22, t + 0.50);
     env.gain.linearRampToValueAtTime(0.0,  t + 0.85);
-    try {
-      if ('speechSynthesis' in window) {
-        const u = new SpeechSynthesisUtterance(`Hallo ${state.callsign || 'PILOT'}`);
-        u.lang = 'de-DE';
-        u.rate = 1.0;
-        u.volume = 0.8;
-        window.speechSynthesis.speak(u);
-      }
-    } catch (e) { console.warn('[test] TTS failed:', e); }
   };
   sayHello();
   _testPeerSayTimer = setInterval(sayHello, 5000);
 
   renderPeers();
   renderMeshChip();
-  console.info('[test] test peer spawned — laeuft 100 m Radius, sagt alle 5 s Hallo');
+  console.info('[test] test peer spawned — laeuft 100 m Radius, Ton-Burst alle 5 s');
 }
 
 function removeTestPeer() {
@@ -2682,6 +2724,7 @@ window.__voicewalker = {
   get testPeerActive() { return state.rooms.has('__test__'); },
   ensureCtx,
   ensureMic,
+  reconcileAudioStreams,
 };
 
 // --- Update-Banner -----------------------------------------------------------

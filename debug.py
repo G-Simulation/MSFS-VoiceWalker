@@ -97,11 +97,14 @@ def setup_logging() -> logging.Logger:
 
     formatter = logging.Formatter(LOG_FORMAT, datefmt=DATE_FORMAT)
 
-    # 1) Konsole — immer
-    ch = logging.StreamHandler(sys.stdout)
-    ch.setLevel(level)
-    ch.setFormatter(formatter)
-    root.addHandler(ch)
+    # 1) Konsole — nur wenn stdout vorhanden ist. Bei PyInstaller-Windowed-Build
+    # (console=False) ist sys.stdout None, dann wuerde StreamHandler beim
+    # naechsten emit() crashen.
+    if sys.stdout is not None:
+        ch = logging.StreamHandler(sys.stdout)
+        ch.setLevel(level)
+        ch.setFormatter(formatter)
+        root.addHandler(ch)
 
     # 2) Datei — rotierend, max 5 × 1 MB
     try:

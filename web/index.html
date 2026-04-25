@@ -440,6 +440,12 @@
                   class="min-w-0 bg-[color:var(--color-bg-soft)] border border-[color:var(--color-border)] rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--color-ring)] transition">
             <option value="">Standard</option>
           </select>
+          <label for="masterVolume" class="text-[color:var(--color-muted)]">Lautstärke</label>
+          <div class="flex items-center gap-3">
+            <input id="masterVolume" type="range" min="0" max="150" step="1" value="100"
+                   class="flex-1 min-w-0 accent-[color:var(--color-accent)]">
+            <span id="masterVolumeVal" class="tabular-nums text-[color:var(--color-muted)] shrink-0 w-10 text-right">100%</span>
+          </div>
         </div>
 
         <!-- Mikrofon-Optionen: versteckt, weil fuer 95 % der User der Default

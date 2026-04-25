@@ -22,8 +22,11 @@ Feedback und Bug-Reports ausdrücklich erwünscht.
   und exe.xml automatisch ein
 - **Debug-Modus** (`Strg+Shift+D` im Browser) mit Live-Log, State-Dump,
   Audio-Tuning-Slidern, Test-Peer (synthetischer Peer der kreisförmig um dich
-  läuft und "Hallo <Callsign>" sagt)
+  läuft und alle 5 s einen HRTF-positionierten Ton-Burst spielt)
 - **Test-Peer** für Smoke-Tests ohne zweiten Rechner
+- **Pro-Lizenz-Validierung** über eigenen WordPress-Plugin-Endpoint auf
+  gsimulations.de — keine Consumer-Credentials auf dem Client, nur der
+  User-Lizenz-Key wird übertragen. 7 Tage Offline-Grace-Cache.
 
 ## Default-Hörweite
 
