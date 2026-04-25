@@ -1188,10 +1188,12 @@ async def ws_handler(ws):
                             STATE.overlay_cache = None
                             asyncio.create_task(broadcast({"type": "tracking_off"}))
                 elif t == "panel_action":
-                    # MSFS-Panel-Buttons. "toggle-tracking" wird direkt im
-                    # Backend ausgefuehrt (Backend-State). PTT + show-far sind
-                    # Browser-State → per remote_action broadcasten, Primary-Tab
-                    # reagiert. Whitelist gegen unbekannte Actions.
+                    # MSFS-Panel-Buttons.
+                    #   "toggle-tracking"   → Backend-State (config.json)
+                    #   "ptt-bind-*"        → direkt an PTTBackend
+                    #   alles andere        → Browser-State, per remote_action
+                    #                         an den Primary-Tab broadcasten.
+                    # Whitelist gegen unbekannte Actions.
                     action = str(m.get("action", ""))
                     if action == "toggle-tracking":
                         new_val = not STATE.tracking_enabled
@@ -1207,11 +1209,28 @@ async def ws_handler(ws):
                         if not new_val:
                             STATE.overlay_cache = None
                             asyncio.create_task(broadcast({"type": "tracking_off"}))
-                    elif action in ("ptt-down", "ptt-up", "toggle-far"):
-                        asyncio.create_task(broadcast({
-                            "type": "remote_action",
-                            "action": action,
-                        }))
+                    elif action == "ptt-bind-start" and PTT is not None:
+                        try: PTT.start_binding()
+                        except Exception as e: log.error("ptt bind start: %s", e)
+                    elif action == "ptt-bind-cancel" and PTT is not None:
+                        try: PTT.cancel_binding()
+                        except Exception as e: log.error("ptt bind cancel: %s", e)
+                    elif action == "ptt-bind-clear" and PTT is not None:
+                        try: PTT.clear_binding()
+                        except Exception as e: log.error("ptt bind clear: %s", e)
+                    elif action in (
+                        "ptt-down", "ptt-up", "toggle-far",
+                        "select-mic", "select-speaker",
+                        "set-master-volume", "toggle-vox",
+                        "set-callsign", "open-browser-license",
+                    ):
+                        # Payload-Felder (deviceId, value, key) mit durchreichen,
+                        # damit der Browser konkrete Werte bekommt.
+                        payload = {"type": "remote_action", "action": action}
+                        for field in ("deviceId", "value", "key"):
+                            if field in m:
+                                payload[field] = m[field]
+                        asyncio.create_task(broadcast(payload))
                     else:
                         log.debug("panel_action: unknown action=%r", action)
                 elif t == "set_license_key":

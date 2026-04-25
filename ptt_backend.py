@@ -1,17 +1,25 @@
 """
-MSFSVoiceWalker — optional USB PTT backend.
+MSFSVoiceWalker — PTT backend with global joystick + keyboard input.
 
 Detects every USB device that registers as a game controller / HID joystick
 via SDL/pygame. That covers essentially all flight sim hardware: Thrustmaster
 HOTAS, Logitech yokes, Honeycomb Alpha/Bravo, Virpil/VKB sticks, rudder
 pedals, throttle quadrants, and generic button boxes.
 
-Pure polling model, 50 Hz, in a background thread. Events are pushed out
-through a single callback supplied by main.py. Binding is persisted to
-ptt_config.json next to main.py.
+In addition, keyboard keys are captured globally via pynput — that means the
+bound key triggers PTT even while MSFS has fullscreen focus. Without this
+hook the browser-side spacebar listener only fires while the browser tab
+itself is focused, so in-sim Tastatur-PTT does not work.
 
-If pygame is not installed, the backend stays dormant — the feature is
-completely optional. Keyboard PTT in the browser keeps working either way.
+Pure polling for joystick (50 Hz, background thread) + event-driven listener
+for keyboard. Events are pushed out through a single callback supplied by
+main.py. Binding is persisted to ptt_config.json with a `type` discriminator
+("joystick" | "keyboard"); legacy configs without `type` are interpreted as
+joystick bindings.
+
+If pygame is not installed, joystick input is disabled. If pynput is not
+installed, keyboard input is disabled. Both stay completely optional;
+browser-tab Tastatur-PTT continues to work either way.
 """
 
 from __future__ import annotations
@@ -41,9 +49,32 @@ try:
 except Exception:  # ImportError or SDL load failure on exotic systems
     HAS_PYGAME = False
 
+try:
+    from pynput import keyboard as pynput_keyboard
+    HAS_PYNPUT = True
+except Exception:
+    HAS_PYNPUT = False
+
 CONFIG_PATH = pathlib.Path(__file__).parent / "ptt_config.json"
 POLL_HZ = 50
 ENUM_INTERVAL_S = 2.0
+
+
+def _key_to_str(key) -> str:
+    """pynput key -> stable string identifier we can persist + match against.
+
+    Key.space -> 'key.space', regular letter -> 'a' (lower-cased), modifier
+    combos are not handled here intentionally — single keys are simpler and
+    cover 99 % of PTT-binding use cases.
+    """
+    if not HAS_PYNPUT:
+        return ""
+    if isinstance(key, pynput_keyboard.Key):
+        return f"key.{key.name}"
+    char = getattr(key, "char", None)
+    if isinstance(char, str) and char:
+        return char.lower()
+    return str(key)
 
 
 class PTTBackend:
@@ -63,6 +94,8 @@ class PTTBackend:
         self._binding: Optional[dict] = self._load_config()
         self._binding_mode = False
         self._pressed = False
+        # pynput keyboard listener — separater Thread, event-driven
+        self._kb_listener = None
 
     # --------------------------------------------------------------- public
     def start(self) -> None:
@@ -72,13 +105,20 @@ class PTTBackend:
             target=self._run, name="ptt-backend", daemon=True
         )
         self._thread.start()
+        self._start_keyboard_listener()
 
     def stop(self) -> None:
         self._stop_event.set()
+        try:
+            if self._kb_listener is not None:
+                self._kb_listener.stop()
+        except Exception:
+            pass
 
     def get_state(self) -> dict:
         return {
             "available": HAS_PYGAME,
+            "keyboard_available": HAS_PYNPUT,
             "devices": [
                 {
                     "index": i,
@@ -142,21 +182,35 @@ class PTTBackend:
         self._emit({"type": "ptt_state", **self.get_state()})
 
     def _load_config(self) -> Optional[dict]:
+        """Lade Binding aus ptt_config.json. Format:
+            {"type": "joystick", "device_guid": "...", "device_name": "...", "button": N}
+            {"type": "keyboard", "key": "key.space"}
+        Legacy ohne `type` aber mit device_guid+button -> joystick.
+        """
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            if (
-                isinstance(data, dict)
-                and isinstance(data.get("device_guid"), str)
-                and isinstance(data.get("button"), int)
-                and 0 <= data["button"] < 256
-            ):
-                # device_name is optional/cosmetic
+            if not isinstance(data, dict):
+                return None
+            t = data.get("type")
+            # Joystick (explizit ODER legacy)
+            if t == "joystick" or (t is None
+                                   and isinstance(data.get("device_guid"), str)
+                                   and isinstance(data.get("button"), int)):
+                btn = data.get("button")
+                if not isinstance(btn, int) or not (0 <= btn < 256):
+                    return None
                 return {
-                    "device_guid": data["device_guid"],
+                    "type": "joystick",
+                    "device_guid": str(data.get("device_guid", "")),
                     "device_name": str(data.get("device_name", ""))[:64],
-                    "button": int(data["button"]),
+                    "button": btn,
                 }
+            # Keyboard
+            if t == "keyboard" and isinstance(data.get("key"), str):
+                key = data["key"]
+                if 1 <= len(key) <= 64:
+                    return {"type": "keyboard", "key": key}
         except FileNotFoundError:
             pass
         except Exception as e:
@@ -259,18 +313,20 @@ class PTTBackend:
 
         if self._binding_mode:
             self._binding = {
+                "type": "joystick",
                 "device_guid": guid,
                 "device_name": name,
                 "button": btn,
             }
             self._binding_mode = False
             self._save_config()
-            log.info("bound: %s button %d", name, btn)
+            log.info("bound: joystick %s button %d", name, btn)
             self._emit_state()
             return
 
         if (
             self._binding
+            and self._binding.get("type") == "joystick"
             and self._binding.get("device_guid") == guid
             and self._binding.get("button") == btn
             and not self._pressed
@@ -282,8 +338,59 @@ class PTTBackend:
         guid = self._device_guid(joy)
         if (
             self._binding
+            and self._binding.get("type") == "joystick"
             and self._binding.get("device_guid") == guid
             and self._binding.get("button") == btn
+            and self._pressed
+        ):
+            self._pressed = False
+            self._emit({"type": "ptt_release"})
+
+    # ------------------------------------------------------- keyboard hook
+    def _start_keyboard_listener(self) -> None:
+        if not HAS_PYNPUT:
+            log.info("pynput not installed — keyboard PTT disabled")
+            return
+        try:
+            self._kb_listener = pynput_keyboard.Listener(
+                on_press=self._on_kb_press,
+                on_release=self._on_kb_release,
+            )
+            self._kb_listener.daemon = True
+            self._kb_listener.start()
+            log.info("keyboard listener running (global hook)")
+        except Exception as e:
+            log.error("keyboard listener init failed: %s", e)
+            self._kb_listener = None
+
+    def _on_kb_press(self, key) -> None:
+        name = _key_to_str(key)
+        if not name:
+            return
+        if self._binding_mode:
+            self._binding = {"type": "keyboard", "key": name}
+            self._binding_mode = False
+            self._save_config()
+            log.info("bound: keyboard '%s'", name)
+            self._emit_state()
+            return
+        if (
+            self._binding
+            and self._binding.get("type") == "keyboard"
+            and self._binding.get("key") == name
+            and not self._pressed
+        ):
+            self._pressed = True
+            self._emit({"type": "ptt_press"})
+
+    def _on_kb_release(self, key) -> None:
+        name = _key_to_str(key)
+        if not name:
+            return
+        if (
+            self._binding
+            and self._binding.get("type") == "keyboard"
+            and self._binding.get("key") == name
             and self._pressed
         ):
             self._pressed = False
