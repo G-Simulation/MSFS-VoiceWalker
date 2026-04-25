@@ -303,6 +303,59 @@ function saveAudioConfig() {
       ducking:    audioConfig.ducking,
     }));
   } catch {}
+  // Pro-Feature: Range-Sync ueber Trystero an alle Mesh-Peers broadcasten,
+  // damit Veranstalter live die Ranges fuer alle setzen koennen.
+  // Nur Sender ist gegated; Empfaenger akzeptiert Werte von jedem Peer.
+  try { scheduleRangeSyncBroadcast(); } catch {}
+}
+
+// --- Range-Sync (Pro-Feature) ----------------------------------------------
+// Pattern: lokales audioConfig change → 1Hz throttled broadcast an alle
+// Peers in allen state.rooms-Cells. Empfaenger ruft applyEventRanges().
+// Nur isPro-Sender; Empfaenger applyt unabhaengig vom Sender-Status.
+let _rangeSyncPending = null;
+let _rangeSyncTimer = null;
+let _lastRangeSyncTs = 0;
+function scheduleRangeSyncBroadcast() {
+  if (!state.isPro) return;
+  if (typeof _isPrimaryTab !== 'undefined' && !_isPrimaryTab) return;
+  if (!state.rooms || state.rooms.size === 0) return;
+  _rangeSyncPending = {
+    walker_m:    audioConfig.walker.maxRangeM,
+    cockpit_m:   audioConfig.cockpit.maxRangeM,
+    crossover_m: audioConfig.crossoverM,
+    ts:          Date.now(),
+  };
+  if (_rangeSyncTimer) return;
+  _rangeSyncTimer = setTimeout(() => {
+    _rangeSyncTimer = null;
+    const cfg = _rangeSyncPending;
+    _rangeSyncPending = null;
+    if (!cfg) return;
+    let count = 0;
+    for (const [, entry] of state.rooms) {
+      if (typeof entry.sendRangeSync === 'function') {
+        try { entry.sendRangeSync(cfg); count++; } catch {}
+      }
+    }
+    console.info('[range-sync] broadcasted (Pro)', cfg, 'rooms=' + count);
+  }, 1000);
+}
+function handleRangeSyncReceived(payload, peerId) {
+  if (!payload || typeof payload !== 'object') return;
+  const ts = +payload.ts || 0;
+  if (ts <= _lastRangeSyncTs) return;       // out-of-order
+  _lastRangeSyncTs = ts;
+  const ranges = {};
+  const w = +payload.walker_m;
+  const c = +payload.cockpit_m;
+  const x = +payload.crossover_m;
+  if (Number.isFinite(w) && w > 0 && w <= 50000) ranges.walker_m = w;
+  if (Number.isFinite(c) && c > 0 && c <= 50000) ranges.cockpit_m = c;
+  if (Number.isFinite(x) && x >= 0 && x <= 10000) ranges.crossover_m = x;
+  applyEventRanges(ranges);
+  try { reconcileAudioStreams(); } catch {}
+  try { renderRadar(); } catch {}
 }
 loadAudioConfig();
 
@@ -1455,6 +1508,12 @@ function joinCellRoom(cell) {
   state.rooms.set(cell, entry);
 
   const [sendPos, getPos] = room.makeAction('pos');
+  // Pro-Feature: Range-Sync. Action-Name 8 Zeichen (Trystero-Limit).
+  // sendRangeSync wird von scheduleRangeSyncBroadcast() aus aufgerufen,
+  // wenn der Sender Pro-Lizenz hat. Empfaenger akzeptiert von jedem Peer.
+  const [sendRangeSync, getRangeSync] = room.makeAction('rangesyn');
+  entry.sendRangeSync = sendRangeSync;
+  getRangeSync(handleRangeSyncReceived);
 
   room.onPeerJoin(peerId => {
     const cap = currentMaxPeers();
