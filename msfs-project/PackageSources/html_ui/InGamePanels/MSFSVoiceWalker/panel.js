@@ -511,6 +511,7 @@
   function render() {
     renderRadar();
     renderUI();
+    renderSetupTab();
   }
 
   function scheduleRender() {
@@ -691,6 +692,210 @@
     }
   }
 
+  // --- Tab-Switch ------------------------------------------------------
+  function setupTabs() {
+    const tabs  = document.querySelectorAll('.vw-tab');
+    const panes = document.querySelectorAll('.vw-pane');
+    tabs.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        tabs.forEach(function (b) { b.classList.remove('active'); });
+        panes.forEach(function (p) { p.classList.remove('active'); });
+        btn.classList.add('active');
+        const target = document.getElementById('pane-' + btn.dataset.pane);
+        if (target) target.classList.add('active');
+        // Beim Wechsel auf Radar-Tab: Re-Layout, falls Canvas-Groesse stimmt nicht
+        if (btn.dataset.pane === 'radar') {
+          resizeCanvas();
+          scheduleRender();
+        }
+      });
+    });
+  }
+
+  // --- Setup-Tab Wiring ------------------------------------------------
+  function sendActionPayload(extra) {
+    if (!VW.ws || VW.ws.readyState !== 1) return;
+    try { VW.ws.send(JSON.stringify(Object.assign({ type: 'panel_action' }, extra))); }
+    catch (e) { W('sendActionPayload: ' + e.message); }
+  }
+
+  // List-Hash damit wir Selects nicht jedes 1-Hz-Tick neu aufbauen
+  // (sonst springt die User-Auswahl zurueck).
+  function deviceListHash(list) {
+    if (!list || !list.length) return '';
+    return list.map(function (d) { return d.deviceId || ''; }).join('|');
+  }
+  let lastMicHash = '', lastSpkHash = '';
+
+  function setupSetupTab() {
+    const mic = $('vw-mic');
+    const spk = $('vw-spk');
+    const vol = $('vw-vol');
+    const volV = $('vw-vol-val');
+    const mPtt = $('vw-mode-ptt');
+    const mVox = $('vw-mode-vox');
+    const bindBtn = $('vw-bind-btn');
+    const cs  = $('vw-cs');
+    const proOpen = $('vw-pro-open');
+
+    // Live-Updates — jedes Input/Click sendet sofort an Browser via Backend
+    if (mic) mic.addEventListener('change', function () {
+      sendActionPayload({ action: 'select-mic', deviceId: mic.value });
+    });
+    if (spk) spk.addEventListener('change', function () {
+      sendActionPayload({ action: 'select-speaker', deviceId: spk.value });
+    });
+    if (vol) {
+      const onVol = function () {
+        const pct = parseInt(vol.value, 10) || 0;
+        if (volV) volV.textContent = pct + '%';
+        sendActionPayload({ action: 'set-master-volume', value: pct / 100 });
+      };
+      vol.addEventListener('input', onVol);
+    }
+    if (mPtt) mPtt.addEventListener('click', function () {
+      // Wenn aktuell VOX → toggle (Wechsel zu PTT)
+      if (state.ui && state.ui.voxMode) sendActionPayload({ action: 'toggle-vox' });
+    });
+    if (mVox) mVox.addEventListener('click', function () {
+      if (!(state.ui && state.ui.voxMode)) sendActionPayload({ action: 'toggle-vox' });
+    });
+    if (bindBtn) bindBtn.addEventListener('click', function () {
+      // Wenn schon im Bind-Mode: cancel; sonst start
+      if (state.ui && state.ui.bindingInProgress) {
+        sendActionPayload({ action: 'ptt-bind-cancel' });
+      } else {
+        sendActionPayload({ action: 'ptt-bind-start' });
+      }
+    });
+    if (cs) cs.addEventListener('change', function () {
+      sendActionPayload({ action: 'set-callsign', value: cs.value });
+    });
+    if (proOpen) proOpen.addEventListener('click', function () {
+      sendActionPayload({ action: 'open-browser-license' });
+    });
+  }
+
+  // Setup-/Pro-Tab DOM aus state.ui aktualisieren — wird aus renderUI()
+  // gerufen. Werte nicht ueberschreiben, wenn der User gerade interagiert
+  // (focused element).
+  function renderSetupTab() {
+    const ui = state.ui || {};
+    const focused = document.activeElement;
+
+    // Mic-Liste
+    const mic = $('vw-mic');
+    if (mic && Array.isArray(ui.audioInputs)) {
+      const h = deviceListHash(ui.audioInputs);
+      if (h !== lastMicHash) {
+        lastMicHash = h;
+        const cur = ui.audioInputId || '';
+        mic.innerHTML = '<option value="">Standard</option>';
+        ui.audioInputs.forEach(function (d) {
+          const o = document.createElement('option');
+          o.value = d.deviceId;
+          o.textContent = d.label || ('Mic ' + d.deviceId.slice(0, 6));
+          mic.appendChild(o);
+        });
+        mic.value = cur;
+      } else if (mic !== focused && mic.value !== (ui.audioInputId || '')) {
+        mic.value = ui.audioInputId || '';
+      }
+    }
+
+    // Speaker-Liste
+    const spk = $('vw-spk');
+    if (spk && Array.isArray(ui.audioOutputs)) {
+      const h = deviceListHash(ui.audioOutputs);
+      if (h !== lastSpkHash) {
+        lastSpkHash = h;
+        const cur = ui.audioOutputId || '';
+        spk.innerHTML = '<option value="">Standard</option>';
+        ui.audioOutputs.forEach(function (d) {
+          const o = document.createElement('option');
+          o.value = d.deviceId;
+          o.textContent = d.label || ('Spk ' + d.deviceId.slice(0, 6));
+          spk.appendChild(o);
+        });
+        spk.value = cur;
+      } else if (spk !== focused && spk.value !== (ui.audioOutputId || '')) {
+        spk.value = ui.audioOutputId || '';
+      }
+    }
+
+    // Volume-Slider — nicht updaten wenn der User gerade dranzieht
+    const vol = $('vw-vol');
+    const volV = $('vw-vol-val');
+    if (vol && vol !== focused && typeof ui.masterVolume === 'number') {
+      const pct = Math.round(ui.masterVolume * 100);
+      vol.value = String(pct);
+      if (volV) volV.textContent = pct + '%';
+    }
+
+    // PTT/VOX-Buttons
+    const mPtt = $('vw-mode-ptt');
+    const mVox = $('vw-mode-vox');
+    if (mPtt && mVox) {
+      const isVox = !!ui.voxMode;
+      mPtt.classList.toggle('active', !isVox);
+      mVox.classList.toggle('active',  isVox);
+    }
+
+    // PTT-Bind-Status
+    const bs = $('vw-bind-status');
+    const bb = $('vw-bind-btn');
+    if (bs && bb) {
+      if (ui.bindingInProgress) {
+        bs.textContent = 'druecke jetzt eine Taste...';
+        bs.className = 'vw-bind-status waiting';
+        bb.textContent = 'abbrechen';
+      } else if (ui.pttBinding) {
+        const b = ui.pttBinding;
+        if (b.type === 'keyboard') {
+          bs.textContent = 'Taste: ' + (b.key || '?');
+        } else if (b.type === 'joystick') {
+          bs.textContent = (b.device_name || 'Joystick') + ' Btn ' + b.button;
+        } else {
+          bs.textContent = 'gebunden';
+        }
+        bs.className = 'vw-bind-status ok';
+        bb.textContent = 'aendern';
+      } else {
+        bs.textContent = 'keine';
+        bs.className = 'vw-bind-status';
+        bb.textContent = 'zuweisen';
+      }
+    }
+
+    // Callsign
+    const cs = $('vw-cs');
+    if (cs && cs !== focused && typeof ui.callsign === 'string'
+        && cs.value !== ui.callsign) {
+      cs.value = ui.callsign;
+    }
+
+    // Pro-Pill + Privater Raum
+    const pill = $('vw-pro-pill');
+    if (pill) {
+      if (ui.isPro) {
+        pill.textContent = 'Pro aktiv';
+        pill.className = 'vw-pro-pill';
+      } else {
+        pill.textContent = 'Free';
+        pill.className = 'vw-pro-pill free';
+      }
+    }
+    const room = $('vw-pro-room');
+    if (room) {
+      if (ui.privateRoom) {
+        const pr = String(ui.privateRoom);
+        room.textContent = 'Raum: ' + (pr.length > 18 ? pr.slice(0, 16) + '...' : pr);
+      } else {
+        room.textContent = 'kein Raum aktiv';
+      }
+    }
+  }
+
   // --- Boot ------------------------------------------------------------
   function boot() {
     L('panel-v4 boot, readyState=' + document.readyState);
@@ -698,6 +903,8 @@
     resizeCanvas();
     setupWheelZoom();
     setupButtons();
+    setupTabs();
+    setupSetupTab();
     scheduleRender();
     setTimeout(tryConnect, 300);
   }
