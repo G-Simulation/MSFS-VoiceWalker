@@ -309,15 +309,20 @@ function saveAudioConfig() {
   try { scheduleRangeSyncBroadcast(); } catch {}
 }
 
-// --- Range-Sync (Pro-Feature) ----------------------------------------------
-// Pattern: lokales audioConfig change → 1Hz throttled broadcast an alle
-// Peers in allen state.rooms-Cells. Empfaenger ruft applyEventRanges().
-// Nur isPro-Sender; Empfaenger applyt unabhaengig vom Sender-Status.
+// --- Range-Sync (Pro-Feature, nur in Private Rooms) -------------------------
+// Trust-Modell: Range-Sync gilt nur fuer Event-Teilnehmer eines geteilten
+// Private Rooms. Im Public-Mesh wird gar nichts gesendet UND nichts
+// akzeptiert — schliesst Trolls automatisch aus, weil sie erst die
+// Event-Passphrase brauchen, um ueberhaupt im selben Mesh zu sein.
+// Zusaetzliches Pro-Gate beim Sender (nur Veranstalter mit Pro-Lizenz
+// duerfen Range-Defaults pushen). Empfaenger akzeptiert von jedem Peer
+// im selben Private Room.
 let _rangeSyncPending = null;
 let _rangeSyncTimer = null;
 let _lastRangeSyncTs = 0;
 function scheduleRangeSyncBroadcast() {
-  if (!state.isPro) return;
+  if (!state.isPro) return;                          // Sender: Pro-Gate
+  if (!state.privateRoom) return;                    // Sender: Private-Room-Gate
   if (typeof _isPrimaryTab !== 'undefined' && !_isPrimaryTab) return;
   if (!state.rooms || state.rooms.size === 0) return;
   _rangeSyncPending = {
@@ -338,10 +343,14 @@ function scheduleRangeSyncBroadcast() {
         try { entry.sendRangeSync(cfg); count++; } catch {}
       }
     }
-    console.info('[range-sync] broadcasted (Pro)', cfg, 'rooms=' + count);
+    console.info('[range-sync] broadcasted (Pro/event)', cfg, 'rooms=' + count);
   }, 1000);
 }
 function handleRangeSyncReceived(payload, peerId) {
+  // Empfaenger: nur akzeptieren wenn ich selbst in einem Private Room bin.
+  // Im Public-Mesh ignorieren — Trolls aus Geohash-Nachbarschaft sollen
+  // meine Default-Ranges nicht ueberschreiben koennen.
+  if (!state.privateRoom) return;
   if (!payload || typeof payload !== 'object') return;
   const ts = +payload.ts || 0;
   if (ts <= _lastRangeSyncTs) return;       // out-of-order
