@@ -383,6 +383,22 @@ def uninstall() -> int:
     return 0
 
 
+def _show_message(title: str, text: str, icon: str = "info") -> None:
+    """Zeigt eine native Windows-MessageBox. Wird im windowed-Build
+    (console=False, kein STDOUT) der einzige sichtbare Feedback-Kanal —
+    ohne sie sieht der User nicht ob der Integrator durchgelaufen ist.
+    Im Konsolenbuild kommt zusaetzlich der bekannte print()-Output.
+    """
+    flags = {"info": 0x40, "error": 0x10, "warn": 0x30}.get(icon, 0x40)
+    flags |= 0x40000  # MB_TOPMOST — vor allen anderen Fenstern (auch MSI-Wizard)
+    try:
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(0, text, title, flags)
+    except Exception:
+        # Headless / non-Windows / DLL fehlt — silent fallback
+        pass
+
+
 def main() -> int:
     mode = "install"
     if len(sys.argv) > 1 and sys.argv[1].lower() in ("uninstall", "--uninstall", "/uninstall"):
@@ -394,10 +410,35 @@ def main() -> int:
         traceback.print_exc()
         rc = 9
     print()
-    try:
-        input("Drücke Enter zum Beenden...")
-    except EOFError:
-        pass
+
+    # Sichtbare Erfolgs-/Fehlermeldung. Bei console=False-Builds laeuft
+    # der Integrator sonst still im Hintergrund und der User sieht nicht
+    # ob's geklappt hat.
+    if mode == "install":
+        if rc == 0:
+            _show_message(
+                "MSFSVoiceWalker — Installation",
+                "Installation erfolgreich abgeschlossen.\n\n"
+                "MSFSVoiceWalker startet beim naechsten Sim-Start automatisch mit.\n"
+                "Du kannst die App auch ueber das Tray-Icon oder die Desktop-"
+                "Verknuepfung manuell oeffnen.",
+                "info",
+            )
+        else:
+            _show_message(
+                "MSFSVoiceWalker — Installation",
+                "Bei der Installation ist ein Problem aufgetreten "
+                f"(Code {rc}).\n\nBitte das Setup als Administrator ausfuehren "
+                "oder die Logs in %LOCALAPPDATA%\\MSFSVoiceWalker\\ pruefen.",
+                "error",
+            )
+    elif mode == "uninstall":
+        _show_message(
+            "MSFSVoiceWalker — Deinstallation",
+            "MSFSVoiceWalker wurde entfernt.",
+            "info",
+        )
+
     return rc
 
 
