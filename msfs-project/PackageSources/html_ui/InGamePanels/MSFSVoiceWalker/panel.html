@@ -225,26 +225,30 @@
         font-family: ui-monospace, "SF Mono", Menlo, monospace;
       }
 
-      /* TABS — Radar / Setup / Pro & Events. Pattern aus debug.js. */
+      /* TABS — Radar / Setup / Pro & Events. Groesser, mit Accent-Underline. */
       .vw-tabs {
         display: flex; flex-shrink: 0;
         border-bottom: 1px solid var(--border);
-        margin: 0 -10px;
+        margin: 4px -10px 0;
+        background: rgba(15, 25, 48, 0.5);
       }
       .vw-tab {
-        flex: 1; padding: 6px 8px;
+        flex: 1; padding: 11px 10px 9px;
         background: transparent;
         color: var(--muted);
         border: none;
-        border-right: 1px solid var(--border);
+        border-bottom: 2px solid transparent;
         cursor: pointer;
-        font-size: 10px; font-weight: 600;
-        text-transform: uppercase; letter-spacing: 0.08em;
+        font-size: 11px; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.12em;
+        transition: color 0.15s, border-color 0.15s, background 0.15s;
+        user-select: none;
       }
-      .vw-tab:last-child { border-right: none; }
+      .vw-tab:hover { color: var(--fg); background: rgba(106,165,255,0.05); }
       .vw-tab.active {
         color: var(--fg);
-        background: rgba(106,165,255,0.08);
+        background: rgba(106,165,255,0.10);
+        border-bottom-color: var(--accent);
       }
       .vw-pane { display: none; flex: 1 1 auto;
                  flex-direction: column; gap: 8px; min-height: 0; }
@@ -286,6 +290,12 @@
         color: var(--muted);
         font-size: 11px; font-weight: 600;
         cursor: pointer; user-select: none;
+        text-align: center;
+        transition: background 0.12s, color 0.12s, border-color 0.12s;
+      }
+      .vw-mode-btn:hover {
+        background: rgba(106,165,255,0.18);
+        color: var(--fg);
       }
       .vw-mode-btn.active {
         background: var(--accent); color: #0b1220;
@@ -345,6 +355,18 @@
       <div id="vw-root">
         <!-- Header-Zeile: conn-dot, callsign, pro-badge, zoom-label -->
         <div class="vw-header">
+          <div class="w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden ring-1 ring-white/10 shadow-lg shadow-blue-500/20"
+               style="background: linear-gradient(135deg, #6aa5ff, #2f5cff);">
+            <!-- Inline-SVG-Logo: Radar mit Mikro. -->
+            <svg viewBox="0 0 24 24" class="w-7 h-7 text-white relative" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="0.8" opacity="0.45" fill="none"/>
+              <circle cx="12" cy="12" r="6.5" stroke="currentColor" stroke-width="0.8" opacity="0.6" fill="none"/>
+              <circle cx="16.5" cy="8" r="0.9" fill="#3fdc8a"/>
+              <rect x="10" y="7.5" width="4" height="6.5" rx="2" fill="currentColor"/>
+              <path d="M8.5 12.2 a3.5 3.5 0 0 0 7 0" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+              <line x1="12" y1="15.5" x2="12" y2="17.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+            </svg>
+          </div>
           <span class="vw-dot" id="vw-conn"></span>
           <span id="vw-label">offline</span>
           <span id="vw-callsign">-</span>
@@ -416,7 +438,7 @@
           <div class="vw-bind-row">
             <label style="flex:0 0 70px;color:var(--muted);font-size:11px">PTT-Taste</label>
             <span class="vw-bind-status" id="vw-bind-status">keine</span>
-            <button class="vw-mode-btn" id="vw-bind-btn" style="flex:0 0 110px">zuweisen</button>
+            <div class="vw-mode-btn" id="vw-bind-btn" style="flex:0 0 110px">zuweisen</div>
           </div>
           <div class="vw-setup-row">
             <label for="vw-cs">Callsign</label>
@@ -432,9 +454,9 @@
           <div class="vw-pro-section">
             <div class="vw-h">Pro-Lizenz</div>
             <div>Lizenzschluessel im Browser eingeben:</div>
-            <button class="vw-mode-btn" id="vw-pro-open" style="margin-top:6px">
+            <div class="vw-mode-btn" id="vw-pro-open" style="margin-top:6px;text-align:center">
               im Browser einrichten
-            </button>
+            </div>
             <div class="vw-pro-url">http://127.0.0.1:7801</div>
           </div>
           <div class="vw-pro-section">
