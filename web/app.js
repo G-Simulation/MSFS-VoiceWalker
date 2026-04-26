@@ -2279,7 +2279,7 @@ function renderRadar() {
 
     const isSpeaking = p.speaking && p.currentVolume > 0.05;
 
-    // Glow beim Sprechen
+    // Glow beim Sprechen (vor Symbol, dahinter)
     if (isSpeaking) {
       const grd = ctx.createRadialGradient(px, py, 0, px, py, 22);
       grd.addColorStop(0, 'rgba(255, 224, 102, 0.7)');
@@ -2288,10 +2288,55 @@ function renderRadar() {
       ctx.beginPath(); ctx.arc(px, py, 22, 0, Math.PI * 2); ctx.fill();
     }
 
-    // Punkt
-    ctx.fillStyle = isSpeaking ? '#ffe066' : color;
-    ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    // Symbol pro Modus: Walker = Kreis + 120 deg Front-Cone in Peer-Heading;
+    // Cockpit = Top-Down-Aircraft, rotiert mit Peer-Heading, KEIN Cone (er
+    // hoert rundum). Heading-Up: relHead = peerHeading - meinHeading.
+    const peerOnFoot = !!p.sim.on_foot;
+    const peerHeading = +p.sim.heading_deg || 0;
+    const peerRelHead = peerHeading - myHead;
+
+    if (peerOnFoot) {
+      // Walker: Cone in Peer-Heading-Richtung. Radius proportional zur
+      // hearRangeM des Peers (so wie der Self-Cone) mit Mindestgroesse
+      // 10 px damit der Cone bei kleinem Walker-Range / grossem Zoom
+      // sichtbar bleibt.
+      const peerHearM   = +p.sim.hearRangeM || 1000;
+      const peerConeRaw = R * Math.min(1, peerHearM / RADAR_RANGE_M);
+      const peerConeR   = Math.max(peerConeRaw, 10);
+      const peerConeHalf = 60 * Math.PI / 180;
+      const peerConeCtr  = (peerRelHead * Math.PI / 180) - Math.PI / 2;
+      const pcs = peerConeCtr - peerConeHalf;
+      const pce = peerConeCtr + peerConeHalf;
+      const fillColor = isSpeaking
+        ? 'rgba(255, 224, 102, 0.40)'
+        : color === '#3fdc8a' ? 'rgba(63, 220, 138, 0.32)'
+        : color === '#6aa5ff' ? 'rgba(106, 165, 255, 0.30)'
+        : color === '#ffc857' ? 'rgba(255, 200, 87, 0.30)'
+        :                       'rgba(107, 120, 150, 0.25)';
+      ctx.fillStyle = fillColor;
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.arc(px, py, peerConeR, pcs, pce);
+      ctx.closePath();
+      ctx.fill();
+
+      // Walker-Punkt im Zentrum
+      ctx.fillStyle = isSpeaking ? '#ffe066' : color;
+      ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    } else {
+      // Cockpit: Aircraft-Icon, kleiner Massstab als Self-Aircraft.
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(peerRelHead * Math.PI / 180);
+      drawAircraftIcon(ctx, {
+        fill: isSpeaking ? '#ffe066' : color,
+        stroke: '#0b1220',
+        lineWidth: 1.1,
+        scale: 0.4,
+      });
+      ctx.restore();
+    }
 
     // Callsign mit kleinem Hintergrund für Lesbarkeit
     const cs = p.sim.callsign || id.slice(0, 6);

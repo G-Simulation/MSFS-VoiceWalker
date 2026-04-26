@@ -394,10 +394,40 @@
         }
         const color = isSpeaking ? '#ffe066'
                     : d <= state.myRange ? '#6aa5ff' : '#556582';
-        ctx.fillStyle = color;
-        ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.arc(px, py, 3.2, 0, Math.PI * 2);
-        ctx.fill(); ctx.stroke();
+
+        // Walker = Punkt + Cone in Heading. Cockpit = Aircraft-Icon.
+        const peerOnFoot = !!p.sim.on_foot;
+        const peerHeading = +p.sim.heading_deg || 0;
+        const peerRelHead = peerHeading - selfHeading;
+
+        if (peerOnFoot) {
+          const peerHearM   = +p.sim.hearRangeM || 1000;
+          const peerConeRaw = R * Math.min(1, peerHearM / radarRangeM);
+          const peerConeR   = Math.max(peerConeRaw, 10);
+          const peerConeHalf = 60 * Math.PI / 180;
+          const peerConeCtr  = (peerRelHead * Math.PI / 180) - Math.PI / 2;
+          const fillCol = isSpeaking
+            ? 'rgba(255,224,102,0.40)'
+            : color === '#6aa5ff' ? 'rgba(106,165,255,0.30)'
+            :                       'rgba(85,101,130,0.25)';
+          ctx.fillStyle = fillCol;
+          ctx.beginPath();
+          ctx.moveTo(px, py);
+          ctx.arc(px, py, peerConeR, peerConeCtr - peerConeHalf, peerConeCtr + peerConeHalf);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = color;
+          ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(px, py, 3.2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        } else {
+          ctx.save();
+          ctx.translate(px, py);
+          ctx.rotate(peerRelHead * Math.PI / 180);
+          drawAircraftIcon(ctx, {
+            fill: color, stroke: '#0b1220', lineWidth: 1, scale: 0.4,
+          });
+          ctx.restore();
+        }
       }
     }
 
