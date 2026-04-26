@@ -21,7 +21,7 @@ VSVersionInfo(
           '040704b0',
           [
             StringStruct('CompanyName',      'Patrick Gottberg'),
-            StringStruct('FileDescription',  'MSFSVoiceWalker — Proximity Voice Chat fuer MSFS 2020/2024'),
+            StringStruct('FileDescription',  'MSFSVoiceWalker — Proximity Voice Chat fuer MSFS 2024'),
             StringStruct('FileVersion',      '0.1.0'),
             StringStruct('InternalName',     'MSFSVoiceWalker'),
             StringStruct('LegalCopyright',   'Copyright (c) 2026 Patrick Gottberg. Licensed under Apache-2.0.'),

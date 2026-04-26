@@ -6,7 +6,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"/></a>
   <a href="https://github.com/G-Simulation/MSFS-VoiceWalker/releases"><img src="https://img.shields.io/github/v/release/G-Simulation/MSFS-VoiceWalker?include_prereleases&label=release" alt="Release"/></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-informational" alt="Platform: Windows 10/11"/>
-  <img src="https://img.shields.io/badge/MSFS-2020%20%26%202024-orange" alt="MSFS 2020 & 2024"/>
+  <img src="https://img.shields.io/badge/MSFS-2024-orange" alt="MSFS 2024"/>
   <a href="https://www.paypal.com/donate/?hosted_button_id=F2GPDVV6BUSAQ"><img src="https://img.shields.io/badge/donate-PayPal-00457C?logo=paypal&logoColor=white" alt="Donate"/></a>
 </p>
 
@@ -54,7 +54,7 @@ Das Setup
 
 - installiert die App nach `%LOCALAPPDATA%\MSFSVoiceWalker\`,
 - legt eine Start-Menü-Verknüpfung an (Desktop-Icon optional),
-- erkennt automatisch alle deine MSFS-Installationen (2020 und 2024, Store und Steam),
+- erkennt automatisch deine MSFS 2024-Installation (Store und Steam),
 - kopiert das Community-Folder-Addon in den jeweils richtigen Community-Ordner,
 - trägt MSFSVoiceWalker in die `exe.xml` des Simulators ein, sodass es beim Start von MSFS automatisch mithochgefahren wird,
 - registriert sich in **Apps & Features** für saubere Deinstallation.

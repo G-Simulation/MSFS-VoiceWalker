@@ -41,13 +41,12 @@ lowercase-Pfaden in `layout.json`), wie es MSFS 2024 intern erwartet.
 
 ## Was unterscheidet sich vom direkt-kopieren-Ordner?
 
-Der `msfs-addon/`-Ordner im Root ist der Dev-Loop-Ordner (Community-direkt-Copy).
-MSFS 2024 akzeptiert den nur wenn er's als Legacy-2020-Paket einordnet.
-`msfs-project/` erzeugt ein echtes MSFS-2024-Paket mit:
+Der `msfs-addon/`-Ordner im Root ist der Dev-Loop-Ordner (Community-direkt-Copy),
+den MSFS 2024 nur als Legacy-Paket einordnet. `msfs-project/` erzeugt
+dagegen ein echtes MSFS-2024-Paket mit:
   - `ingamepanels/msfsvoicewalker_panel.spb` (kompiliert statt `.xml`)
   - lowercase-Pfaden in `layout.json`
   - korrekter `ContentInfo`-Struktur
   - `total_package_size` automatisch korrekt berechnet
 
-Das ist der vom SDK vorgeschriebene Weg und funktioniert sowohl in MSFS 2024
-als auch in MSFS 2020 (SPB-Format ist abwaertskompatibel).
+Das ist der vom SDK vorgeschriebene Weg fuer MSFS 2024.

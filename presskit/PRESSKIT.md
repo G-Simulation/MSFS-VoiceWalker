@@ -17,7 +17,7 @@ Zwei Modi je nach Spielsituation: **direktes Sprechen** wenn du als Walker auf d
 Die App läuft, ist installierbar, und sucht jetzt **echte Tester** für das Finetuning. Du musst nicht programmieren können — nur fliegen, Bugs melden, Eindrücke teilen.
 
 ### Was ich von Testern brauche
-- **MSFS 2024** installiert (Pflicht — 2020 wird parallel unterstützt, aber im Beta-Fokus liegt 2024)
+- **MSFS 2024** installiert (Pflicht)
 - **Etwas Zeit** für ein paar Test-Flüge in einem privaten Raum oder im öffentlichen Mesh
 - **Discord-Account** für kurzen Austausch (Bug-Reports, Feedback, „klingt das natürlich?")
 
@@ -89,7 +89,7 @@ PTT-Button, Mikrofon-Optionen, Stream-Modus für Twitch/YouTube, USB-PTT-Bind.
 ## System-Voraussetzungen
 
 - **Windows 10/11**
-- **MSFS 2024** (Steam oder MS Store) — 2020 läuft parallel, aber im Beta-Fokus liegt 2024
+- **MSFS 2024** (Steam oder MS Store)
 - **Microsoft Edge** (für die Edge-`--app`-Browser-UI; auf Windows ohnehin vorinstalliert)
 - **Mikrofon + Kopfhörer** (für 3D-Audio empfohlen — Lautsprecher gehen, aber HRTF wirkt schwächer)
 

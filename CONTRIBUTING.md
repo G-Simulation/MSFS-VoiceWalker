@@ -8,7 +8,7 @@ ausdrücklich willkommen und unkompliziert.
 
 - **Bugs / Fehlverhalten**: gern als
   [GitHub-Issue](https://github.com/G-Simulation/MSFS-VoiceWalker/issues).
-  Hilfreich: Windows-Version, MSFS-Version (2020/2024, Store oder Steam),
+  Hilfreich: Windows-Version, MSFS 2024-Variante (Store oder Steam),
   Schritte zur Reproduktion, und wenn möglich das Debug-Bundle:
   Strg+Shift+D im Browser-UI → Export.
 - **Sicherheitslücken**: bitte **nicht** als öffentliches Issue.
@@ -43,7 +43,7 @@ Unterschreiben.
 
 ## Was wir besonders gut gebrauchen können
 
-- Test-Berichte aus echten Setups (MSFS 2020 vs 2024, verschiedene HOTAS,
+- Test-Berichte aus echten Setups (verschiedene HOTAS,
   verschiedene Router/NAT-Varianten)
 - Übersetzungen (aktuell ist die UI zu 90 % auf Deutsch — Englisch und
   weitere Sprachen wären ein Plus)

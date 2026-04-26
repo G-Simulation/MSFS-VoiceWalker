@@ -233,7 +233,7 @@ START_TIME = time.time()
 #  12 = Worldmap (MSFS 2024, live verifiziert 22.04.2026 — cam=12 zeigt
 #       waehrend Worldmap-Browsing typ. Seattle-Default-Position 47.518932/
 #       -122.294505; NICHT als Walker werten!)
-#  13..19 = diverse 2020 Walker / EFB-Zustaende
+#  13..19 = diverse Walker / EFB-Zustaende (legacy)
 #  16     = MSFS 2024 Walker (live verifiziert 24.04.2026 — on_foot=True
 #           wenn Avatar > 2m vom Aircraft entfernt)
 #  26     = MSFS 2024 Walker (laut altem Live-Probe-Vermerk)

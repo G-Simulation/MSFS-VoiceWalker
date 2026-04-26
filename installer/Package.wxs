@@ -26,7 +26,7 @@
       Scope="perUser"
       Compressed="yes">
 
-    <SummaryInformation Description="MSFSVoiceWalker — Proximity-Voice für MSFS 2020/2024" />
+    <SummaryInformation Description="MSFSVoiceWalker — Proximity-Voice für MSFS 2024" />
 
     <!-- Saubere Upgrades: vorherige Version wird automatisch entfernt -->
     <MajorUpgrade
@@ -138,7 +138,7 @@
     <Component Id="StartMenuShortcut" Directory="ApplicationProgramsFolder" Guid="*">
       <Shortcut Id="AppStartMenuShortcut"
                 Name="MSFSVoiceWalker"
-                Description="Proximity-Voice für MSFS 2020 und 2024"
+                Description="Proximity-Voice für MSFS 2024"
                 Target="[INSTALLFOLDER]MSFSVoiceWalker.exe"
                 WorkingDirectory="INSTALLFOLDER"
                 Icon="AppIcon.ico" IconIndex="0" />
@@ -153,7 +153,7 @@
     <Component Id="DesktopShortcutComp" Directory="DesktopFolder" Guid="*">
       <Shortcut Id="AppDesktopShortcut"
                 Name="MSFSVoiceWalker"
-                Description="Proximity-Voice für MSFS 2020 und 2024"
+                Description="Proximity-Voice für MSFS 2024"
                 Target="[INSTALLFOLDER]MSFSVoiceWalker.exe"
                 WorkingDirectory="INSTALLFOLDER"
                 Icon="AppIcon.ico" IconIndex="0" />

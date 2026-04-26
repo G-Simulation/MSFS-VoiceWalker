@@ -2,7 +2,7 @@
 MSFSVoiceWalker — automatischer Installer.
 
 Was passiert beim Ausführen:
-  1) Erkennt alle MSFS-Installationen (2020 und 2024, Store und Steam).
+  1) Erkennt alle MSFS 2024-Installationen (Store und Steam).
   2) Kopiert MSFSVoiceWalker.exe nach %LOCALAPPDATA%\\MSFSVoiceWalker\\.
   3) Kopiert das Community-Folder-Addon in jeden gefundenen Community-Ordner.
   4) Fügt MSFSVoiceWalker in die exe.xml jeder Sim-Installation ein
@@ -69,14 +69,6 @@ def detect_msfs_installs():
     # Kandidaten für LocalCache-Ordner (enthält exe.xml und UserCfg.opt)
     candidates = []
 
-    # MSFS 2020 Store
-    if local:
-        for d in _safe_glob(local, "Packages/Microsoft.FlightSimulator_*/LocalCache"):
-            candidates.append(("MSFS 2020 (Store)", d))
-    # MSFS 2020 Steam
-    s = roaming / "Microsoft Flight Simulator"
-    if _safe_is_dir(s):
-        candidates.append(("MSFS 2020 (Steam)", s))
     # MSFS 2024 Store — Package-Name ist je nach Version unterschiedlich
     if local:
         for pat in ("Microsoft.Limitless_*", "Microsoft.FlightSimulator2024_*"):
@@ -267,7 +259,6 @@ def clear_wasm_compile_cache(sim: dict, addon_name: str) -> list[str]:
     candidates = [
         base / "LocalState" / "WASM" / "MSFS2024",
         base / "LocalState" / "WASM",
-        local_cache / "WASM",           # MSFS 2020 Fallback
     ]
     needle = addon_name.lower()
     for cache_dir in candidates:
@@ -310,8 +301,8 @@ def install() -> int:
     # 2) Sims erkennen
     sims = detect_msfs_installs()
     if not sims:
-        print("\n[!] Keine MSFS-Installation gefunden (weder 2020 noch 2024).")
-        print("    Wenn MSFS später installiert wird, einfach dieses Setup erneut starten.")
+        print("\n[!] Keine MSFS 2024-Installation gefunden.")
+        print("    Wenn MSFS 2024 später installiert wird, einfach dieses Setup erneut starten.")
         return 0
 
     print(f"\n{len(sims)} MSFS-Installation(en) gefunden:\n")

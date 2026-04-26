@@ -63,7 +63,7 @@ Beim Doppelklick auf die MSI:
 - **Start-Menü-Verknüpfung**: wird immer angelegt.
 - **Desktop-Verknüpfung**: optional, per Haken im Installer-Feature.
 - **MSFS-Integration**: der Integrator wird als Custom Action am Ende des
-  Installs aufgerufen. Er erkennt MSFS 2020/2024 (Store + Steam), kopiert
+  Installs aufgerufen. Er erkennt MSFS 2024 (Store + Steam), kopiert
   das Community-Folder-Paket in den jeweiligen Ordner und trägt
   `MSFSVoiceWalker` in die `exe.xml` ein (mit `.bak`-Backup).
 - **Uninstaller**: Windows-Standard; "Apps & Features" → MSFSVoiceWalker →

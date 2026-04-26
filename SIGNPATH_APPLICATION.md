@@ -11,7 +11,7 @@
 ## Project Summary
 
 MSFSVoiceWalker is a free, open-source proximity voice chat for Microsoft
-Flight Simulator 2020 and 2024. It lets pilots hear other players only when
+Flight Simulator 2024. It lets pilots hear other players only when
 they are physically close in the simulator — mimicking real-life radio
 range and walker-mode conversations — without any central server.
 
