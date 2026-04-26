@@ -256,10 +256,14 @@
     ctx.fillText('E', cx + R - 8, cy);
     ctx.fillText('W', cx - R + 8, cy);
 
-    // Audio-Bubble (Hoerbarkeits-Kreis in gruen)
+    // Audio-Bubble (Hoerbarkeits-Kreis in gruen). Bei Walker (10 m) auf
+    // grossem Zoom ist die Bubble rechnerisch winzig — wir geben ihr eine
+    // visuelle Mindestgroesse damit der User den Hoerbereich ueberhaupt
+    // sieht. Ab 8 px wird die korrekte Mathe-Groesse gezeichnet.
     if (state.mySim && state.myRange > 0) {
-      const rAudio = R * Math.min(1, state.myRange / radarRangeM);
-      if (rAudio > 3) {
+      const rAudioRaw = R * Math.min(1, state.myRange / radarRangeM);
+      const rAudio    = rAudioRaw < 8 ? Math.max(rAudioRaw, 8) : rAudioRaw;
+      if (rAudio > 0) {
         const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, rAudio);
         grad.addColorStop(0, 'rgba(63,220,138,0.22)');
         grad.addColorStop(1, 'rgba(63,220,138,0.00)');

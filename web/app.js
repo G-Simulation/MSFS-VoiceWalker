@@ -2107,9 +2107,13 @@ function renderRadar() {
   // fullVolumeM, dann stetig leiser bis maxRangeM = stumm.
   const myRangeM    = audioConfig.maxRangeM   || 75;
   const myFullM     = audioConfig.fullVolumeM || 3;
-  const rRangePx    = R * Math.min(1, myRangeM / RADAR_RANGE_M);
+  // Bei Walker (10m) auf 1km Zoom ist die Bubble nur ~1-2px klein; trotzdem
+  // zeichnen, mit visueller Mindestgroesse damit sie ueberhaupt erkennbar
+  // ist. Ueber 8px wird die echte mathematisch korrekte Groesse genommen.
+  const rRangePxRaw = R * Math.min(1, myRangeM / RADAR_RANGE_M);
+  const rRangePx    = rRangePxRaw < 8 ? Math.max(rRangePxRaw, 8) : rRangePxRaw;
   const rFullPx     = R * Math.min(1, myFullM  / RADAR_RANGE_M);
-  if (rRangePx > 4) {
+  if (myRangeM > 0) {
     const audioGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, rRangePx);
     audioGrad.addColorStop(0,                              'rgba(63, 220, 138, 0.22)');
     audioGrad.addColorStop(Math.min(0.95, rFullPx/rRangePx), 'rgba(63, 220, 138, 0.16)');
