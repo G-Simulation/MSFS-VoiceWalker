@@ -1761,13 +1761,30 @@ function updateAudioFor(p) {
   p.gainNode.gain.setTargetAtTime(v, audioCtx.currentTime, 0.05);
   p.currentVolume = v;
 
+  // Panning-Modus dynamisch nach Welt:
+  //   Walker (on_foot=true)  → HRTF, 3D-direktional, "hoert wie in echt"
+  //   Cockpit (on_foot=false) → equalpower, omnidirektional, Funk-Feeling
+  // Distance-Daempfung macht weiterhin der gainNode (oben), Panner ist
+  // hier nur fuer den Richtungs-Effekt zustaendig — in Cockpit also aus.
+  if (!p.pannerNode || !p.pannerNode.positionX) return;
+  const targetModel = mineOnFoot ? 'HRTF' : 'equalpower';
+  if (p.pannerNode.panningModel !== targetModel) {
+    p.pannerNode.panningModel = targetModel;
+  }
+  if (!mineOnFoot) {
+    // Cockpit: zentrale Position, kein 3D-Effekt. equalpower mit (0,0,-1)
+    // = mittiger Stereo-Pan, also rundum gleich.
+    p.pannerNode.positionX.value = 0;
+    p.pannerNode.positionY.value = 0;
+    p.pannerNode.positionZ.value = -1;
+    return;
+  }
+
   // 3) Richtung: relativer Vektor ME → PEER in ENU (East/North/Up), normiert.
   //    Der Panner wird auf diesen Einheitsvektor gesetzt (Distanz irrelevant,
   //    weil refDistance=1 + rolloffFactor=0 — Distanzdaempfung macht der
   //    gainNode). HRTF rendert basierend darauf die Richtung relativ zur
-  //    Listener-Orientation, die wiederum am Avatar-Heading (Walker) oder
-  //    Aircraft-Heading (Cockpit) haengt.
-  if (!p.pannerNode || !p.pannerNode.positionX) return;
+  //    Listener-Orientation, die wiederum am Avatar-Heading haengt.
 
   const R = 6371000;
   const toRad = x => x * Math.PI / 180;
@@ -2146,32 +2163,31 @@ function renderRadar() {
     ctx.fillStyle = 'rgba(63, 220, 138, 0.95)';
     ctx.fillText(audioLbl, ax - 2, ay);
 
-    // Audio-Cone — 120 deg Front-Highlight in Heading-Richtung. Browser-UI
-    // ist Heading-Up (Welt rotiert), also zeigt der Cone fix nach oben am
-    // Radar. Visualisiert dass HRTF die vorderen Quellen am genauesten
-    // lokalisiert. Liegt OBEN auf dem Bubble-Kreis und ueberzeichnet ihn
-    // im Front-Sektor mit hoeherer Opacity.
-    const coneHalfRad = 60 * Math.PI / 180;
-    const coneCenter  = -Math.PI / 2;             // Heading-Up: oben = vorne
-    const coneStart   = coneCenter - coneHalfRad;
-    const coneEnd     = coneCenter + coneHalfRad;
-    const coneGrad    = ctx.createRadialGradient(cx, cy, 0, cx, cy, rRangePx);
-    coneGrad.addColorStop(0, 'rgba(63, 220, 138, 0.32)');
-    coneGrad.addColorStop(Math.min(0.95, rFullPx/rRangePx), 'rgba(63, 220, 138, 0.22)');
-    coneGrad.addColorStop(1, 'rgba(63, 220, 138, 0.00)');
-    ctx.fillStyle = coneGrad;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, rRangePx, coneStart, coneEnd);
-    ctx.closePath();
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(63, 220, 138, 0.7)';
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, rRangePx, coneStart, coneEnd);
-    ctx.closePath();
-    ctx.stroke();
+    // Audio-Cone — nur im Walker-Modus. Cockpit hoert rundum (equalpower),
+    // also ist auch visuell der Vollkreis ohne Front-Cone korrekt.
+    if (state.mySim && state.mySim.on_foot) {
+      const coneHalfRad = 60 * Math.PI / 180;
+      const coneCenter  = -Math.PI / 2;            // Heading-Up: oben = vorne
+      const coneStart   = coneCenter - coneHalfRad;
+      const coneEnd     = coneCenter + coneHalfRad;
+      const coneGrad    = ctx.createRadialGradient(cx, cy, 0, cx, cy, rRangePx);
+      coneGrad.addColorStop(0, 'rgba(63, 220, 138, 0.32)');
+      coneGrad.addColorStop(Math.min(0.95, rFullPx/rRangePx), 'rgba(63, 220, 138, 0.22)');
+      coneGrad.addColorStop(1, 'rgba(63, 220, 138, 0.00)');
+      ctx.fillStyle = coneGrad;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, rRangePx, coneStart, coneEnd);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(63, 220, 138, 0.7)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, rRangePx, coneStart, coneEnd);
+      ctx.closePath();
+      ctx.stroke();
+    }
   }
 
   // Eigenes Icon im Zentrum — Top-Down-Flugzeug oder Walker-Kreis.

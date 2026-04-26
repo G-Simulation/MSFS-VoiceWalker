@@ -271,27 +271,30 @@
       ctx.setLineDash([2, 4]);
       ctx.beginPath(); ctx.arc(cx, cy, rAudio, 0, Math.PI * 2); ctx.stroke();
       ctx.setLineDash([]);
-      // Front-Cone (120 deg) in Heading-Richtung
-      const coneHalfRad = 60 * Math.PI / 180;
-      const coneCenter  = (selfHeading * Math.PI / 180) - Math.PI / 2;
-      const coneStart   = coneCenter - coneHalfRad;
-      const coneEnd     = coneCenter + coneHalfRad;
-      const coneGrad    = ctx.createRadialGradient(cx, cy, 0, cx, cy, rAudio);
-      coneGrad.addColorStop(0, 'rgba(63,220,138,0.34)');
-      coneGrad.addColorStop(1, 'rgba(63,220,138,0.00)');
-      ctx.fillStyle = coneGrad;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, rAudio, coneStart, coneEnd);
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(63,220,138,0.7)';
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, rAudio, coneStart, coneEnd);
-      ctx.closePath();
-      ctx.stroke();
+      // Front-Cone (120 deg) in Heading-Richtung — nur Walker-Modus.
+      // Cockpit hoert rundum (equalpower-Panner), kein Cone.
+      if (state.mySim.on_foot) {
+        const coneHalfRad = 60 * Math.PI / 180;
+        const coneCenter  = (selfHeading * Math.PI / 180) - Math.PI / 2;
+        const coneStart   = coneCenter - coneHalfRad;
+        const coneEnd     = coneCenter + coneHalfRad;
+        const coneGrad    = ctx.createRadialGradient(cx, cy, 0, cx, cy, rAudio);
+        coneGrad.addColorStop(0, 'rgba(63,220,138,0.34)');
+        coneGrad.addColorStop(1, 'rgba(63,220,138,0.00)');
+        ctx.fillStyle = coneGrad;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, rAudio, coneStart, coneEnd);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(63,220,138,0.7)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, rAudio, coneStart, coneEnd);
+        ctx.closePath();
+        ctx.stroke();
+      }
 
       // Audio-Bubble-Label — unten links
       const audioLbl = 'AUDIO ' + fmtRange(state.myRange);
