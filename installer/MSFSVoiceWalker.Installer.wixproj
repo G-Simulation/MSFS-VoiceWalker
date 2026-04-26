@@ -166,11 +166,11 @@
 
     <Message Text="==&gt; Baue Python-EXEs mit PyInstaller..." Importance="high" />
 
-    <!-- Falls eine vorherige App-/Setup-Instanz noch laeuft, blockiert sie
-         dist\*.exe und PyInstaller --clean schlaegt mit "Zugriff verweigert"
-         fehl. Wir killen die EXEs zuerst silent (errorlevel ignoriert,
-         /T = Children, /F = force). Existiert keiner der Prozesse, ist
-         taskkill harmlos. -->
+    <!-- Falls eine vorherige App- oder Setup-Instanz noch laeuft, blockiert
+         sie dist\*.exe und PyInstaller (Clean-Schritt) schlaegt mit
+         "Zugriff verweigert" fehl. Wir killen die EXEs zuerst silent
+         (errorlevel ignoriert, /T = Children, /F = force). Existiert
+         keiner der Prozesse, ist taskkill harmlos. -->
     <Exec Command="taskkill /F /T /IM MSFSVoiceWalker.exe 2&gt;nul &amp; taskkill /F /T /IM MSFSVoiceWalker-Setup.exe 2&gt;nul &amp; exit /b 0"
           IgnoreExitCode="true" />
 
