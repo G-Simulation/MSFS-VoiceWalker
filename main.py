@@ -616,13 +616,21 @@ class SimReader:
             self._attempt += 1
 
     def _safe(self, name: str, default: float = 0.0) -> float:
+        # Heartbeat-Counter: wenn der Sim geschlossen wird, liefert
+        # python-SimConnect entweder None oder wirft Exceptions. Wir
+        # zaehlen consecutive failures; nach >100 in Folge (~ 1s @ 10Hz
+        # mit ~10 SimVars/snapshot) gilt der Sim als weg, _connected wird
+        # zurueckgesetzt und der Reader liefert ab dem naechsten Tick
+        # _demo_snapshot (in_menu=True) — Tray + UI gehen dann auf "connected".
         try:
             v = self.areq.get(name)
+            if v is None:
+                self._null_streak = getattr(self, "_null_streak", 0) + 1
+            else:
+                self._null_streak = 0
             return float(v) if v is not None else float(default)
         except Exception as e:
-            # Einzelne SimVar-Fehler sind normal (SimVar existiert nicht in
-            # dem aktuellen Mode, z.B. CAMERA_POS_LAT nur im Walker). Wir
-            # loggen sie nur einmal pro Name, damit die Konsole nicht flutet.
+            self._null_streak = getattr(self, "_null_streak", 0) + 1
             bad = getattr(self, "_bad_vars", None)
             if bad is None:
                 bad = set()
@@ -631,6 +639,24 @@ class SimReader:
                 bad.add(name)
                 log.warning("SimVar %s failed: %s", name, e)
             return float(default)
+
+    def _check_alive(self) -> None:
+        """Wird nach jedem snapshot() ausgewertet: bei zu vielen consecutive
+        SimVar-Failures gehen wir davon aus dass der Sim zu ist und schalten
+        Reader auf disconnected. Der naechste snapshot() liefert dann
+        _demo_snapshot statt veralteter Last-Known-Werte."""
+        if getattr(self, "_null_streak", 0) > 100:
+            log.info("SimConnect: heartbeat lost (sim closed?), disconnecting")
+            try:
+                if self.sm is not None:
+                    self.sm = None
+            except Exception:
+                pass
+            self.areq = None
+            self._connected = False
+            STATE.sim_connected = False
+            self._null_streak = 0
+            self._bad_vars = set()
 
     def _demo_snapshot(self):
         """Platzhalter wenn entweder Package fehlt ODER MSFS nicht laeuft.
@@ -834,6 +860,10 @@ class SimReader:
         }
         STATE.sim_last_snapshot = snap
         STATE.sim_last_read_at = time.time()
+        # Sim-alive-Check: wenn alle SimVars in den letzten Calls None waren,
+        # schalten wir den Reader auf disconnected und der naechste Tick
+        # liefert _demo_snapshot mit in_menu=True.
+        self._check_alive()
         return snap
 
 
@@ -1328,7 +1358,9 @@ async def tray_status_loop(tray_icon, reader: SimReader):
     """Tray-Icon-Farbe an Verbindungs-/Sim-Status anpassen.
       offline   — keine UI verbunden (kein Browser, kein Panel)
       connected — UI verbunden, aber Sim hat noch keine echte Position
-      online    — UI + gueltige Sim-Position (gruen leuchtend)
+                  (Sim nicht gestartet, im Hauptmenue, oder Sim wurde
+                  geschlossen → Heartbeat verloren → demo-Snapshot)
+      online    — UI + gueltige Sim-Position + SimConnect aktiv
     Throttle: nur bei State-Change wird das Icon getauscht (vermeidet
     Flicker und unnoetige PIL-Renderings)."""
     if tray_icon is None:
@@ -1339,7 +1371,7 @@ async def tray_status_loop(tray_icon, reader: SimReader):
             try:
                 if not SUBSCRIBERS:
                     state = "offline"
-                elif _has_valid_position(reader.snapshot()):
+                elif STATE.sim_connected and _has_valid_position(reader.snapshot()):
                     state = "online"
                 else:
                     state = "connected"
