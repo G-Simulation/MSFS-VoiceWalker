@@ -159,6 +159,37 @@
     }
     .toggle-pill:has(input:checked) span { color: var(--color-fg); }
 
+    /* Standalone iOS-Style-Toggle (Settings-Dialog + First-Run-Wizard).
+       Wie .toggle-pill, aber ohne Pill-Wrapper drumrum. */
+    .vw-toggle { display: inline-flex; align-items: center; cursor: pointer; }
+    .vw-toggle input[type=checkbox] {
+      appearance: none; -webkit-appearance: none;
+      width: 34px; height: 19px; border-radius: 999px;
+      border: 1px solid var(--color-border);
+      background: rgba(106,165,255,0.08);
+      cursor: pointer;
+      transition: all 0.15s;
+      position: relative;
+      flex-shrink: 0;
+    }
+    .vw-toggle input[type=checkbox]::after {
+      content: '';
+      position: absolute; top: 1px; left: 1px;
+      width: 15px; height: 15px;
+      border-radius: 50%;
+      background: var(--color-muted);
+      transition: all 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.1);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    }
+    .vw-toggle input[type=checkbox]:checked {
+      background: var(--color-accent);
+      border-color: var(--color-accent);
+    }
+    .vw-toggle input[type=checkbox]:checked::after {
+      left: 16px;
+      background: #0b1220;
+    }
+
     /* Peer-Rows */
     .peer-row {
       display: grid; grid-template-columns: 22px 1fr auto; gap: 12px;
@@ -284,8 +315,16 @@
       </div>
       <div class="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full glass text-xs text-[color:var(--color-muted)]">
         <span class="w-2 h-2 rounded-full bg-[color:var(--color-good)] dot-good"></span>
-        v0.1.0 · online
+        <span id="appVersion">v0.1.0</span> · online
       </div>
+      <button id="openSettingsBtn" type="button"
+              class="ml-1 w-9 h-9 rounded-full glass flex items-center justify-center text-[color:var(--color-muted)] hover:text-[color:var(--color-fg)] hover:bg-white/5 transition"
+              title="Einstellungen" aria-label="Einstellungen">
+        <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
     </header>
 
     <!-- ================= STATUS STRIP =================
@@ -772,6 +811,183 @@
                        bg-[color:var(--color-accent)] text-[#0b1220]
                        hover:bg-blue-300 transition">
           Verstanden &amp; Starten
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= UPDATE-COMPLETED TOAST =================
+       Erscheint einmalig nach einem Silent-Update beim naechsten Start.
+       Zeigt "Auf vX.Y aktualisiert", schliesst sich nach 8s oder per X. -->
+  <div id="updateCompletedToast"
+       class="hidden fixed bottom-4 right-4 z-[60] max-w-sm glass rounded-xl p-3 shadow-2xl border border-[color:var(--color-good)]/30">
+    <div class="flex items-start gap-3">
+      <div class="w-2 h-2 rounded-full mt-1.5 bg-[color:var(--color-good)] shrink-0 dot-good"></div>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-semibold text-[color:var(--color-good)]">Update installiert</div>
+        <div id="updateCompletedText" class="text-xs text-[color:var(--color-muted)] mt-0.5"></div>
+      </div>
+      <button id="updateCompletedDismiss" type="button"
+              class="text-[color:var(--color-muted)] hover:text-[color:var(--color-fg)] transition"
+              aria-label="Schliessen">✕</button>
+    </div>
+  </div>
+
+  <!-- ================= SETTINGS DIALOG =================
+       Geoeffnet ueber das Zahnrad oben rechts. Drei Toggles + ein
+       Button zum manuellen Log-Senden. State kommt vom Backend per
+       'settings_state'-Message; Aenderungen gehen per 'settings_set'
+       zurueck — Backend persistiert in config.json + setzt Registry. -->
+  <div id="settingsDialog"
+       class="fixed inset-0 z-[10001] hidden items-center justify-center
+              bg-[rgba(7,11,22,0.85)] backdrop-blur-md p-4"
+       aria-hidden="true">
+    <div class="glass rounded-2xl max-w-xl w-full p-6 md:p-7 border border-[color:var(--color-border)]"
+         role="dialog" aria-labelledby="settingsTitle">
+      <div class="flex items-start justify-between gap-4 mb-5">
+        <div>
+          <h2 id="settingsTitle" class="text-xl font-bold">Einstellungen</h2>
+          <p class="text-xs text-[color:var(--color-muted)] mt-1">
+            Werden in <code>config.json</code> gespeichert.
+          </p>
+        </div>
+        <button id="settingsCloseBtn" type="button"
+                class="text-[color:var(--color-muted)] hover:text-[color:var(--color-fg)] transition"
+                aria-label="Schliessen">✕</button>
+      </div>
+
+      <ul class="space-y-4 mb-6">
+        <li class="flex items-start gap-3">
+          <label class="vw-toggle mt-0.5">
+            <input id="setAutostart" type="checkbox">
+            <span></span>
+          </label>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold">Mit Windows starten</div>
+            <div class="text-xs text-[color:var(--color-muted)] mt-0.5">
+              MSFSVoiceWalker laeuft nach dem Login automatisch im Tray.
+            </div>
+          </div>
+        </li>
+        <li class="flex items-start gap-3">
+          <label class="vw-toggle mt-0.5">
+            <input id="setAutoUpdate" type="checkbox">
+            <span></span>
+          </label>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold">Automatisch aktualisieren</div>
+            <div class="text-xs text-[color:var(--color-muted)] mt-0.5">
+              Updates werden im Hintergrund installiert. Beim naechsten Start kurzer Hinweis.
+            </div>
+          </div>
+        </li>
+        <li class="flex items-start gap-3">
+          <label class="vw-toggle mt-0.5">
+            <input id="setSendLogs" type="checkbox">
+            <span></span>
+          </label>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold">Logs bei Fehler an Entwickler senden</div>
+            <div class="text-xs text-[color:var(--color-muted)] mt-0.5">
+              Bei einem Crash wird das Log automatisch an den Entwickler-Discord geschickt.
+              Enthaelt Sim-Pfade, Versionen, Stacktraces — keine Audio-Daten.
+            </div>
+          </div>
+        </li>
+      </ul>
+
+      <div class="border-t border-[color:var(--color-border)] pt-4">
+        <div class="text-xs text-[color:var(--color-muted)] mb-2">Manuell:</div>
+        <div class="flex flex-col sm:flex-row gap-2">
+          <input id="feedbackNote" type="text" maxlength="500"
+                 placeholder="Kurz beschreiben (optional)…"
+                 class="flex-1 px-3 py-2 text-sm rounded-lg bg-[rgba(7,11,22,0.5)]
+                        border border-[color:var(--color-border)]
+                        focus:border-[color:var(--color-accent)] outline-none
+                        placeholder:text-[color:var(--color-muted)]/60">
+          <button id="feedbackSendBtn" type="button"
+                  class="px-4 py-2 text-sm font-semibold rounded-lg
+                         bg-[color:var(--color-accent)] text-[#0b1220]
+                         hover:bg-blue-300 transition disabled:opacity-50
+                         disabled:cursor-not-allowed">
+            Logs jetzt senden
+          </button>
+        </div>
+        <div id="feedbackResult" class="text-xs mt-2 hidden"></div>
+      </div>
+
+      <div class="flex justify-end mt-6">
+        <button id="settingsDoneBtn" type="button"
+                class="px-4 py-2 text-sm rounded-lg border border-[color:var(--color-border)]
+                       text-[color:var(--color-muted)] hover:bg-white/5 transition">
+          Fertig
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= FIRST-RUN WIZARD =================
+       Wird beim allerersten Start nach dem Consent-Dialog gezeigt
+       (config.first_run_done == false). Drei Voreinstellungen, dann
+       wird first_run_done=true gesetzt — kommt nicht wieder hoch. -->
+  <div id="firstRunDialog"
+       class="fixed inset-0 z-[10002] hidden items-center justify-center
+              bg-[rgba(7,11,22,0.92)] backdrop-blur-md p-4"
+       aria-hidden="true">
+    <div class="glass rounded-2xl max-w-xl w-full p-6 md:p-8 border border-[color:var(--color-border)]"
+         role="dialog" aria-labelledby="firstRunTitle">
+      <h2 id="firstRunTitle" class="text-xl md:text-2xl font-bold mb-1">
+        Letzter Schritt
+      </h2>
+      <p class="text-sm text-[color:var(--color-muted)] mb-6">
+        Drei Schalter — du kannst sie spaeter im Zahnrad-Menue jederzeit anpassen.
+      </p>
+
+      <ul class="space-y-4 mb-6">
+        <li class="flex items-start gap-3">
+          <label class="vw-toggle mt-0.5">
+            <input id="frAutostart" type="checkbox">
+            <span></span>
+          </label>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold">Mit Windows starten</div>
+            <div class="text-xs text-[color:var(--color-muted)] mt-0.5">
+              Laeuft nach dem Login automatisch im Tray, bereit fuer MSFS.
+            </div>
+          </div>
+        </li>
+        <li class="flex items-start gap-3">
+          <label class="vw-toggle mt-0.5">
+            <input id="frAutoUpdate" type="checkbox" checked>
+            <span></span>
+          </label>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold">Automatisch aktualisieren</div>
+            <div class="text-xs text-[color:var(--color-muted)] mt-0.5">
+              Empfohlen — kleines Update (≈30 MB) wird still installiert.
+            </div>
+          </div>
+        </li>
+        <li class="flex items-start gap-3">
+          <label class="vw-toggle mt-0.5">
+            <input id="frSendLogs" type="checkbox">
+            <span></span>
+          </label>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold">Logs bei Fehler senden</div>
+            <div class="text-xs text-[color:var(--color-muted)] mt-0.5">
+              Hilft mir Probleme schneller zu finden — du kannst das jederzeit zurueckdrehen.
+            </div>
+          </div>
+        </li>
+      </ul>
+
+      <div class="flex justify-end">
+        <button id="firstRunDoneBtn" type="button"
+                class="px-5 py-2 text-sm font-semibold rounded-lg
+                       bg-[color:var(--color-accent)] text-[#0b1220]
+                       hover:bg-blue-300 transition">
+          Speichern und starten
         </button>
       </div>
     </div>

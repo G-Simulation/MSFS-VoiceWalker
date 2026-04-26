@@ -73,6 +73,73 @@ class RingHandler(logging.Handler):
             pass
 
 
+class AutoFeedbackHandler(logging.Handler):
+    """Bei ERROR/CRITICAL-Records: feedback.send() im Hintergrund-Thread,
+    aber nur wenn der User in den Settings 'send_logs_on_error' aktiviert
+    hat. Throttle: max 1 Auto-Send pro Stunde, damit ein wiederkehrender
+    Fehler den Discord-Channel nicht zumuellt."""
+
+    THROTTLE_S = 3600  # 1 Stunde
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.ERROR)
+        self._last_send_at = 0.0
+        self._lock = __import__("threading").Lock()
+
+    def emit(self, record: logging.LogRecord) -> None:  # noqa: D401
+        try:
+            if record.levelno < logging.ERROR:
+                return
+            # Eigene Logs vom feedback-Modul nicht in eine Schleife jagen
+            if record.name == "feedback":
+                return
+            import time as _t
+            now = _t.time()
+            with self._lock:
+                if now - self._last_send_at < self.THROTTLE_S:
+                    return
+                self._last_send_at = now
+
+            # Lazy imports — vermeidet zirkulare Imports beim Modul-Load.
+            try:
+                from main import load_config, SETTINGS_DEFAULTS
+                cfg = load_config()
+                if not bool(cfg.get(
+                    "send_logs_on_error",
+                    SETTINGS_DEFAULTS.get("send_logs_on_error", False),
+                )):
+                    # Toggle aus: Throttle-Zaehler zuruecksetzen, sonst
+                    # bekaeme der User nach dem Einschalten erst eine Stunde
+                    # spaeter den ersten Auto-Send.
+                    with self._lock:
+                        self._last_send_at = 0.0
+                    return
+            except Exception:
+                return
+
+            def _do_send():
+                try:
+                    from feedback import send
+                    from updater import APP_VERSION
+                    note = f"auto: {record.levelname} [{record.name}] {record.getMessage()[:200]}"
+                    ok, msg = send(note, app_version=APP_VERSION,
+                                   reason="auto-error")
+                    if not ok:
+                        # Bei Fehlschlag Throttle resetten, damit der naechste
+                        # Error noch eine Chance hat (sonst ist der User eine
+                        # Stunde im Loch).
+                        with self._lock:
+                            self._last_send_at = 0.0
+                except Exception:
+                    pass
+
+            import threading
+            threading.Thread(target=_do_send, name="feedback-auto",
+                             daemon=True).start()
+        except Exception:
+            pass
+
+
 def recent_log_entries(limit: int = 100) -> list[dict]:
     """Liefert die letzten N Log-Einträge (für /debug/status)."""
     if limit <= 0:
@@ -124,6 +191,13 @@ def setup_logging() -> logging.Logger:
     rh.setLevel(logging.DEBUG)   # Ring nimmt alles, /debug entscheidet
     rh.setFormatter(formatter)
     root.addHandler(rh)
+
+    # 4) Auto-Feedback — sendet bei ERROR den Log an den Entwickler-Discord,
+    # gated durch den 'send_logs_on_error'-Toggle in config.json. Throttle
+    # 1/Stunde verhindert Flooding.
+    afh = AutoFeedbackHandler()
+    afh.setFormatter(formatter)
+    root.addHandler(afh)
 
     # Globaler Exception-Catcher für alles, was durch die Ritzen fällt
     def excepthook(exc_type, exc, tb):

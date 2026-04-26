@@ -679,6 +679,15 @@
         state.ui.trackingEnabled = !!m.enabled;
         if (!m.enabled) state.trackingOff = true;
         else state.trackingOff = false;
+      } else if (m.type === 'version') {
+        const vEl = $('vw-version');
+        if (vEl && m.version) vEl.textContent = 'v' + m.version;
+      } else if (m.type === 'ptt_state') {
+        // Backend meldet PTT-Bind-Fortschritt direkt — wichtig wenn nur das
+        // Panel offen ist (kein Browser-UI das overlay_state.ui spiegelt).
+        if (!state.ui) state.ui = {};
+        state.ui.bindingInProgress = !!m.binding_mode;
+        state.ui.pttBinding         = m.binding || null;
       }
       scheduleRender();
     };
@@ -860,7 +869,6 @@
     // Diese Funktion bleibt nur als no-op, falls sie noch von boot() gerufen
     // wird (Aufrufer wird gleich auf setupEventRouter umgestellt).
     return;
-    });
   }
 
   // Setup-/Pro-Tab DOM aus state.ui aktualisieren — wird aus renderUI()

@@ -238,8 +238,10 @@ const audioConfig = {
   cockpit: { maxRangeM: 5000, fullVolumeM: 50, rolloff: 0.8 },
   // Crossover: wenn > 0 koennen sich Walker und Cockpit-Piloten innerhalb
   // dieses Radius hoeren (z.B. Walker steht neben eigener Cessna → Co-Pilot
-  // im Cockpit ist noch hoerbar). Default 0 = Welten streng getrennt.
-  crossoverM: 0,
+  // im Cockpit ist noch hoerbar). Default 10 m = Walker direkt am Flugzeug
+  // hoert den Cockpit-Piloten und umgekehrt; ausserhalb dieses Radius
+  // bleiben Walker- und Cockpit-Welt getrennt.
+  crossoverM: 10,
 
   // Ducking (Stream-Feature): wenn der lokale User spricht, werden alle
   // Peer-Stimmen leiser geregelt, damit die eigene Stimme im Stream-Mic
@@ -282,21 +284,32 @@ function profileBetween(mineOnFoot, peerOnFoot, distM) {
   return null;   // stumm
 }
 
-// Persistenz in localStorage
+// Persistenz in localStorage. schemaVersion bumpen wenn ein Default-Wert
+// migrated werden soll der keine eigene UI hat (z.B. crossoverM) — alte
+// Eintraege werden dann auf den neuen Default gehoben, User-Settings mit
+// eigener UI (Walker/Cockpit-Range, Ducking) bleiben erhalten.
+const AUDIO_CONFIG_SCHEMA = 3;
 function loadAudioConfig() {
   try {
     const s = localStorage.getItem('vw.audioConfig_v2');
     if (!s) return;
     const j = JSON.parse(s);
+    const oldSchema = +j.schemaVersion || 0;
     if (j.walker)  Object.assign(audioConfig.walker,  j.walker);
     if (j.cockpit) Object.assign(audioConfig.cockpit, j.cockpit);
-    if (Number.isFinite(+j.crossoverM)) audioConfig.crossoverM = +j.crossoverM;
+    // crossoverM nur uebernehmen wenn die gespeicherte Config schon das
+    // aktuelle Schema hat. Aelter → Code-Default greift (Migration).
+    if (oldSchema >= 3 && Number.isFinite(+j.crossoverM)) {
+      audioConfig.crossoverM = +j.crossoverM;
+    }
     if (j.ducking) Object.assign(audioConfig.ducking, j.ducking);
+    if (oldSchema < AUDIO_CONFIG_SCHEMA) saveAudioConfig();   // bump
   } catch {}
 }
 function saveAudioConfig() {
   try {
     localStorage.setItem('vw.audioConfig_v2', JSON.stringify({
+      schemaVersion: AUDIO_CONFIG_SCHEMA,
       walker:     audioConfig.walker,
       cockpit:    audioConfig.cockpit,
       crossoverM: audioConfig.crossoverM,
@@ -931,10 +944,19 @@ function connectBackendWs() {
       location.reload();
     } else if (m.type === 'update_available' || m.type === 'update_state') {
       showUpdateBanner(m);
+    } else if (m.type === 'update_completed') {
+      showUpdateCompletedToast(m);
+    } else if (m.type === 'settings_state') {
+      applySettingsState(m);
+    } else if (m.type === 'feedback_result') {
+      applyFeedbackResult(m);
     } else if (m.type === 'tracking_state') {
       applyTrackingState(!!m.enabled);
     } else if (m.type === 'license_state') {
       applyLicenseState(m);
+    } else if (m.type === 'version') {
+      const av = document.getElementById('appVersion');
+      if (av && m.version) av.textContent = 'v' + m.version;
     } else if (m.type === 'remote_action') {
       // MSFS-Panel hat Button/Slider/Select bedient, Backend relayted hier
       // → ausfuehren. toggle-tracking wird schon im Backend gemacht (kommt
@@ -2990,6 +3012,156 @@ document.getElementById('updateInstallBtn')?.addEventListener('click', () => {
 });
 document.getElementById('updateDismissBtn')?.addEventListener('click', () => {
   document.getElementById('updateBanner')?.classList.add('hidden');
+});
+
+// --- Update-Completed-Toast --------------------------------------------------
+// Backend schickt einmal pro Session 'update_completed' wenn last_known_version
+// kleiner als APP_VERSION ist. Wir zeigen einen kurzen Toast unten rechts.
+function showUpdateCompletedToast(m) {
+  const toast = document.getElementById('updateCompletedToast');
+  const text  = document.getElementById('updateCompletedText');
+  if (!toast || !text) return;
+  text.textContent = `Auf v${m.to || '?'} aktualisiert (vorher v${m.from || '?'}).`;
+  toast.classList.remove('hidden');
+  // Auto-Hide nach 8s, falls der User nicht selber wegklickt
+  setTimeout(() => toast.classList.add('hidden'), 8000);
+}
+document.getElementById('updateCompletedDismiss')?.addEventListener('click', () => {
+  document.getElementById('updateCompletedToast')?.classList.add('hidden');
+});
+
+// --- Settings-Dialog + First-Run-Wizard --------------------------------------
+// Dialog-State kommt vom Backend per 'settings_state' (initial beim WS-Connect
+// und nach jedem 'settings_set'). Aenderungen schicken wir per 'settings_set'
+// mit einem Patch — das Backend persistiert in config.json und broadcastet
+// die kanonische Sicht zurueck (auch an alle anderen offenen Tabs).
+const _settingsState = {
+  windows_autostart: false,
+  auto_update:       true,
+  send_logs_on_error: false,
+  first_run_done:    false,
+};
+
+function applySettingsState(s) {
+  for (const k of Object.keys(_settingsState)) {
+    if (typeof s[k] === 'boolean') _settingsState[k] = s[k];
+  }
+  // Settings-Dialog-Toggles synchronisieren (auch wenn Dialog gerade zu ist —
+  // schadet nichts; sicherstellen dass beim naechsten Oeffnen aktuelle Werte
+  // angezeigt werden).
+  const aBox  = document.getElementById('setAutostart');
+  const uBox  = document.getElementById('setAutoUpdate');
+  const lBox  = document.getElementById('setSendLogs');
+  if (aBox) aBox.checked = _settingsState.windows_autostart;
+  if (uBox) uBox.checked = _settingsState.auto_update;
+  if (lBox) lBox.checked = _settingsState.send_logs_on_error;
+
+  // First-Run-Wizard: wenn first_run_done == false UND Consent schon gegeben,
+  // den Wizard zeigen. Consent muss zuerst durch — Privacy/Consent kommt aus
+  // hasConsent() (siehe oben). Der Wizard zeigt sich nur EINMAL pro Install.
+  if (!_settingsState.first_run_done && hasConsent()) {
+    _maybeShowFirstRun();
+  }
+}
+
+function applyFeedbackResult(m) {
+  const out = document.getElementById('feedbackResult');
+  const btn = document.getElementById('feedbackSendBtn');
+  if (btn) btn.disabled = false;
+  if (!out) return;
+  out.textContent = m.msg || (m.ok ? 'Gesendet.' : 'Fehler beim Senden.');
+  out.className = 'text-xs mt-2 ' + (m.ok
+    ? 'text-[color:var(--color-good)]'
+    : 'text-[color:var(--color-bad)]');
+}
+
+function _openSettingsDialog() {
+  // Aktuellen State frisch nachfragen — UI zeigt sonst evtl. veraltetes
+  sendBackend({ type: 'settings_get' });
+  const dlg = document.getElementById('settingsDialog');
+  if (!dlg) return;
+  dlg.classList.remove('hidden');
+  dlg.classList.add('flex');
+  dlg.setAttribute('aria-hidden', 'false');
+  // Feedback-UI zuruecksetzen
+  const out = document.getElementById('feedbackResult');
+  if (out) { out.classList.add('hidden'); out.textContent = ''; }
+  const note = document.getElementById('feedbackNote');
+  if (note) note.value = '';
+}
+function _closeSettingsDialog() {
+  const dlg = document.getElementById('settingsDialog');
+  if (!dlg) return;
+  dlg.classList.add('hidden');
+  dlg.classList.remove('flex');
+  dlg.setAttribute('aria-hidden', 'true');
+}
+
+function _bindSettingsToggle(id, key) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('change', () => {
+    sendBackend({ type: 'settings_set', patch: { [key]: el.checked } });
+  });
+}
+
+document.getElementById('openSettingsBtn')?.addEventListener('click', _openSettingsDialog);
+document.getElementById('settingsCloseBtn')?.addEventListener('click', _closeSettingsDialog);
+document.getElementById('settingsDoneBtn')?.addEventListener('click', _closeSettingsDialog);
+_bindSettingsToggle('setAutostart',  'windows_autostart');
+_bindSettingsToggle('setAutoUpdate', 'auto_update');
+_bindSettingsToggle('setSendLogs',   'send_logs_on_error');
+
+document.getElementById('feedbackSendBtn')?.addEventListener('click', () => {
+  const note = (document.getElementById('feedbackNote')?.value || '').trim();
+  const out  = document.getElementById('feedbackResult');
+  const btn  = document.getElementById('feedbackSendBtn');
+  if (out) {
+    out.textContent = 'Sende…';
+    out.className = 'text-xs mt-2 text-[color:var(--color-muted)]';
+    out.classList.remove('hidden');
+  }
+  if (btn) btn.disabled = true;
+  sendBackend({ type: 'feedback_send', note });
+});
+
+// First-Run-Wizard ------------------------------------------------------------
+let _firstRunShown = false;
+function _maybeShowFirstRun() {
+  if (_firstRunShown || _settingsState.first_run_done) return;
+  _firstRunShown = true;
+  const dlg = document.getElementById('firstRunDialog');
+  if (!dlg) return;
+  // Default-Werte vom Backend uebernehmen (auto_update=an, andere=aus).
+  const a = document.getElementById('frAutostart');
+  const u = document.getElementById('frAutoUpdate');
+  const l = document.getElementById('frSendLogs');
+  if (a) a.checked = _settingsState.windows_autostart;
+  if (u) u.checked = _settingsState.auto_update;
+  if (l) l.checked = _settingsState.send_logs_on_error;
+  dlg.classList.remove('hidden');
+  dlg.classList.add('flex');
+  dlg.setAttribute('aria-hidden', 'false');
+}
+document.getElementById('firstRunDoneBtn')?.addEventListener('click', () => {
+  const a = document.getElementById('frAutostart');
+  const u = document.getElementById('frAutoUpdate');
+  const l = document.getElementById('frSendLogs');
+  sendBackend({
+    type: 'settings_set',
+    patch: {
+      windows_autostart:  !!(a && a.checked),
+      auto_update:        !!(u && u.checked),
+      send_logs_on_error: !!(l && l.checked),
+      first_run_done:     true,
+    },
+  });
+  const dlg = document.getElementById('firstRunDialog');
+  if (dlg) {
+    dlg.classList.add('hidden');
+    dlg.classList.remove('flex');
+    dlg.setAttribute('aria-hidden', 'true');
+  }
 });
 
 // Initial paint

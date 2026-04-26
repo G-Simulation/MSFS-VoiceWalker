@@ -197,20 +197,37 @@ async def check_once() -> UpdateState:
     return STATE
 
 
+def _auto_update_enabled() -> bool:
+    """Liest config.json (lazy import um Circular-Imports zu vermeiden).
+    Default: True — wir wollen, dass User nicht stillschweigend ohne
+    Updates unterwegs sind, ausser sie haben's explizit deaktiviert."""
+    try:
+        from main import load_config, SETTINGS_DEFAULTS
+        cfg = load_config()
+        return bool(cfg.get("auto_update", SETTINGS_DEFAULTS["auto_update"]))
+    except Exception:
+        return True
+
+
 async def check_loop(on_update_found=None) -> None:
-    """Background-Loop: einmal nach STARTUP_DELAY_S, dann alle CHECK_INTERVAL_S."""
+    """Background-Loop: einmal nach STARTUP_DELAY_S, dann alle CHECK_INTERVAL_S.
+    Respektiert den 'auto_update'-Toggle aus config.json — wenn aus, ueberspringt
+    der Loop den Check (kommuniziert nichts an die UI)."""
     await asyncio.sleep(STARTUP_DELAY_S)
     prev_available = False
     while True:
         try:
-            await check_once()
-            if STATE.available and not prev_available and on_update_found:
-                # Nur beim Wechsel von "nicht verfuegbar" → "verfuegbar" benachrichtigen
-                try:
-                    await on_update_found(STATE)
-                except Exception as e:
-                    log.debug("update notifier failed: %s", e)
-            prev_available = STATE.available
+            if _auto_update_enabled():
+                await check_once()
+                if STATE.available and not prev_available and on_update_found:
+                    # Nur beim Wechsel von "nicht verfuegbar" → "verfuegbar" benachrichtigen
+                    try:
+                        await on_update_found(STATE)
+                    except Exception as e:
+                        log.debug("update notifier failed: %s", e)
+                prev_available = STATE.available
+            else:
+                log.debug("updater: auto_update disabled, skip check")
         except Exception as e:
             log.debug("updater check_loop exception: %s", e)
         await asyncio.sleep(CHECK_INTERVAL_S)
@@ -229,11 +246,48 @@ def _download_blocking(url: str, target: Path) -> None:
             f.write(chunk)
 
 
-async def download_and_install() -> bool:
+def _write_restart_helper(msi_path: Path, exe_path: str) -> Path:
+    """Schreibt eine kleine .bat in %TEMP%, die:
+       1) auf das Beenden von msiexec.exe wartet (Polling, ~1 s Tick)
+       2) die frisch installierte App neu startet (selber Pfad — MSI hat die
+          .exe ueber das alte Binary geschrieben)
+       3) sich selbst loescht, damit %TEMP% nicht zumuellt
+    Wir starten die .bat detached + ohne sichtbares Konsolen-Fenster ueber
+    cmd /c start "" /b. Das uebernimmt sich selbst, wir geben nur den Pfad
+    zurueck damit die Aufrufer ihn abfeuern koennen.
+    """
+    bat = Path(tempfile.gettempdir()) / "MSFSVoiceWalker-restart.bat"
+    # Doppel-% in batch escapen; "%~f0" expandiert auf das Skript selbst
+    bat.write_text(
+        "@echo off\r\n"
+        "rem MSFSVoiceWalker silent-update restart helper\r\n"
+        "rem Wartet bis msiexec fertig ist, startet die neue App, loescht sich selbst.\r\n"
+        ":wait\r\n"
+        'tasklist /fi "imagename eq msiexec.exe" 2>nul | find /i "msiexec.exe" >nul\r\n'
+        "if %errorlevel%==0 (\r\n"
+        "  ping -n 2 127.0.0.1 >nul\r\n"
+        "  goto wait\r\n"
+        ")\r\n"
+        "ping -n 2 127.0.0.1 >nul\r\n"
+        f'start "" "{exe_path}"\r\n'
+        'del "%~f0"\r\n',
+        encoding="ascii",
+    )
+    return bat
+
+
+async def download_and_install(silent: bool = False) -> bool:
     """
     Laedt die neueste .msi nach %TEMP% und startet sie via msiexec.
-    Nach dem Start wird die laufende App beendet — der MSI-MajorUpgrade
-    entfernt die alte Version automatisch.
+
+    silent=True: vollstaendig still (msiexec /qn). Der Restart-Helper ueber-
+    nimmt das Hochfahren der neuen Version.
+    silent=False: legacy (mit /passive Progress-UI) — wir nutzen das nicht
+    mehr aktiv, lassen die Codepath aber drin falls jemand das von aussen
+    triggern moechte.
+
+    Nach dem msiexec-Start wird die laufende App beendet — der MSI-Major-
+    Upgrade entfernt die alte Version automatisch.
     """
     if STATE.installing:
         log.info("updater: Installation laeuft bereits")
@@ -253,12 +307,24 @@ async def download_and_install() -> bool:
         log.error("updater: %s", STATE.error)
         return False
 
+    # Restart-Helper schreiben — laeuft NACH msiexec und startet die neue App
+    helper_path = None
     try:
-        # /passive = minimal UI, /norestart = kein automatischer Reboot.
-        # Windows Installer kuemmert sich um alles andere via MajorUpgrade.
-        log.info("updater: starte msiexec fuer %s", target)
+        exe_path = sys.executable
+        if exe_path:
+            helper_path = _write_restart_helper(target, exe_path)
+            log.info("updater: restart helper -> %s", helper_path)
+    except Exception as e:
+        log.warning("updater: restart helper konnte nicht geschrieben werden: %s", e)
+
+    try:
+        # /qn = quiet no-UI (silent), /passive = minimal UI (Fortschritt sichtbar).
+        # /norestart = kein automatischer Reboot. Windows Installer macht den
+        # MajorUpgrade-Swap automatisch.
+        ui_flag = "/qn" if silent else "/passive"
+        log.info("updater: starte msiexec %s fuer %s", ui_flag, target)
         subprocess.Popen(
-            ["msiexec", "/i", str(target), "/passive", "/norestart"],
+            ["msiexec", "/i", str(target), ui_flag, "/norestart"],
             creationflags=(
                 subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
                 if hasattr(subprocess, "DETACHED_PROCESS") else 0
@@ -269,6 +335,22 @@ async def download_and_install() -> bool:
         STATE.installing = False
         log.error("updater: %s", STATE.error)
         return False
+
+    # Restart-Helper detached starten — er wartet auf msiexec und startet
+    # dann die neue exe. Muss VOR os._exit() laufen, sonst kann er nicht
+    # mehr gespawnt werden (parent-Process tot).
+    if helper_path is not None:
+        try:
+            CREATE_NO_WINDOW = 0x08000000
+            DETACHED_PROCESS = 0x00000008
+            subprocess.Popen(
+                ["cmd", "/c", str(helper_path)],
+                creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
+                close_fds=True,
+            )
+            log.info("updater: restart helper gespawnt")
+        except Exception as e:
+            log.warning("updater: helper-spawn fehlgeschlagen: %s", e)
 
     # App beenden, damit MSI die alte Version ersetzen kann
     log.info("updater: beende App damit MSI die alte Version ersetzen kann")

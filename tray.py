@@ -54,6 +54,11 @@ def _edge_path() -> Optional[str]:
 # Schluessel: profile-Suffix (leer fuer Haupt-UI, "-overlay" fuer Mini).
 _running_procs: dict = {}
 
+# Port unter dem das Backend lauscht. Wird in setup_tray() gesetzt, damit
+# show_ui() (vom Backend gerufen, z.B. wenn das Panel "im Browser einrichten"
+# klickt) das Haupt-UI-Fenster ohne Argument vorholen kann.
+_active_port: Optional[int] = None
+
 
 def _bring_window_to_front(pid: int) -> bool:
     """Findet das Top-Level-Fenster eines Prozesses (per PID) und holt es
@@ -231,16 +236,31 @@ def set_status(icon, state: str) -> None:
 
 def _open_web_ui(port: int) -> Callable:
     def _action(icon, item):
-        url = f"http://127.0.0.1:{port}/"
-        if _open_app_window(url, (1100, 800)):
-            log.info("tray: app-fenster (Edge --app) geoeffnet")
-            return
-        try:
-            webbrowser.open(url)
-            log.info("tray: fallback default-browser fuer ui")
-        except Exception as e:
-            log.warning("tray: konnte ui nicht oeffnen: %s", e)
+        show_ui()
     return _action
+
+
+def show_ui() -> bool:
+    """Haupt-UI-Fenster vorholen — oder neu starten, wenn nicht offen.
+
+    Wird vom Backend aufgerufen, wenn das InGame-Panel "im Browser einrichten"
+    klickt. Re-uses das Process-Caching von _open_app_window (kein zweites
+    Edge-Fenster). Threadsafe: ctypes/user32 Calls sind aus jedem Thread ok.
+    """
+    if _active_port is None:
+        log.debug("tray.show_ui: kein active_port gesetzt")
+        return False
+    url = f"http://127.0.0.1:{_active_port}/"
+    if _open_app_window(url, (1100, 800)):
+        log.info("tray: ui vorgeholt/geoeffnet via show_ui")
+        return True
+    try:
+        webbrowser.open(url)
+        log.info("tray: fallback default-browser via show_ui")
+        return True
+    except Exception as e:
+        log.warning("tray.show_ui: konnte ui nicht oeffnen: %s", e)
+        return False
 
 
 def _open_mini_overlay(port: int) -> Callable:
@@ -286,6 +306,8 @@ def setup_tray(port: int, on_quit: Callable[[], None]) -> Optional[object]:
     'Beenden' klickt. Die Funktion sollte das asyncio-Loop sauber
     runterfahren (z.B. server.close() per call_soon_threadsafe).
     """
+    global _active_port
+    _active_port = port
     try:
         import pystray
     except ImportError as e:

@@ -68,6 +68,8 @@ from ptt_backend import PTTBackend
 import updater
 import license_client
 import tray
+import autostart
+import feedback
 
 
 def _load_env_file(path: pathlib.Path) -> None:
@@ -137,6 +139,54 @@ def save_config(cfg: dict) -> None:
             _l.getLogger("root").warning("config.json save failed: %s", e)
         except Exception:
             pass
+
+
+# --- User-Settings (First-Run-Wizard + Settings-Dialog) ---------------------
+# Defaults beim allerersten Start: Auto-Update an, Autostart aus, Logs aus.
+SETTINGS_DEFAULTS = {
+    "windows_autostart":   False,
+    "auto_update":         True,
+    "send_logs_on_error":  False,
+    "first_run_done":      False,
+}
+
+def settings_view(cfg: dict | None = None) -> dict:
+    """Liest die User-Settings aus config.json mit Defaults aufgefuellt."""
+    if cfg is None:
+        cfg = load_config()
+    out = {}
+    for k, default in SETTINGS_DEFAULTS.items():
+        out[k] = bool(cfg.get(k, default))
+    # is_enabled() prueft den realen Registry-Stand; wenn der von der
+    # config-Sicht abweicht (z.B. User hat den Run-Key manuell geloescht),
+    # gewinnt die Realitaet.
+    out["windows_autostart"] = autostart.is_enabled() if (
+        getattr(sys, "frozen", False)
+    ) else bool(cfg.get("windows_autostart", False))
+    return out
+
+
+def settings_apply(new: dict) -> dict:
+    """Schreibt die uebergebenen Settings in config.json und wendet
+    Side-Effects an (Autostart-Registry). Ignoriert unbekannte Keys.
+    Gibt den neuen, normalisierten View zurueck."""
+    cfg = load_config()
+    # Sticky: einmal first_run_done=true → bleibt true, egal was das UI schickt.
+    # Schuetzt vor Edge-Cases, wo der Wizard ein zweites Mal hochkommt.
+    already_done = bool(cfg.get("first_run_done"))
+    for k in SETTINGS_DEFAULTS.keys():
+        if k in new:
+            cfg[k] = bool(new[k])
+    if already_done:
+        cfg["first_run_done"] = True
+    save_config(cfg)
+    # Autostart-Registry sofort syncen
+    if "windows_autostart" in new:
+        try:
+            autostart.apply(bool(new["windows_autostart"]))
+        except Exception as e:
+            log.warning("autostart.apply failed: %s", e)
+    return settings_view(cfg)
 
 
 WEB_DIR = asset_dir() / "web"
@@ -241,6 +291,11 @@ class AppState:
     # wenn True; bei False wird STATE.wasm_pos geloescht + an alle UIs der
     # "tracking_off"-Hinweis broadcastet.
     tracking_enabled: bool = True
+    # Wenn bei diesem Start eine neuere Version laeuft als beim letzten
+    # Beenden, halten wir die alte Version-String hier — die UI bekommt
+    # sie als "update_completed"-Toast eingeblendet ("Auf v0.1.1 aktualisiert").
+    # Wird beim naechsten App-Start (anderer Prozess) automatisch zu None.
+    upgraded_from: str | None = None
     # Pro-License-State (Monetarisierung). Wird beim Start aus config.json +
     # license_cache.json ermittelt, spaeter via WS-Message "set_license_key"
     # aktualisiert. Broadcast als "license_state" an UI.
@@ -1115,6 +1170,13 @@ ALLOWED_INBOUND = {
     # leitet (bei Bedarf) an Haupt-Browser-Tab weiter als "remote_action".
     # Payload: {"type": "panel_action", "action": "ptt-down"|"ptt-up"|"toggle-far"|"toggle-tracking"}
     "panel_action",
+    # User-Settings (First-Run-Wizard + Settings-Dialog).
+    #   settings_get  → broadcasted "settings_state"
+    #   settings_set  → patch wird in config.json gemerged, broadcast neuer State
+    "settings_get",
+    "settings_set",
+    # Manuelles Log-Send: Discord-Webhook-Upload, Resultat als feedback_result
+    "feedback_send",
 }
 
 
@@ -1179,6 +1241,12 @@ async def ws_handler(ws):
     log.info("UI connected (%d total)", STATE.ui_clients)
     try:
         await ws.send(json.dumps({"type": "ptt_state", **PTT.get_state()}))
+        # App-Version sofort an UI/Panel — UI rendert sie im Header,
+        # Panel im Versions-Pill rechts neben dem Zoom-Label.
+        await ws.send(json.dumps({
+            "type": "version",
+            "version": updater.APP_VERSION,
+        }))
         # Aktueller Tracking-Status (persistiert ueber Neustart hinweg)
         await ws.send(json.dumps({
             "type": "tracking_state",
@@ -1187,6 +1255,26 @@ async def ws_handler(ws):
         # License-State sofort mitsenden, damit UI weiss ob Pro freigeschaltet
         # ist (z.B. fuer Private-Rooms-Button-Sichtbarkeit).
         await ws.send(json.dumps(_license_state_msg()))
+        # User-Settings (Autostart / Auto-Update / Logs senden) — UI rendert
+        # damit den Settings-Dialog ohne extra Roundtrip.
+        try:
+            await ws.send(json.dumps({
+                "type": "settings_state",
+                **settings_view(),
+            }))
+        except Exception as e:
+            log.debug("ws settings_state initial: %s", e)
+        # Post-Update-Toast: einmal pro Session, jeder neue Client
+        # bekommt's bis zum App-Restart erneut (dann ist upgraded_from None).
+        if STATE.upgraded_from:
+            try:
+                await ws.send(json.dumps({
+                    "type":    "update_completed",
+                    "from":    STATE.upgraded_from,
+                    "to":      updater.APP_VERSION,
+                }))
+            except Exception as e:
+                log.debug("ws update_completed initial: %s", e)
         # Cache-Replay: wenn der Haupt-Client schon overlay_state gesendet hat,
         # kriegt der neue Client (z.B. MSFS-Panel-iframe) den sofort — so muss
         # das Panel nicht bis zum naechsten 250ms-Tick warten um Peers zu sehen.
@@ -1221,7 +1309,10 @@ async def ws_handler(ws):
                 elif t == "update_check":
                     asyncio.create_task(_manual_update_check())
                 elif t == "update_install":
-                    asyncio.create_task(updater.download_and_install())
+                    # Silent install + Restart-Helper. Wir machen das auch bei
+                    # User-Klick "Jetzt installieren" silent — der Helper startet
+                    # die neue Version automatisch nach.
+                    asyncio.create_task(updater.download_and_install(silent=True))
                 elif t == "overlay_state":
                     # Vom Haupt-Browser-Client → an alle WS-Clients (Haupt-UI
                     # selbst ignoriert's, MSFS-Panel-iframe rendert damit das
@@ -1297,6 +1388,16 @@ async def ws_handler(ws):
                             if field in m:
                                 payload[field] = m[field]
                         asyncio.create_task(broadcast(payload))
+                        # "im Browser einrichten" macht im UI nur scrollIntoView —
+                        # das hilft nicht wenn das Fenster minimiert / hinten liegt
+                        # / gar nicht offen ist. Also UI hier aktiv vorholen bzw.
+                        # neu starten. Tray cached den Edge-Process; Doppel-Open
+                        # ist abgesichert.
+                        if action == "open-browser-license":
+                            try:
+                                tray.show_ui()
+                            except Exception as e:
+                                log.debug("tray.show_ui failed: %s", e)
                     else:
                         log.debug("panel_action: unknown action=%r", action)
                 elif t == "set_license_key":
@@ -1317,6 +1418,60 @@ async def ws_handler(ws):
                         except Exception as e:
                             record_error("set_license_key", e)
                     asyncio.create_task(_do_license(new_key))
+                elif t == "settings_get":
+                    try:
+                        view = settings_view()
+                        await ws.send(json.dumps({
+                            "type": "settings_state",
+                            **view,
+                        }))
+                    except Exception as e:
+                        record_error("settings_get", e)
+                elif t == "settings_set":
+                    try:
+                        patch = m.get("patch") if isinstance(m.get("patch"), dict) else m
+                        view = settings_view()
+                        new_view = settings_apply(patch)
+                        log.info("settings: patch=%s -> %s",
+                                 {k: patch.get(k) for k in SETTINGS_DEFAULTS if k in patch},
+                                 new_view)
+                        await broadcast({"type": "settings_state", **new_view})
+                    except Exception as e:
+                        record_error("settings_set", e)
+                        try:
+                            await ws.send(json.dumps({
+                                "type": "settings_error",
+                                "msg": str(e),
+                            }))
+                        except Exception:
+                            pass
+                elif t == "feedback_send":
+                    note = str(m.get("note", ""))[:500]
+                    async def _do_feedback(n: str):
+                        try:
+                            ok, msg = await asyncio.to_thread(
+                                feedback.send,
+                                n,
+                                app_version=updater.APP_VERSION,
+                                license_mode=STATE.license_mode or "none",
+                                reason="manual",
+                            )
+                            await ws.send(json.dumps({
+                                "type": "feedback_result",
+                                "ok":   bool(ok),
+                                "msg":  msg,
+                            }))
+                        except Exception as e:
+                            record_error("feedback_send", e)
+                            try:
+                                await ws.send(json.dumps({
+                                    "type": "feedback_result",
+                                    "ok":   False,
+                                    "msg":  f"Senden fehlgeschlagen: {e}",
+                                }))
+                            except Exception:
+                                pass
+                    asyncio.create_task(_do_feedback(note))
             except Exception as e:
                 record_error(f"ws_handler.{t}", e)
     except websockets.ConnectionClosed:
@@ -1336,8 +1491,19 @@ async def _manual_update_check():
 
 
 async def _on_update_found(_state):
-    """Callback aus updater.check_loop, wenn ein neues Update erkannt wird."""
-    await broadcast({"type": "update_available", **updater.STATE.to_dict()})
+    """Callback aus updater.check_loop, wenn ein neues Update erkannt wird.
+
+    Wenn der User 'auto_update' aktiviert hat: silent runterladen + installieren,
+    App startet nach dem MSI-Restart neu hoch (Toast 'Auf vX.Y aktualisiert').
+    Sonst: UI-Banner mit manuellem Install-Button.
+    """
+    cfg_view = settings_view()
+    if cfg_view.get("auto_update"):
+        log.info("auto_update an — starte silent install")
+        await broadcast({"type": "update_state", **updater.STATE.to_dict()})
+        asyncio.create_task(updater.download_and_install(silent=True))
+    else:
+        await broadcast({"type": "update_available", **updater.STATE.to_dict()})
 
 
 async def broadcast_sim(reader: SimReader):
@@ -1545,6 +1711,30 @@ async def main():
     _cfg = load_config()
     STATE.tracking_enabled = bool(_cfg.get("tracking_enabled", True))
     log.info("config loaded: tracking_enabled=%s", STATE.tracking_enabled)
+
+    # Post-Update-Erkennung: lief beim letzten Start eine andere (kleinere)
+    # Version, dann zeigen wir der UI einen "auf vX.Y aktualisiert"-Toast.
+    # Update last_known_version sofort, damit der Toast nur einmal kommt.
+    _last_known = str(_cfg.get("last_known_version", "")).strip()
+    if _last_known and updater.is_newer(updater.APP_VERSION, _last_known):
+        STATE.upgraded_from = _last_known
+        log.info("post-update: upgraded from %s -> %s",
+                 _last_known, updater.APP_VERSION)
+    if _cfg.get("last_known_version") != updater.APP_VERSION:
+        _cfg["last_known_version"] = updater.APP_VERSION
+        save_config(_cfg)
+
+    # Autostart-Toggle mit der Realitaet syncen — wenn der User in der
+    # config.json autostart=True hat, aber der Run-Key fehlt (z.B. weil ein
+    # neuer EXE-Pfad nach Update), trag ihn nach. Umgekehrt: config sagt
+    # False, Registry hat noch alten Eintrag → entfernen.
+    try:
+        _want_autostart = bool(_cfg.get("windows_autostart", False))
+        if _want_autostart != autostart.is_enabled():
+            autostart.apply(_want_autostart)
+            log.info("autostart: synced to config (%s)", _want_autostart)
+    except Exception as e:
+        log.debug("autostart sync at startup failed: %s", e)
 
     # License-State bestimmen: Key kommt primaer aus config.json, faellt aber
     # auf license_cache.json zurueck (robust gegen verlorene config). Dann

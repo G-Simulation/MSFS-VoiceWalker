@@ -17,7 +17,10 @@
     <CommandLineArguments>
     </CommandLineArguments>
     <EnableNativeCodeDebugging>False</EnableNativeCodeDebugging>
-    <IsWindowsApplication>False</IsWindowsApplication>
+    <!-- True = pythonw.exe (kein Konsolenfenster). Logs gehen ueber
+         %LOCALAPPDATA%\MSFSVoiceWalker\voicewalker.log und das Browser-
+         Debug-Panel (Strg+Shift+D). -->
+    <IsWindowsApplication>True</IsWindowsApplication>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>true</DebugSymbols>
