@@ -2150,9 +2150,7 @@ function renderRadar() {
     // Audio-Bubble-Label — unten-links der Bubble (225°-Position), mit kleinem
     // Pill-Background fuer Lesbarkeit. Abseits der Ring-Labels (unten-rechts)
     // und der Kompass-Marker → kein Overlap.
-    const audioLbl = myRangeM < 1000
-      ? `🔊 ${myRangeM.toFixed(0)} m`
-      : `🔊 ${(myRangeM/1000).toFixed(1)} km`;
+    const audioLbl = `🔊 ${fmtDist(myRangeM)}`;
     const ax = cx - rRangePx * 0.707;
     const ay = cy + rRangePx * 0.707 + 2;
     ctx.font = '600 10px ui-monospace, "SF Mono", Menlo, monospace';
@@ -2540,6 +2538,14 @@ function renderMeshChip() {
 }
 
 function fmtDist(m) {
+  // Cockpit-Modus → Aviation-Konvention NM. Walker → m/km.
+  const asNm = state && state.mySim && !state.mySim.on_foot;
+  if (asNm) {
+    const nm = m / 1852;
+    if (nm < 1)  return `${nm.toFixed(2)} NM`;
+    if (nm < 10) return `${nm.toFixed(1)} NM`;
+    return `${Math.round(nm)} NM`;
+  }
   if (m < 1000) return `${m.toFixed(0)} m`;
   return `${(m / 1000).toFixed(2)} km`;
 }

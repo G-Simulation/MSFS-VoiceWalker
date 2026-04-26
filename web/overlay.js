@@ -90,7 +90,17 @@
   }
   function esc(s) { return String(s).replace(/[&<>"']/g,
       c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-  function fmt(m) { return m < 1000 ? `${m.toFixed(0)} m` : `${(m/1000).toFixed(2)} km`; }
+  function fmt(m) {
+    // Cockpit-Modus → NM, Walker → m/km
+    const asNm = state && state.mySim && !state.mySim.on_foot;
+    if (asNm) {
+      const nm = m / 1852;
+      if (nm < 1)  return `${nm.toFixed(2)} NM`;
+      if (nm < 10) return `${nm.toFixed(1)} NM`;
+      return `${Math.round(nm)} NM`;
+    }
+    return m < 1000 ? `${m.toFixed(0)} m` : `${(m/1000).toFixed(2)} km`;
+  }
   function fmtShort(m) {
     if (m < 1000) return `${Math.round(m)} m`;
     const km = m / 1000;

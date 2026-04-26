@@ -177,25 +177,48 @@ function initDebugPanel() {
       <div class="pane" id="pane-controls">
 
         <section>
-          <h4>Audio-Distanz live tunen</h4>
+          <h4>Hörgrenzen — Walker (zu Fuß)</h4>
           <div class="row">
             <label>volle Lautstärke bis</label>
-            <input type="range" id="c-full" min="1" max="200" step="1" value="3">
-            <span class="readout" id="c-full-r">3 m</span>
+            <input type="range" id="c-w-full" min="0.5" max="50" step="0.5" value="1">
+            <span class="readout" id="c-w-full-r">1 m</span>
           </div>
           <div class="row">
             <label>Hörgrenze</label>
-            <input type="range" id="c-max" min="10" max="10000" step="5" value="75">
-            <span class="readout" id="c-max-r">75 m</span>
+            <input type="range" id="c-w-max" min="2" max="500" step="1" value="10">
+            <span class="readout" id="c-w-max-r">10 m</span>
           </div>
           <div class="row">
             <label>Rolloff-Faktor</label>
-            <input type="range" id="c-roll" min="0.1" max="3" step="0.1" value="1">
-            <span class="readout" id="c-roll-r">1.0</span>
+            <input type="range" id="c-w-roll" min="0.1" max="3" step="0.1" value="1">
+            <span class="readout" id="c-w-roll-r">1.0</span>
           </div>
           <div class="hint">
-            Event / zu Fuß: ~75 m. Grosser Platz / Rollfeld: ~200 m.
-            In-Air Funk-Feeling: 1000–2000 m. 1.0 = physikalisch korrekt.
+            Walker hört wie in echt — kurze Reichweite, scharfer Falloff.
+            Default 10 m. Für Rollfeld-Events bis ~50 m sinnvoll.
+          </div>
+        </section>
+
+        <section>
+          <h4>Hörgrenzen — Cockpit (im Flugzeug)</h4>
+          <div class="row">
+            <label>volle Lautstärke bis</label>
+            <input type="range" id="c-c-full" min="10" max="500" step="5" value="50">
+            <span class="readout" id="c-c-full-r">50 m</span>
+          </div>
+          <div class="row">
+            <label>Hörgrenze</label>
+            <input type="range" id="c-c-max" min="100" max="20000" step="100" value="5000">
+            <span class="readout" id="c-c-max-r">5000 m</span>
+          </div>
+          <div class="row">
+            <label>Rolloff-Faktor</label>
+            <input type="range" id="c-c-roll" min="0.1" max="3" step="0.1" value="0.8">
+            <span class="readout" id="c-c-roll-r">0.8</span>
+          </div>
+          <div class="hint">
+            Cockpit hört rundum (Funk-Feeling) — Reichweite typisch 1–10 km.
+            Default 5 km, Slider geht bis 20 km für Long-Range-Funk.
           </div>
         </section>
 
@@ -294,29 +317,33 @@ function initDebugPanel() {
 
 
   // ==== Audio-Tuning ======================================================
-  function bindSlider(inputSel, readoutSel, configKey, unit = '') {
+  // Slider direkt auf audioConfig.walker.* / audioConfig.cockpit.* binden.
+  // (Vorher: backward-compat-Pfad ueber audioConfig.maxRangeM, der je nach
+  // state.mySim.on_foot auf walker oder cockpit gemapped hat — daher
+  // konnte man nur den AKTUELLEN Modus tunen.) Reconcile + renderRadar
+  // werden nach jedem Tick getriggert, damit Bubble + Streams live folgen.
+  function bindProfileSlider(inputSel, readoutSel, profile, key, unit = '') {
     const inp = $(inputSel);
     const out = $(readoutSel);
     const cfg = window.__voicewalker?.audioConfig;
-    if (!cfg) return;
-    inp.value = cfg[configKey];
+    if (!cfg || !cfg[profile]) return;
+    inp.value = cfg[profile][key];
     const fmt = () => {
       const v = parseFloat(inp.value);
       out.textContent = unit === 'm' ? `${Math.round(v)} m` : v.toFixed(1);
-      cfg[configKey] = v;
-      // Backward-compat-Setter schreibt audioConfig.walker/cockpit.* je nach
-      // state.mySim.on_foot. Ohne Reconcile greift die neue Range erst beim
-      // naechsten 1-Hz-Tick — mit Reconcile sofort. renderRadar zusaetzlich,
-      // damit die Audio-Bubble live mitwaechst beim Slidern.
+      cfg[profile][key] = v;
       try { window.__voicewalker?.reconcileAudioStreams?.(); } catch {}
       try { window.__voicewalker?.renderRadar?.(); } catch {}
     };
     fmt();
     inp.addEventListener('input', fmt);
   }
-  bindSlider('#c-full', '#c-full-r', 'fullVolumeM', 'm');
-  bindSlider('#c-max',  '#c-max-r',  'maxRangeM',  'm');
-  bindSlider('#c-roll', '#c-roll-r', 'rolloff');
+  bindProfileSlider('#c-w-full', '#c-w-full-r', 'walker',  'fullVolumeM', 'm');
+  bindProfileSlider('#c-w-max',  '#c-w-max-r',  'walker',  'maxRangeM',   'm');
+  bindProfileSlider('#c-w-roll', '#c-w-roll-r', 'walker',  'rolloff');
+  bindProfileSlider('#c-c-full', '#c-c-full-r', 'cockpit', 'fullVolumeM', 'm');
+  bindProfileSlider('#c-c-max',  '#c-c-max-r',  'cockpit', 'maxRangeM',   'm');
+  bindProfileSlider('#c-c-roll', '#c-c-roll-r', 'cockpit', 'rolloff');
 
 
   // ==== HRTF-Testtoene ====================================================

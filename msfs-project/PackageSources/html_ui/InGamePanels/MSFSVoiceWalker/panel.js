@@ -57,6 +57,14 @@
   }
 
   function fmtRange(m) {
+    // Cockpit-Modus → Aviation-Konvention NM. Walker → m/km.
+    const asNm = state && state.mySim && !state.mySim.on_foot;
+    if (asNm) {
+      const nm = m / 1852;
+      if (nm < 1)  return nm.toFixed(2) + ' NM';
+      if (nm < 10) return nm.toFixed(1) + ' NM';
+      return Math.round(nm) + ' NM';
+    }
     if (m < 1000) return Math.round(m) + ' m';
     const km = m / 1000;
     if (Math.abs(km - Math.round(km)) < 0.01) return Math.round(km) + ' km';
