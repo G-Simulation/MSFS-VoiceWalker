@@ -49,6 +49,48 @@ def _edge_path() -> Optional[str]:
     return None
 
 
+# Tracking der bereits gestarteten Edge-App-Fenster, damit Doppelklick
+# aufs Tray nicht jedes Mal ein neues Fenster aufmacht.
+# Schluessel: profile-Suffix (leer fuer Haupt-UI, "-overlay" fuer Mini).
+_running_procs: dict = {}
+
+
+def _bring_window_to_front(pid: int) -> bool:
+    """Findet das Top-Level-Fenster eines Prozesses (per PID) und holt es
+    nach vorne. Funktioniert mit Edge --app weil dessen Window dem
+    msedge.exe-Process gehoert. Stilles Failure auf non-Windows / wenn
+    kein passendes Fenster da ist."""
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+        user32 = ctypes.windll.user32
+        target = ctypes.c_void_p(0)
+
+        EnumProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wt.HWND, wt.LPARAM)
+
+        def _cb(hwnd, _lparam):
+            wpid = wt.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(wpid))
+            if wpid.value == pid and user32.IsWindowVisible(hwnd):
+                # nur das erste Top-Level-Fenster nehmen (Edge hat manchmal
+                # versteckte Helper-Fenster fuer GPU/Service)
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    target.value = hwnd
+                    return False
+            return True
+
+        user32.EnumWindows(EnumProc(_cb), 0)
+        if target.value:
+            SW_RESTORE = 9
+            user32.ShowWindow(target.value, SW_RESTORE)
+            user32.SetForegroundWindow(target.value)
+            return True
+    except Exception as e:
+        log.debug("bring-to-front failed: %s", e)
+    return False
+
+
 def _edge_user_data_dir(suffix: str = "") -> str:
     """Eigenes Edge-Profil-Verzeichnis, damit das App-Fenster nicht im
     Surf-Profil des Users reinhaengt (Cookies/History gemischt) und das
@@ -66,6 +108,10 @@ def _open_app_window(url: str, size: Tuple[int, int],
                      profile_suffix: str = "") -> bool:
     """Edge --app=URL Modus. Gibt True zurueck wenn Edge gefunden + gestartet.
 
+    Doppelklick-Schutz: pro profile_suffix wird der Subprocess gemerkt.
+    Beim naechsten Aufruf, falls der Process noch lebt, wird sein Fenster
+    nach vorne geholt statt ein zweites Fenster zu oeffnen.
+
     creationflags=CREATE_NO_WINDOW verhindert dass Windows kurzzeitig ein
     Konsolen-Fenster fuer den Subprocess oeffnet, wenn die Parent-App
     selbst windowed (console=False) ist.
@@ -73,9 +119,20 @@ def _open_app_window(url: str, size: Tuple[int, int],
     edge = _edge_path()
     if not edge:
         return False
+
+    # Existierender Process? Dann nicht doppelt starten — Window nach vorne.
+    proc = _running_procs.get(profile_suffix)
+    if proc is not None and proc.poll() is None:
+        # Edge --app spawnt einen child-Prozess; das Top-Level-Fenster
+        # gehoert oft dem child, nicht dem Launcher. Wir versuchen erst
+        # unsere bekannte PID, dann breit alle msedge.exe.
+        if not _bring_window_to_front(proc.pid):
+            _bring_msedge_to_front()
+        return True
+
     try:
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        subprocess.Popen(
+        new_proc = subprocess.Popen(
             [
                 edge,
                 f"--app={url}",
@@ -85,10 +142,43 @@ def _open_app_window(url: str, size: Tuple[int, int],
             creationflags=flags,
             close_fds=True,
         )
+        _running_procs[profile_suffix] = new_proc
         return True
     except Exception as e:
         log.warning("tray: Edge konnte nicht gestartet werden: %s", e)
         return False
+
+
+def _bring_msedge_to_front() -> None:
+    """Fallback: alle Edge-Fenster mit dem App-Profile-Pfad in den
+    Vordergrund. Wird genutzt wenn die direkte PID-Suche nichts findet
+    (Edge child-Process)."""
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+        user32 = ctypes.windll.user32
+        EnumProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wt.HWND, wt.LPARAM)
+
+        def _cb(hwnd, _lparam):
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length <= 0:
+                return True
+            buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
+            # Edge --app benennt das Fenster nach der ersten <title>-Zeile
+            # der geladenen URL — bei uns "MSFSVoiceWalker" oder aehnlich.
+            if "MSFSVoiceWalker" in buf.value:
+                SW_RESTORE = 9
+                user32.ShowWindow(hwnd, SW_RESTORE)
+                user32.SetForegroundWindow(hwnd)
+                return False  # ersten Treffer reicht
+            return True
+
+        user32.EnumWindows(EnumProc(_cb), 0)
+    except Exception as e:
+        log.debug("msedge front-bring failed: %s", e)
 
 
 def _make_icon_image(state: str = "offline", size: int = 64):
