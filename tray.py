@@ -81,22 +81,52 @@ def _open_app_window(url: str, size: Tuple[int, int],
         return False
 
 
-def _make_icon_image(size: int = 64):
+def _make_icon_image(state: str = "offline", size: int = 64):
     """Programmatisch ein einfaches Icon erzeugen — kein File-Asset noetig.
-    Dunkelblauer Hintergrund + heller Kreis als 'Audio-Sphaere'-Symbolik."""
+    Status-Farbe spiegelt Verbindungs-/Sim-Status:
+      offline   = grau          (keine UI verbunden)
+      connected = orange        (UI verbunden, aber Sim noch nicht aktiv)
+      online    = leuchtgruen   (UI + gueltige Sim-Daten)
+    """
     from PIL import Image, ImageDraw
+
+    color_map = {
+        "offline":   (130, 140, 155, 255),     # neutral grau
+        "connected": (255, 180,  60, 255),     # warm orange
+        "online":    ( 63, 220, 138, 255),     # voll-grün, MSFSVoiceWalker-Akzent
+    }
+    fill = color_map.get(state, color_map["offline"])
 
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     dc = ImageDraw.Draw(img)
 
-    # Hintergrund-Kreis (dunkelblau, MSFSVoiceWalker-Branding)
+    # Hintergrund-Kreis (dunkelblau, Branding)
     dc.ellipse((2, 2, size - 2, size - 2), fill=(11, 18, 32, 255))
     # Innerer hellblauer Ring (Audio-Range-Anspielung)
     dc.ellipse((10, 10, size - 10, size - 10), outline=(106, 165, 255, 255), width=3)
-    # Mittelpunkt (gelb-grün, Pilot-Position)
-    dc.ellipse((size // 2 - 5, size // 2 - 5, size // 2 + 5, size // 2 + 5),
-               fill=(63, 220, 138, 255))
+    # Status-Disk in der Mitte — groesser bei online fuer „glow"-Eindruck
+    r = 10 if state == "online" else 7
+    cx = size // 2
+    dc.ellipse((cx - r, cx - r, cx + r, cx + r), fill=fill)
+
     return img
+
+
+def set_status(icon, state: str) -> None:
+    """Tray-Icon-Bild + Tooltip an aktuellen Status anpassen.
+    Threadsafe in pystray (icon.icon = ... ist intern ge-lock-t)."""
+    if icon is None:
+        return
+    title_map = {
+        "offline":   "MSFSVoiceWalker (offline)",
+        "connected": "MSFSVoiceWalker (Browser verbunden)",
+        "online":    "MSFSVoiceWalker (online)",
+    }
+    try:
+        icon.icon = _make_icon_image(state)
+        icon.title = title_map.get(state, ICON_TITLE)
+    except Exception as e:
+        log.debug("tray.set_status: %s", e)
 
 
 def _open_web_ui(port: int) -> Callable:
@@ -188,7 +218,7 @@ def setup_tray(port: int, on_quit: Callable[[], None]) -> Optional[object]:
     try:
         icon = pystray.Icon(
             ICON_NAME,
-            icon=_make_icon_image(64),
+            icon=_make_icon_image("offline"),
             title=ICON_TITLE,
             menu=menu,
         )

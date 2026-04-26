@@ -929,6 +929,28 @@ async def http_handler(connection, request):
     # Workarounds vor dem WASM+ClientData-Setup. Heute laeuft alles ueber
     # SimConnect ClientData (AvatarReader-Thread).
 
+    # /_/highlight — IPC-Endpoint, den eine zweite gestartete Instanz pingt,
+    # damit wir hier (die laufende Instanz) das Tray-Icon hervorheben und
+    # den Browser oeffnen, statt eine zweite App zu starten.
+    if path == "/_/highlight":
+        try:
+            try:
+                webbrowser.open(f"http://127.0.0.1:{PORT}/")
+            except Exception:
+                pass
+            icon = globals().get("_TRAY_ICON_REF")
+            if icon is not None:
+                try:
+                    icon.notify(
+                        "MSFSVoiceWalker laeuft bereits — UI im Browser geoeffnet.",
+                        "MSFSVoiceWalker",
+                    )
+                except Exception as e:
+                    log.debug("tray notify failed: %s", e)
+            return _make_response(HTTPStatus.OK, [("Content-Type", "text/plain")], b"ok")
+        except Exception as e:
+            return _make_response(HTTPStatus.INTERNAL_SERVER_ERROR, [], str(e).encode("utf-8"))
+
     if path.startswith("/debug/status"):
         try:
             body = json.dumps(debug_status_payload(), default=str).encode("utf-8")
@@ -1289,6 +1311,48 @@ async def broadcast_sim(reader: SimReader):
         return
 
 
+def _has_valid_position(snap) -> bool:
+    """Sim-Daten gelten nur dann als 'aktiv', wenn echte Welt-Position
+    da ist und der Pilot nicht im Menue/Demo haengt."""
+    if not isinstance(snap, dict):
+        return False
+    if snap.get("in_menu") or snap.get("demo"):
+        return False
+    lat, lon = snap.get("lat"), snap.get("lon")
+    if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+        return False
+    return abs(lat) > 0.001 or abs(lon) > 0.001
+
+
+async def tray_status_loop(tray_icon, reader: SimReader):
+    """Tray-Icon-Farbe an Verbindungs-/Sim-Status anpassen.
+      offline   — keine UI verbunden (kein Browser, kein Panel)
+      connected — UI verbunden, aber Sim hat noch keine echte Position
+      online    — UI + gueltige Sim-Position (gruen leuchtend)
+    Throttle: nur bei State-Change wird das Icon getauscht (vermeidet
+    Flicker und unnoetige PIL-Renderings)."""
+    if tray_icon is None:
+        return
+    last_state = None
+    try:
+        while True:
+            try:
+                if not SUBSCRIBERS:
+                    state = "offline"
+                elif _has_valid_position(reader.snapshot()):
+                    state = "online"
+                else:
+                    state = "connected"
+                if state != last_state:
+                    tray.set_status(tray_icon, state)
+                    last_state = state
+            except Exception as e:
+                record_error("tray_status_loop", e)
+            await asyncio.sleep(1.0)
+    except asyncio.CancelledError:
+        return
+
+
 async def watch_web_dir(web_dir: pathlib.Path):
     """
     Live-Reload-Watcher: nur im Debug-Modus aktiv. Pollt web/ alle 500ms auf
@@ -1444,14 +1508,27 @@ async def main():
 
     if _own_app_on(PORT_DEFAULT):
         log.warning(
-            "MSFSVoiceWalker laeuft bereits auf Port %d — oeffne Browser dort "
-            "und beende diese Instanz.",
+            "MSFSVoiceWalker laeuft bereits auf Port %d — pinge die laufende "
+            "Instanz und beende diese hier.",
             PORT_DEFAULT,
         )
+        # Statt selbst Browser zu oeffnen + zu starten: die laufende Instanz
+        # bekommt einen Ping auf /_/highlight, hebt selbst das Tray-Icon
+        # hervor und oeffnet den Browser. Falls das fehlschlaegt (alte
+        # Version ohne Endpoint), Fallback auf Browser-Oeffnen.
+        import urllib.request as _ur
         try:
-            webbrowser.open(f"http://127.0.0.1:{PORT_DEFAULT}")
+            with _ur.urlopen(
+                f"http://127.0.0.1:{PORT_DEFAULT}/_/highlight",
+                timeout=2.0,
+            ) as resp:
+                resp.read()
         except Exception as e:
-            log.warning("could not open browser: %s", e)
+            log.warning("highlight-ping failed (%s); fallback browser.open", e)
+            try:
+                webbrowser.open(f"http://127.0.0.1:{PORT_DEFAULT}")
+            except Exception:
+                pass
         sys.exit(0)
 
     # Port finden: starte bei PORT_DEFAULT, versuche die naechsten PORT_SEARCH_RANGE
@@ -1493,29 +1570,26 @@ async def main():
 
     log.info("listening on http://127.0.0.1:%d (debug at /debug/status)", PORT)
 
-    async def open_browser():
-        await asyncio.sleep(0.8)
-        try:
-            webbrowser.open(f"http://127.0.0.1:{PORT}")
-            log.info("browser geoeffnet auf http://127.0.0.1:%d", PORT)
-        except Exception as e:
-            log.warning("could not open browser: %s", e)
-
     # Tray-Icon: laeuft in eigenem Thread. Beenden-Button schliesst den
     # websockets-Server, dann faellt asyncio.gather() durch und wir landen
     # im finally. icon.stop() macht dort den pystray-Thread sauber zu.
+    # Browser oeffnet sich NICHT automatisch — der User triggert das ueber
+    # Doppelklick aufs Tray-Icon oder Rechtsklick → "MSFSVoiceWalker oeffnen".
     _loop = asyncio.get_event_loop()
     def _quit_from_tray():
         log.info("tray-quit signal: server.close + finalize")
         _loop.call_soon_threadsafe(server.close)
     tray_icon = tray.setup_tray(PORT, _quit_from_tray)
+    # Globale Reference, damit der HTTP-Endpoint /_/highlight pystray.notify
+    # beim Doppelstart-Ping aufrufen kann (siehe http_handler oben).
+    globals()["_TRAY_ICON_REF"] = tray_icon
 
     try:
         await asyncio.gather(
             broadcast_sim(reader),
-            open_browser(),
             watch_web_dir(WEB_DIR),
             updater.check_loop(on_update_found=_on_update_found),
+            tray_status_loop(tray_icon, reader),
             server.wait_closed(),
         )
     finally:
