@@ -417,7 +417,7 @@
             <dd id="agl" class="tabular-nums text-xs">—</dd>
           </div>
           <div class="flex justify-between">
-            <dt class="text-[color:var(--color-muted)] text-xs">Ansicht</dt>
+            <dt class="text-[color:var(--color-muted)] text-xs" data-i18n="self.view">Ansicht</dt>
             <dd id="mode" class="text-xs">—</dd>
           </div>
           <div id="cellRow" class="flex justify-between">
@@ -428,7 +428,7 @@
                Zeigt die Distanz + Richtung, nicht die Koordinaten (die stehen
                oben bereits als Pilot-Position). -->
           <div id="acRow" class="flex justify-between" style="display:none">
-            <dt class="text-[color:var(--color-muted)] text-xs">Flugzeug</dt>
+            <dt class="text-[color:var(--color-muted)] text-xs" data-i18n="self.aircraft">Flugzeug</dt>
             <dd id="acPos" class="tabular-nums text-xs">—</dd>
           </div>
         </dl>
@@ -437,7 +437,7 @@
           <svg viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4">
             <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zm5 9a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/>
           </svg>
-          <span id="pttLabel">Leertaste halten zum Sprechen</span>
+          <span id="pttLabel" data-i18n="ptt.hold_space">Leertaste halten zum Sprechen</span>
           <!-- Live-Level-Bar: width wird aus mic-RMS via updateMicLevel() in app.js
                animiert. Immer im Button vorhanden, nur leer wenn mic stumm. -->
           <div id="micLevel"></div>
@@ -446,7 +446,7 @@
         <!-- Callsign-Zeile: allein, damit auch lange Namen Platz haben.
              Pro-Badge rechts in derselben Zeile (erscheint nur bei is_pro). -->
         <div class="mt-4 flex items-center gap-3">
-          <label for="callsign" class="text-xs text-[color:var(--color-muted)] shrink-0">Callsign</label>
+          <label for="callsign" class="text-xs text-[color:var(--color-muted)] shrink-0" data-i18n="callsign.label">Callsign</label>
           <input id="callsign" maxlength="16" value="PILOT"
                  class="flex-1 min-w-0 bg-[color:var(--color-bg-soft)] border border-[color:var(--color-border)] rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[color:var(--color-ring)] transition">
           <span id="proBadge" style="display:none"
@@ -464,17 +464,17 @@
              am Yoke — hinter einem Details-Block versteckt. Normale Piloten
              sollen den Standardflow "Leertaste halten" unmittelbar sehen. -->
         <div class="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 items-center text-xs">
-          <label for="audioInput" class="text-[color:var(--color-muted)]">Mikrofon</label>
+          <label for="audioInput" class="text-[color:var(--color-muted)]" data-i18n="audio.mic">Mikrofon</label>
           <select id="audioInput"
                   class="min-w-0 bg-[color:var(--color-bg-soft)] border border-[color:var(--color-border)] rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--color-ring)] transition">
-            <option value="">Standard</option>
+            <option value="" data-i18n="audio.default">Standard</option>
           </select>
-          <label for="audioOutput" class="text-[color:var(--color-muted)]">Lautsprecher</label>
+          <label for="audioOutput" class="text-[color:var(--color-muted)]" data-i18n="audio.speaker">Lautsprecher</label>
           <select id="audioOutput"
                   class="min-w-0 bg-[color:var(--color-bg-soft)] border border-[color:var(--color-border)] rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--color-ring)] transition">
-            <option value="">Standard</option>
+            <option value="" data-i18n="audio.default">Standard</option>
           </select>
-          <label for="masterVolume" class="text-[color:var(--color-muted)]">Lautstärke</label>
+          <label for="masterVolume" class="text-[color:var(--color-muted)]" data-i18n="audio.volume">Lautstärke</label>
           <div class="flex items-center gap-3">
             <input id="masterVolume" type="range" min="0" max="150" step="1" value="100"
                    class="flex-1 min-w-0 accent-[color:var(--color-accent)]">
@@ -486,7 +486,7 @@
              (Push-to-Talk via Leertaste) genau richtig ist. Hier fuer Power-User
              die mit VR / HOTAS / Yoke beide Haende gebunden haben. -->
         <details id="micOptionsDetails" class="mt-3 text-xs">
-          <summary class="cursor-pointer text-[color:var(--color-muted)] select-none py-1">
+          <summary class="cursor-pointer text-[color:var(--color-muted)] select-none py-1" data-i18n="mic.options">
             Mikrofon-Optionen
           </summary>
           <div class="mt-3 space-y-2">
@@ -494,11 +494,11 @@
                           px-3 py-2 rounded-lg border border-[color:var(--color-border)]
                           hover:bg-white/5 transition">
               <div class="flex-1 min-w-0">
-                <div class="text-[color:var(--color-fg)] font-semibold">Offenes Mikrofon</div>
+                <div class="text-[color:var(--color-fg)] font-semibold" data-i18n="mic.vox.title">Offenes Mikrofon</div>
                 <div class="text-[10px] text-[color:var(--color-muted)] leading-snug mt-0.5">
-                  Sendet automatisch, sobald du sprichst — ohne Taste drücken.
+                  <span data-i18n="mic.vox.desc.1">Sendet automatisch, sobald du sprichst — ohne Taste drücken.
                   Praktisch mit VR oder wenn beide Hände am Yoke / HOTAS sind.
-                  Standard bleibt <em>Leertaste halten</em>.
+                  Standard bleibt</span> <em data-i18n="mic.vox.desc.2">Leertaste halten</em>.
                 </div>
               </div>
               <input id="voxToggle" type="checkbox"
@@ -518,27 +518,29 @@
 
         <!-- Pro freischalten -->
         <details id="licenseDetails" class="mt-4 text-xs">
-          <summary class="cursor-pointer text-[color:var(--color-muted)] select-none py-1">
+          <summary class="cursor-pointer text-[color:var(--color-muted)] select-none py-1" data-i18n="license.summary">
             Pro freischalten
           </summary>
           <div class="mt-3 space-y-2">
-            <p id="licenseStatus" class="text-xs text-[color:var(--color-muted)]">
+            <p id="licenseStatus" class="text-xs text-[color:var(--color-muted)]" data-i18n="license.status.free">
               Free-Version — Pro-Key eingeben zum Freischalten
             </p>
             <div class="flex gap-2 items-center">
               <input id="licenseKeyInput" type="text" maxlength="80"
                      placeholder="z. B. DEV-PRO-TESTER oder LMFWC-Key"
+                     data-i18n-attr="placeholder:license.placeholder"
                      class="flex-1 min-w-0 bg-[color:var(--color-bg-soft)] border border-[color:var(--color-border)] rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[color:var(--color-ring)] transition">
               <button id="licenseValidateBtn" type="button"
-                      class="px-3 py-1.5 rounded-lg bg-[color:var(--color-accent)] text-[#0b1220] font-semibold hover:bg-blue-300 transition">
+                      class="px-3 py-1.5 rounded-lg bg-[color:var(--color-accent)] text-[#0b1220] font-semibold hover:bg-blue-300 transition"
+                      data-i18n="license.activate">
                 Aktivieren
               </button>
             </div>
             <p class="text-[10px] text-[color:var(--color-muted)] leading-relaxed">
-              Noch kein Key? Pro (7,99 € einmalig) gibt es auf
+              <span data-i18n="license.help.1">Noch kein Key? Pro (7,99 € einmalig) gibt es auf</span>
               <a href="https://www.gsimulations.de/produkt/voicewalker/" target="_blank" rel="noopener"
                  class="underline decoration-dotted">gsimulations.de</a>.
-              Unlimitierte Peers, Private Rooms, Supporter-Badge.
+              <span data-i18n="license.help.2">Unlimitierte Peers, Private Rooms, Supporter-Badge.</span>
             </p>
           </div>
         </details>
@@ -552,11 +554,11 @@
              "Ducking" / "Overlay" / "Browser-Source" nichts anfangen koennen.
              Streamer finden das aktiv, alle anderen sehen nur die Ueberschrift. -->
         <details id="streamDetails" class="mt-4 text-xs">
-          <summary class="cursor-pointer text-[color:var(--color-muted)] select-none py-1">
+          <summary class="cursor-pointer text-[color:var(--color-muted)] select-none py-1" data-i18n="stream.summary">
             Stream-Modus (für Twitch / YouTube)
           </summary>
           <div class="mt-3 space-y-3">
-            <p class="text-[10px] text-[color:var(--color-muted)] leading-relaxed">
+            <p class="text-[10px] text-[color:var(--color-muted)] leading-relaxed" data-i18n="stream.intro">
               Für Streamer: automatisches Leiser-Regeln anderer Pilot-Stimmen
               wenn du sprichst (wie Discord-Ducking) plus ein transparentes
               Browser-Overlay für OBS.
@@ -567,8 +569,8 @@
                           px-3 py-2 rounded-lg border border-[color:var(--color-border)]
                           hover:bg-white/5 transition">
               <div class="flex-1 min-w-0">
-                <div class="text-[color:var(--color-fg)] font-semibold">Auto-Ducking</div>
-                <div class="text-[10px] text-[color:var(--color-muted)] leading-snug mt-0.5">
+                <div class="text-[color:var(--color-fg)] font-semibold" data-i18n="stream.ducking.title">Auto-Ducking</div>
+                <div class="text-[10px] text-[color:var(--color-muted)] leading-snug mt-0.5" data-i18n="stream.ducking.desc">
                   Andere Piloten werden auf ~30 % runtergeregelt, solange du ins Mikro sprichst.
                   Dein Kommentar dominiert im Stream-Mic.
                 </div>
@@ -579,9 +581,9 @@
 
             <!-- OBS-Browser-Source-Anleitung -->
             <div class="px-3 py-2 rounded-lg border border-[color:var(--color-border)] space-y-1.5">
-              <div class="text-[color:var(--color-fg)] font-semibold">OBS Browser-Source</div>
+              <div class="text-[color:var(--color-fg)] font-semibold" data-i18n="stream.obs.title">OBS Browser-Source</div>
               <div class="text-[10px] text-[color:var(--color-muted)] leading-snug">
-                In OBS: <em>Quellen → + → Browser → Hinzufügen</em>, als URL diese einfügen:
+                <span data-i18n="stream.obs.howto.1">In OBS:</span> <em data-i18n="stream.obs.howto.2">Quellen → + → Browser → Hinzufügen</em><span data-i18n="stream.obs.howto.3">, als URL diese einfügen:</span>
               </div>
               <div class="flex gap-2 items-center">
                 <code id="obsUrl"
@@ -591,47 +593,51 @@
                 </code>
                 <button id="obsUrlCopyBtn" type="button"
                         class="px-2.5 py-1 rounded-md bg-[color:var(--color-accent)] text-[#0b1220]
-                               font-semibold text-[11px] hover:bg-blue-300 transition shrink-0">
+                               font-semibold text-[11px] hover:bg-blue-300 transition shrink-0"
+                        data-i18n="stream.obs.copy">
                   Kopieren
                 </button>
               </div>
               <div class="text-[10px] text-[color:var(--color-muted)] leading-snug">
-                Breite 400 × Höhe 600 empfohlen. Im OBS-Browser-Dialog
-                <em>„Hintergrund steuern"</em> anhaken (transparent) — dann
-                erscheinen im Stream nur die gerade sprechenden Piloten als Pill-Tags.
+                <span data-i18n="stream.obs.help.1">Breite 400 × Höhe 600 empfohlen. Im OBS-Browser-Dialog</span>
+                <em data-i18n="stream.obs.help.2">„Hintergrund steuern"</em> <span data-i18n="stream.obs.help.3">anhaken (transparent) — dann
+                erscheinen im Stream nur die gerade sprechenden Piloten als Pill-Tags.</span>
               </div>
             </div>
           </div>
         </details>
 
         <details id="pttDetails" class="mt-4 text-xs">
-          <summary class="cursor-pointer text-[color:var(--color-muted)] select-none py-1">
+          <summary class="cursor-pointer text-[color:var(--color-muted)] select-none py-1" data-i18n="ptt.summary">
             USB-PTT zuweisen (optional)
           </summary>
           <div class="mt-3 space-y-2">
             <div class="flex justify-between">
-              <span class="text-[color:var(--color-muted)]">Aktuelle Bindung</span>
-              <span id="pttBindingText" class="tabular-nums">keine</span>
+              <span class="text-[color:var(--color-muted)]" data-i18n="ptt.binding">Aktuelle Bindung</span>
+              <span id="pttBindingText" class="tabular-nums" data-i18n="ptt.binding.none">keine</span>
             </div>
             <div class="flex justify-between">
-              <span class="text-[color:var(--color-muted)]">Erkannte Geräte</span>
+              <span class="text-[color:var(--color-muted)]" data-i18n="ptt.devices">Erkannte Geräte</span>
               <span id="pttDevices" class="text-right max-w-[60%] truncate">—</span>
             </div>
             <div class="flex gap-2 mt-3">
               <button id="pttBindBtn"
-                      class="px-3 py-1.5 rounded-lg bg-[color:var(--color-accent)] text-[#0b1220] font-semibold hover:bg-blue-300 transition">
+                      class="px-3 py-1.5 rounded-lg bg-[color:var(--color-accent)] text-[#0b1220] font-semibold hover:bg-blue-300 transition"
+                      data-i18n="ptt.bind">
                 Taste zuweisen
               </button>
               <button id="pttCancelBtn" style="display:none"
-                      class="px-3 py-1.5 rounded-lg border border-[color:var(--color-border)] text-[color:var(--color-muted)] hover:bg-white/5 transition">
+                      class="px-3 py-1.5 rounded-lg border border-[color:var(--color-border)] text-[color:var(--color-muted)] hover:bg-white/5 transition"
+                      data-i18n="ptt.cancel">
                 Abbrechen
               </button>
               <button id="pttClearBtn"
-                      class="px-3 py-1.5 rounded-lg border border-[color:var(--color-border)] text-[color:var(--color-muted)] hover:bg-white/5 transition">
+                      class="px-3 py-1.5 rounded-lg border border-[color:var(--color-border)] text-[color:var(--color-muted)] hover:bg-white/5 transition"
+                      data-i18n="ptt.clear">
                 Zurücksetzen
               </button>
             </div>
-            <p class="text-[10px] text-[color:var(--color-muted)] leading-relaxed mt-2">
+            <p class="text-[10px] text-[color:var(--color-muted)] leading-relaxed mt-2" data-i18n="ptt.help">
               Auf "Taste zuweisen" klicken, dann auf deinem Joystick / HOTAS / Yoke /
               Button-Box einen Knopf drücken. Funktioniert anschließend auch, wenn
               MSFS im Vordergrund ist.
@@ -651,11 +657,12 @@
                       bg-[color:var(--color-bg-soft)] border border-[color:var(--color-border)]
                       text-[11px] font-semibold tracking-wider">
             <span id="peersModeIcon" aria-hidden="true">📡</span>
-            <span id="peersModeLabel" class="text-[color:var(--color-fg)]">Öffentliches Mesh</span>
+            <span id="peersModeLabel" class="text-[color:var(--color-fg)]" data-i18n="mesh.public">Öffentliches Mesh</span>
           </div>
           <button id="peersModeAction" type="button"
                   class="text-[11px] font-semibold text-[color:var(--color-accent)]
-                         hover:underline cursor-pointer">
+                         hover:underline cursor-pointer"
+                  data-i18n="mesh.private.btn">
             Privater Raum…
           </button>
         </div>
@@ -664,24 +671,27 @@
              Sichtbar nur bei Klick auf "Privater Raum…" und wenn nicht bereits
              gejoint. Pro-Gate passiert in app.js (joinPrivateRoom). -->
         <div id="privateRoomForm" class="hidden mb-3 space-y-2">
-          <p class="text-[10px] text-[color:var(--color-muted)] leading-relaxed">
+          <p class="text-[10px] text-[color:var(--color-muted)] leading-relaxed" data-i18n="mesh.private.help">
             Passphrase eingeben — alle Piloten mit derselben Passphrase landen
             im gleichen privaten Mesh (weltweit verbunden, kein Geohash).
           </p>
           <div class="flex gap-2 items-center">
             <input id="privateRoomPass" type="text" maxlength="80"
                    placeholder="Passphrase (mind. 6 Zeichen)"
+                   data-i18n-attr="placeholder:mesh.private.placeholder"
                    class="flex-1 min-w-0 bg-[color:var(--color-bg-soft)] border border-[color:var(--color-border)]
                           rounded-lg px-3 py-1.5 text-xs font-mono
                           focus:outline-none focus:ring-2 focus:ring-[color:var(--color-ring)] transition">
             <button id="privateRoomJoinBtn" type="button"
                     class="px-3 py-1.5 rounded-lg bg-[color:var(--color-accent)] text-[#0b1220]
-                           font-semibold text-xs hover:bg-blue-300 transition">
+                           font-semibold text-xs hover:bg-blue-300 transition"
+                    data-i18n="mesh.private.join">
               Betreten
             </button>
             <button id="privateRoomFormCancel" type="button"
                     class="px-2 py-1.5 rounded-lg text-[color:var(--color-muted)] text-xs
-                           hover:bg-white/5 transition">
+                           hover:bg-white/5 transition"
+                    data-i18n="ptt.cancel">
               Abbrechen
             </button>
           </div>
@@ -694,17 +704,17 @@
 
         <!-- Filter: weit entfernte Peers einblenden -->
         <div class="flex items-center justify-between mb-2">
-          <h2 id="peersTitle" class="text-[10px] font-bold tracking-widest uppercase text-[color:var(--color-muted)]">
+          <h2 id="peersTitle" class="text-[10px] font-bold tracking-widest uppercase text-[color:var(--color-muted)]" data-i18n="peers.title">
             Piloten
           </h2>
           <label class="text-[11px] text-[color:var(--color-muted)] inline-flex items-center gap-1.5 cursor-pointer">
             <input id="showFar" type="checkbox" checked class="accent-[color:var(--color-accent)]">
-            auch außer Reichweite
+            <span data-i18n="peers.show_far">auch außer Reichweite</span>
           </label>
         </div>
 
         <div id="peers">
-          <p class="text-center text-xs text-[color:var(--color-muted)] py-4">
+          <p class="text-center text-xs text-[color:var(--color-muted)] py-4" data-i18n="peers.waiting">
             Warte auf andere Piloten in deiner Nähe…
           </p>
         </div>
@@ -714,15 +724,16 @@
     <!-- ================= FOOTER ================= -->
     <footer class="text-center text-[11px] text-[color:var(--color-muted)] space-y-2">
       <div>
-        P2P via öffentliche WebTorrent-Tracker · keine Registrierung ·
-        <a href="/overlay.html" target="_blank" class="hover:text-[color:var(--color-accent)] transition">Mini-Overlay öffnen</a>
+        <span data-i18n="footer.p2p.1">P2P via öffentliche WebTorrent-Tracker · keine Registrierung ·</span>
+        <a href="/overlay.html" target="_blank" class="hover:text-[color:var(--color-accent)] transition" data-i18n="footer.overlay">Mini-Overlay öffnen</a>
       </div>
       <div>
-        MSFSVoiceWalker ist freie Software (Apache 2.0).
-        Wenn dir das Tool hilft, freue ich mich über eine Spende:
+        <span data-i18n="footer.foss">MSFSVoiceWalker ist freie Software (Apache 2.0).</span>
+        <span data-i18n="footer.donate">Wenn dir das Tool hilft, freue ich mich über eine Spende:</span>
         <a href="https://www.paypal.com/donate/?hosted_button_id=F2GPDVV6BUSAQ"
            target="_blank" rel="noopener noreferrer"
-           class="text-[color:var(--color-accent)] hover:text-white transition font-medium">
+           class="text-[color:var(--color-accent)] hover:text-white transition font-medium"
+           data-i18n="footer.paypal">
           ☕ via PayPal
         </a>
       </div>

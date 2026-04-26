@@ -487,15 +487,16 @@ function renderTrackingButton() {
   const userWants = !!state.trackingEnabled;
   const effective = userWants && !inMenu;
 
+  const T = (k) => (window.i18n ? window.i18n.t(k) : k);
   let labelText, dotClass;
   if (inMenu) {
-    labelText = 'Standby';
+    labelText = T('self.tracking.off');
     dotClass  = 'w-2 h-2 rounded-full bg-[color:var(--color-muted)] opacity-60';
   } else if (userWants) {
-    labelText = 'Sichtbar';
+    labelText = T('self.tracking.on');
     dotClass  = 'w-2 h-2 rounded-full bg-[color:var(--color-good)] shadow-[0_0_8px_var(--color-good)]';
   } else {
-    labelText = 'Verborgen';
+    labelText = T('self.tracking.hidden');
     dotClass  = 'w-2 h-2 rounded-full bg-[color:var(--color-muted)]';
   }
   if (btn)   btn.dataset.enabled = effective ? 'true' : 'false';
@@ -2548,9 +2549,12 @@ function renderSelf() {
     setStatus('sim',
       s.demo ? 'Demo (kein Sim)' : 'Hauptmenü / kein Flug', 'warn',
       s.demo ? 'status.demo' : 'status.main_menu');
-    modeEl.innerHTML = s.demo
-      ? '<span class="badge external">Kein Sim</span>'
-      : '<span class="badge external">Hauptmenü</span>';
+    {
+      const T = (k) => (window.i18n ? window.i18n.t(k) : k);
+      modeEl.innerHTML = s.demo
+        ? `<span class="badge external">${T('self.mode.no_sim')}</span>`
+        : `<span class="badge external">${T('self.mode.menu')}</span>`;
+    }
     // Nur "Ansicht" zeigen, alles andere ausblenden — die Zahlen wären
     // Default-Werte (0/90) und verwirren nur.
     if (posRow)  posRow.style.display  = 'none';
