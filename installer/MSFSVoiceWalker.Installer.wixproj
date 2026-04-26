@@ -35,6 +35,18 @@
     <WasmBridgeOutput>$(RepoRoot)\msfs-project\PackageSources\modules\MSFSVoiceWalkerBridge.wasm</WasmBridgeOutput>
 
     <SuppressIces>ICE61;ICE91</SuppressIces>
+
+    <!-- Debug-Build-Schalter. Wenn true: debug.js wird ins Bundle eingepackt
+         und /debug/* Endpoints sind in main.py freigegeben. Wenn false
+         (Default fuer Public-Release): debug.js fehlt im Bundle, Endpoints
+         liefern 404 — End-User koennen keinen Backend-State pollen.
+
+         Aktivieren via:  dotnet build /p:VWDebugBuild=true ...
+         oder via Env-Var: set VW_DEBUG_BUILD=1 vor dem Build. -->
+    <VWDebugBuild Condition="'$(VWDebugBuild)' == '' And '$(VW_DEBUG_BUILD)' == '1'">true</VWDebugBuild>
+    <VWDebugBuild Condition="'$(VWDebugBuild)' == ''">false</VWDebugBuild>
+    <_DebugBuildPy Condition="'$(VWDebugBuild)' == 'true'">True</_DebugBuildPy>
+    <_DebugBuildPy Condition="'$(VWDebugBuild)' != 'true'">False</_DebugBuildPy>
   </PropertyGroup>
 
   <ItemGroup>
@@ -164,7 +176,7 @@
           Inputs="$(RepoRoot)\main.py;$(RepoRoot)\debug.py;$(RepoRoot)\ptt_backend.py;$(RepoRoot)\installer.py;$(RepoRoot)\requirements.txt"
           Outputs="$(AppExe);$(SetupHelperExe)">
 
-    <Message Text="==&gt; Baue Python-EXEs mit PyInstaller..." Importance="high" />
+    <Message Text="==&gt; Baue Python-EXEs mit PyInstaller (DebugBuild=$(VWDebugBuild))..." Importance="high" />
 
     <!-- Falls eine vorherige App- oder Setup-Instanz noch laeuft, blockiert
          sie dist\*.exe und PyInstaller (Clean-Schritt) schlaegt mit
@@ -174,11 +186,36 @@
     <Exec Command="taskkill /F /T /IM MSFSVoiceWalker.exe 2&gt;nul &amp; taskkill /F /T /IM MSFSVoiceWalker-Setup.exe 2&gt;nul &amp; exit /b 0"
           IgnoreExitCode="true" />
 
+    <!-- Build-Time-Flag in build_config.py schreiben. Wird von main.py
+         beim Start gelesen; steuert ob /debug/* Endpoints offen sind. -->
+    <WriteLinesToFile File="$(RepoRoot)\build_config.py"
+                      Lines="DEBUG_BUILD = $(_DebugBuildPy)"
+                      Overwrite="true" />
+    <Message Text="==&gt; build_config.py: DEBUG_BUILD = $(_DebugBuildPy)" Importance="high" />
+
+    <!-- Web-Source fuer PyInstaller vorbereiten. Public-Build: debug.js
+         wird AUSGESCHLOSSEN, sodass das Frontend-Debug-Panel im Bundle
+         nicht existiert. Dev-Build: alle web-Dateien rein. -->
+    <RemoveDir Directories="$(RepoRoot)\dist\web_for_build" />
+    <ItemGroup>
+      <_WebFilesPublic Include="$(RepoRoot)\web\**\*.*"
+                       Exclude="$(RepoRoot)\web\debug.js"
+                       Condition="'$(VWDebugBuild)' != 'true'" />
+      <_WebFilesDev Include="$(RepoRoot)\web\**\*.*"
+                    Condition="'$(VWDebugBuild)' == 'true'" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_WebFilesPublic)"
+          DestinationFiles="@(_WebFilesPublic->'$(RepoRoot)\dist\web_for_build\%(RecursiveDir)%(Filename)%(Extension)')"
+          Condition="'$(VWDebugBuild)' != 'true'" />
+    <Copy SourceFiles="@(_WebFilesDev)"
+          DestinationFiles="@(_WebFilesDev->'$(RepoRoot)\dist\web_for_build\%(RecursiveDir)%(Filename)%(Extension)')"
+          Condition="'$(VWDebugBuild)' == 'true'" />
+
     <!-- App-EXE: noconsole + Tray-Modul + App-Icon eingebunden.
          pystray + PIL muessen mit collect-all rein damit das Windows-Tray-
          Backend in der gefrorenen EXE verfuegbar ist. tray + pynput + license_client
          als hidden-import weil sie nur dynamisch geladen werden. -->
-    <Exec Command="python -m PyInstaller --noconfirm --clean --name MSFSVoiceWalker --onefile --noconsole --icon &quot;packaging\app-icon.ico&quot; --add-data &quot;web;web&quot; --collect-all SimConnect --collect-all pygame --collect-all websockets --collect-all pystray --collect-all PIL --hidden-import ptt_backend --hidden-import debug --hidden-import tray --hidden-import pynput --hidden-import license_client main.py"
+    <Exec Command="python -m PyInstaller --noconfirm --clean --name MSFSVoiceWalker --onefile --noconsole --icon &quot;packaging\app-icon.ico&quot; --add-data &quot;dist\web_for_build;web&quot; --collect-all SimConnect --collect-all pygame --collect-all websockets --collect-all pystray --collect-all PIL --hidden-import ptt_backend --hidden-import debug --hidden-import tray --hidden-import pynput --hidden-import license_client --hidden-import build_config main.py"
           WorkingDirectory="$(RepoRoot)" />
 
     <Error Condition="!Exists('$(AppExe)')"

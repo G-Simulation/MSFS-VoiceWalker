@@ -29,6 +29,13 @@ import traceback
 import webbrowser
 from http import HTTPStatus
 
+# Build-Time-Flag: Debug-Endpoints + debug.js nur in Dev/Internal-Builds.
+# Public-Release-Build setzt DEBUG_BUILD=False ueber den wixproj-Step.
+try:
+    from build_config import DEBUG_BUILD
+except Exception:
+    DEBUG_BUILD = True   # Fallback fuer Dev-Run aus IDE / `python main.py`
+
 # Logging ZUERST initialisieren — alle Module unten reden über den Logger
 from debug import (
     debug_enabled,
@@ -981,7 +988,12 @@ async def http_handler(connection, request):
         except Exception as e:
             return _make_response(HTTPStatus.INTERNAL_SERVER_ERROR, [], str(e).encode("utf-8"))
 
+    # Debug-Endpoints sind nur in Dev/Internal-Builds offen. Public-Release-
+    # Builds setzen DEBUG_BUILD=False ueber build_config.py — dort liefern
+    # /debug/status und /debug/log dann 404, niemand kann Backend-State pollen.
     if path.startswith("/debug/status"):
+        if not DEBUG_BUILD:
+            return _make_response(HTTPStatus.NOT_FOUND, [], b"")
         try:
             body = json.dumps(debug_status_payload(), default=str).encode("utf-8")
             return _make_response(
@@ -1003,6 +1015,8 @@ async def http_handler(connection, request):
     # funktionierenden Coherent GT Debugger (der in MSFS 2024 oft haengt).
     # Format: GET /debug/log?level=info&msg=...  (URL-encoded)
     if path.startswith("/debug/log"):
+        if not DEBUG_BUILD:
+            return _make_response(HTTPStatus.NOT_FOUND, [], b"")
         try:
             from urllib.parse import urlparse, parse_qs
             parsed = urlparse(path)

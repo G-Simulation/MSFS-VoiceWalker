@@ -63,6 +63,9 @@ UpgradeLog*.htm
 CLAUDE_CONTEXT.md
 .serena/
 
+# --- Build-Time Konfiguration (wird vom Installer-Build erzeugt/ueberschrieben) ---
+build_config.py
+
 # --- MSFS SDK build intermediates ---
 msfs-project/_PackageInt/
 msfs-project/PackagesMetadata/
