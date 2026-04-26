@@ -166,7 +166,11 @@
 
     <Message Text="==&gt; Baue Python-EXEs mit PyInstaller..." Importance="high" />
 
-    <Exec Command="python -m PyInstaller --noconfirm --clean --name MSFSVoiceWalker --onefile --console --add-data &quot;web;web&quot; --collect-all SimConnect --collect-all pygame --collect-all websockets --hidden-import ptt_backend --hidden-import debug main.py"
+    <!-- App-EXE: noconsole + Tray-Modul + App-Icon eingebunden.
+         pystray + PIL muessen mit collect-all rein damit das Windows-Tray-
+         Backend in der gefrorenen EXE verfuegbar ist. tray + pynput + license_client
+         als hidden-import weil sie nur dynamisch geladen werden. -->
+    <Exec Command="python -m PyInstaller --noconfirm --clean --name MSFSVoiceWalker --onefile --noconsole --icon &quot;packaging\app-icon.ico&quot; --add-data &quot;web;web&quot; --collect-all SimConnect --collect-all pygame --collect-all websockets --collect-all pystray --collect-all PIL --hidden-import ptt_backend --hidden-import debug --hidden-import tray --hidden-import pynput --hidden-import license_client main.py"
           WorkingDirectory="$(RepoRoot)" />
 
     <Error Condition="!Exists('$(AppExe)')"
@@ -178,7 +182,9 @@
     <Error Condition="!Exists('$(BuiltMsfsPackage)\manifest.json')"
            Text="MSFS-Package nicht gefunden unter $(BuiltMsfsPackage). fspackagetool.exe hat nichts gebaut — pruefe ob MSFS 2024 laeuft und Dev Mode aktiv ist, dann erneut bauen." />
 
-    <Exec Command="python -m PyInstaller --noconfirm --clean --name MSFSVoiceWalker-Setup --onefile --console --add-data &quot;dist\MSFSVoiceWalker.exe;.&quot; --add-data &quot;msfs-project\Packages\gsimulation-msfsvoicewalker;gsimulation-msfsvoicewalker&quot; installer.py"
+    <!-- Setup/Integrator-EXE: noconsole, weil installer.py jetzt eine
+         native Win32-MessageBox zeigt statt stdout/input zu nutzen. -->
+    <Exec Command="python -m PyInstaller --noconfirm --clean --name MSFSVoiceWalker-Setup --onefile --noconsole --icon &quot;packaging\app-icon.ico&quot; --add-data &quot;dist\MSFSVoiceWalker.exe;.&quot; --add-data &quot;msfs-project\Packages\gsimulation-msfsvoicewalker;gsimulation-msfsvoicewalker&quot; installer.py"
           WorkingDirectory="$(RepoRoot)" />
 
     <Error Condition="!Exists('$(SetupHelperExe)')"
