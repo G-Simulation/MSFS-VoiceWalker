@@ -637,6 +637,14 @@
       if (ws.readyState !== 1) {
         VW.hostIdx++;
         try { ws.close(); } catch (e) {}
+        // Fallback: bei initial-failed Connections (Server nicht da)
+        // feuert ws.onclose in Coherent GT nicht zuverlaessig. Wir
+        // schedulen den Reconnect deshalb pro-aktiv hier.
+        if (VW.ws === ws) {
+          VW.ws = null;
+          setConn('offline', 'offline');
+          scheduleReconnect();
+        }
       }
     }, 4000);
 
@@ -682,7 +690,16 @@
       scheduleReconnect();
     };
 
-    ws.onerror = function () { /* onclose folgt */ };
+    ws.onerror = function () {
+      // onclose folgt typischerweise, ist aber bei Coherent GT bei
+      // initial-failed Connects nicht garantiert — Reconnect proaktiv
+      // anstossen. scheduleReconnect ist idempotent (Guard auf
+      // VW.reconnectTimer), also kein doppelter Timer.
+      clearTimeout(VW.wsTimeout);
+      if (VW.ws === ws) VW.ws = null;
+      setConn('offline', 'offline');
+      scheduleReconnect();
+    };
   }
 
   function scheduleReconnect() {
