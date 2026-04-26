@@ -20,16 +20,65 @@ from __future__ import annotations
 import logging
 import os
 import pathlib
+import subprocess
 import sys
 import threading
 import webbrowser
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 log = logging.getLogger("tray")
 
 # Konstanten
 ICON_TITLE = "MSFSVoiceWalker"
 ICON_NAME  = "msfsvoicewalker"
+
+# Edge im --app=URL Modus oeffnet die UI als chrome-loses App-Fenster
+# (kein URL-Bar, keine Tabs) — sieht aus wie eine native Desktop-App.
+# Edge ist auf jedem Windows-System vorhanden; falls nicht (sehr selten),
+# fallen wir auf den Default-Browser zurueck.
+EDGE_PATHS = [
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Microsoft Edge\Application\msedge.exe",
+]
+
+
+def _edge_path() -> Optional[str]:
+    for p in EDGE_PATHS:
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def _edge_user_data_dir(suffix: str = "") -> str:
+    """Eigenes Edge-Profil-Verzeichnis, damit das App-Fenster nicht im
+    Surf-Profil des Users reinhaengt (Cookies/History gemischt) und das
+    Mini-Overlay seine eigene Storage-Welt hat."""
+    base = pathlib.Path(os.environ.get("LOCALAPPDATA", str(pathlib.Path.home())))
+    target = base / "MSFSVoiceWalker" / f"edge-profile{suffix}"
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    return str(target)
+
+
+def _open_app_window(url: str, size: Tuple[int, int],
+                     profile_suffix: str = "") -> bool:
+    """Edge --app=URL Modus. Gibt True zurueck wenn Edge gefunden + gestartet."""
+    edge = _edge_path()
+    if not edge:
+        return False
+    try:
+        subprocess.Popen([
+            edge,
+            f"--app={url}",
+            f"--window-size={size[0]},{size[1]}",
+            f"--user-data-dir={_edge_user_data_dir(profile_suffix)}",
+        ])
+        return True
+    except Exception as e:
+        log.warning("tray: Edge konnte nicht gestartet werden: %s", e)
+        return False
 
 
 def _make_icon_image(size: int = 64):
@@ -52,11 +101,33 @@ def _make_icon_image(size: int = 64):
 
 def _open_web_ui(port: int) -> Callable:
     def _action(icon, item):
+        url = f"http://127.0.0.1:{port}/"
+        if _open_app_window(url, (1100, 800)):
+            log.info("tray: app-fenster (Edge --app) geoeffnet")
+            return
         try:
-            webbrowser.open(f"http://127.0.0.1:{port}/")
-            log.info("tray: web-ui geoeffnet")
+            webbrowser.open(url)
+            log.info("tray: fallback default-browser fuer ui")
         except Exception as e:
-            log.warning("tray: konnte browser nicht oeffnen: %s", e)
+            log.warning("tray: konnte ui nicht oeffnen: %s", e)
+    return _action
+
+
+def _open_mini_overlay(port: int) -> Callable:
+    """Kompaktes Overlay-Fenster — kleines Always-Visible-Radar fuer den
+    zweiten Monitor (oder zum auf den MSFS-Frame ziehen). Gleiche View
+    wie OBS-Source, aber ohne ?stream=1 — also mit Radar + Status, nicht
+    nur Speaking-Pills."""
+    def _action(icon, item):
+        url = f"http://127.0.0.1:{port}/overlay.html"
+        if _open_app_window(url, (480, 480), profile_suffix="-overlay"):
+            log.info("tray: mini-overlay (Edge --app) geoeffnet")
+            return
+        try:
+            webbrowser.open(url)
+            log.info("tray: fallback default-browser fuer overlay")
+        except Exception as e:
+            log.warning("tray: konnte overlay nicht oeffnen: %s", e)
     return _action
 
 
@@ -108,6 +179,7 @@ def setup_tray(port: int, on_quit: Callable[[], None]) -> Optional[object]:
             _open_web_ui(port),
             default=True,   # Doppelklick aufs Icon ruft diese Action
         ),
+        pystray.MenuItem("Mini-Overlay", _open_mini_overlay(port)),
         pystray.MenuItem("Logs anzeigen", _open_logs()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Beenden", _quit_action),
