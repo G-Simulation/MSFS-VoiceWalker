@@ -1,16 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- MSFS Toolbar-Icons sind Monochrom: das Coherent-Toolbar erzwingt weisse
-     Fuellung und liefert den Hintergrund (blau bei hover, dunkel im Idle)
-     selbst. Das Icon muss deshalb als reine Alpha-Maske designt sein:
-     keine farbigen Rects, nur weisse Shapes auf transparentem Canvas. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- Radar-Ringe -->
-  <circle cx="32" cy="32" r="26" fill="none" stroke="#ffffff" stroke-width="2.4" opacity="0.55"/>
-  <circle cx="32" cy="32" r="17" fill="none" stroke="#ffffff" stroke-width="2.4" opacity="0.8"/>
-  <!-- Mic-Body -->
-  <rect x="25" y="16" width="14" height="22" rx="7" fill="#ffffff"/>
-  <!-- Mic-Bogen -->
-  <path d="M18 34 a14 14 0 0 0 28 0" fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round"/>
-  <!-- Mic-Stand -->
-  <line x1="32" y1="42" x2="32" y2="50" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round"/>
+<!-- MSFS Toolbar-Icon: Coherent GT erzwingt Monochrom-Weiss + Alpha.
+     Farbige Hintergruende, Gradients und Akzent-Farben werden ignoriert
+     und auf weiss zusammengepresst. Deshalb hier reine Alpha-Maske —
+     fette Strokes, sichtbar auf MSFS-Toolbar-Hintergrund (dunkel idle,
+     blau bei Hover). Designed fuer 24x24 viewBox. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Aeusserer Radar-Ring -->
+    <circle cx="12" cy="12" r="10" stroke-width="1.4" opacity="0.55"/>
+    <!-- Innerer Radar-Ring -->
+    <circle cx="12" cy="12" r="6.5" stroke-width="1.4" opacity="0.85"/>
+    <!-- Mikro-Bogen (unterer Halbkreis als Mic-Stand-Halterung) -->
+    <path d="M8.5 12.2 a3.5 3.5 0 0 0 7 0" stroke-width="1.6"/>
+    <!-- Mikro-Stand -->
+    <line x1="12" y1="15.5" x2="12" y2="17.8" stroke-width="1.6"/>
+  </g>
+  <!-- Mikro-Body — solider Fill, klare Silhouette ueber den Radar-Ringen -->
+  <rect x="10" y="6.5" width="4" height="7.5" rx="2" fill="#ffffff"/>
 </svg>
