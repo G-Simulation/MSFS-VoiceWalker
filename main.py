@@ -1445,6 +1445,35 @@ BANNER = r"""
 """
 
 
+_SINGLE_INSTANCE_MUTEX_HANDLE = None
+
+
+def _acquire_single_instance_mutex() -> bool:
+    """Globaler Single-Instance-Lock auf OS-Ebene per Named Mutex.
+    Vorteil gegenueber Port-Probe: keine Race-Condition mehr beim Start.
+    Wenn ein anderer MSFSVoiceWalker-Prozess schon laeuft, returns False.
+    Andernfalls wird der Mutex bis zum Process-Ende gehalten (Handle bleibt
+    in einer Modul-Variable damit der Garbage Collector ihn nicht freigibt).
+    """
+    global _SINGLE_INSTANCE_MUTEX_HANDLE
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        ERROR_ALREADY_EXISTS = 183
+        # "Global\" prefix funktioniert in normalen User-Sessions auch ohne
+        # Admin-Rechte; bei Bedarf weglassen wenn UAC-issues auftauchen.
+        h = kernel32.CreateMutexW(None, False, "Global\\MSFSVoiceWalker-Singleton")
+        if not h:
+            return True  # CreateMutex selbst gefailt → besser starten als blockieren
+        if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+            kernel32.CloseHandle(h)
+            return False
+        _SINGLE_INSTANCE_MUTEX_HANDLE = h
+        return True
+    except Exception:
+        return True
+
+
 async def main():
     global PTT, LOOP, PORT
     LOOP = asyncio.get_running_loop()
@@ -1453,6 +1482,22 @@ async def main():
     if not WEB_DIR.is_dir():
         log.error("web directory not found: %s", WEB_DIR)
         sys.exit(1)
+
+    # ROBUSTER Single-Instance-Lock (Named Mutex) — ersetzt den race-anfaelligen
+    # Port-Probe-Check unten. Wenn schon eine Instanz laeuft: Highlight-Ping +
+    # Beenden, ohne ueberhaupt SimConnect/PTT/Tray zu booten.
+    if not _acquire_single_instance_mutex():
+        log.warning("MSFSVoiceWalker laeuft bereits — sende Highlight-Ping und beende")
+        try:
+            import urllib.request as _ur
+            with _ur.urlopen(
+                f"http://127.0.0.1:{PORT_DEFAULT}/_/highlight",
+                timeout=2.0,
+            ) as resp:
+                resp.read()
+        except Exception:
+            pass
+        sys.exit(0)
 
     print(BANNER)
     log.info("MSFSVoiceWalker starting")
