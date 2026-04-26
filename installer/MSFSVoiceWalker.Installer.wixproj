@@ -193,6 +193,13 @@
                       Overwrite="true" />
     <Message Text="==&gt; build_config.py: DEBUG_BUILD = $(_DebugBuildPy)" Importance="high" />
 
+    <!-- Logo-Assets (PNG-Varianten + Web/Panel-Kopien) generieren — sonst
+         fehlt das Logo in der gepackten EXE wenn web/voicewalker-logo-mark-
+         light.png aus Versehen geloescht oder das Source-PNG geaendert wurde. -->
+    <Exec Command="python packaging\build-logo-assets.py"
+          WorkingDirectory="$(RepoRoot)"
+          IgnoreExitCode="true" />
+
     <!-- Web-Source fuer PyInstaller vorbereiten. Public-Build: debug.js
          wird AUSGESCHLOSSEN, sodass das Frontend-Debug-Panel im Bundle
          nicht existiert. Dev-Build: alle web-Dateien rein. -->

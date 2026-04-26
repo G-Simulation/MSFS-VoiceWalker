@@ -924,7 +924,7 @@ function connectBackendWs() {
   backendWs = new WebSocket(`ws://${location.host}/ui`);
   // WS-Open heisst Python-App laeuft — nicht dass SimConnect zu MSFS steht.
   // Echte Sim-Status-Updates kommen erst mit dem ersten 'sim'-Snapshot.
-  backendWs.onopen = () => setStatus('sim', 'wartet auf Sim…', 'warn');
+  backendWs.onopen = () => setStatus('sim', 'wartet auf Sim…', 'warn', 'status.waiting_for_sim');
   backendWs.onmessage = e => {
     let m;
     try { m = JSON.parse(e.data); } catch { return; }
@@ -1009,7 +1009,7 @@ function connectBackendWs() {
     }
   };
   backendWs.onclose = () => {
-    setStatus('sim', 'getrennt, verbinde neu…', 'warn');
+    setStatus('sim', 'getrennt, verbinde neu…', 'warn', 'status.reconnecting');
     setTimeout(connectBackendWs, 1000);
   };
   backendWs.onerror = () => {};
@@ -1233,7 +1233,7 @@ async function ensureMic() {
     state.micStream = await navigator.mediaDevices.getUserMedia(constraints);
     state.micTrack  = state.micStream.getAudioTracks()[0];
     state.micTrack.enabled = state.voxMode;
-    setStatus('mic', 'bereit', 'good');
+    setStatus('mic', 'bereit', 'good', 'status.mic_ready');
     // Local-VAD-Analyser fuer Ducking aufsetzen (bleibt auch wenn ducking
     // deaktiviert — Kosten sind minimal, dafuer kein Init-Delay beim Einschalten).
     setupLocalVAD();
@@ -1241,7 +1241,7 @@ async function ensureMic() {
     // reconcileAudioStreams() nach Distanz (O(Dichte) statt O(N)).
     reconcileAudioStreams();
   } catch (e) {
-    setStatus('mic', 'Zugriff verweigert', 'bad');
+    setStatus('mic', 'Zugriff verweigert', 'bad', 'status.mic_denied');
     console.error('[mic]', e);
   }
 }
@@ -1910,7 +1910,7 @@ setInterval(() => {
   // (oder MSFS) weg — degradiere die Status-Anzeige, statt stumm weiter
   // "verbunden" zu zeigen.
   if (state.mySim && Date.now() / 1000 - (state.mySim.t || 0) > 3) {
-    setStatus('sim', 'getrennt (MSFS beendet?)', 'warn');
+    setStatus('sim', 'getrennt (MSFS beendet?)', 'warn', 'status.msfs_quit');
   }
 
   // Lokales VAD: "spreche ich gerade?" — wird fuer Ducking in updateAudioFor()
@@ -2492,13 +2492,38 @@ document.getElementById('pttClearBtn').addEventListener('click', () => {
 });
 
 // --- Rendering ---------------------------------------------------------------
-function setStatus(which, text, cls) {
+function setStatus(which, text, cls, i18nKey, i18nParams) {
   // which: 'sim' | 'mic' | 'mesh'
+  // text   = bereits uebersetzter Default (DE), wird angezeigt wenn kein Key
+  // i18nKey/i18nParams = optional, fuer dynamische Re-Translation bei Sprach-
+  //                      Wechsel (siehe i18n:changed-Handler unten)
   const dot = document.getElementById(which + 'Dot');
   const val = document.getElementById(which + 'Status');
   if (dot) dot.className = 'dot ' + (cls || '');
-  if (val) val.textContent = text;
+  if (val) {
+    if (i18nKey && window.i18n) {
+      val.dataset.i18nKey = i18nKey;
+      val.dataset.i18nParams = i18nParams ? JSON.stringify(i18nParams) : '';
+      val.textContent = window.i18n.t(i18nKey, i18nParams);
+    } else {
+      delete val.dataset.i18nKey;
+      delete val.dataset.i18nParams;
+      val.textContent = text;
+    }
+  }
 }
+
+// Beim Sprach-Wechsel alle dynamisch gesetzten Status-Strings neu rendern.
+window.addEventListener('i18n:changed', () => {
+  document.querySelectorAll('[data-i18n-key]').forEach(el => {
+    const key = el.dataset.i18nKey;
+    let p = null;
+    if (el.dataset.i18nParams) {
+      try { p = JSON.parse(el.dataset.i18nParams); } catch {}
+    }
+    el.textContent = window.i18n.t(key, p);
+  });
+});
 function setText(id, txt) {
   const el = document.getElementById(id);
   if (el) el.textContent = txt;
@@ -2520,7 +2545,9 @@ function renderSelf() {
   // Demo zaehlt auch als "kein Flug" — Badge zeigt das klar statt faelschlich
   // "Cockpit" (weil demo camera_state=2 hat).
   if (s.in_menu || s.demo) {
-    setStatus('sim', s.demo ? 'Demo (kein Sim)' : 'Hauptmenü / kein Flug', 'warn');
+    setStatus('sim',
+      s.demo ? 'Demo (kein Sim)' : 'Hauptmenü / kein Flug', 'warn',
+      s.demo ? 'status.demo' : 'status.main_menu');
     modeEl.innerHTML = s.demo
       ? '<span class="badge external">Kein Sim</span>'
       : '<span class="badge external">Hauptmenü</span>';
@@ -2552,8 +2579,8 @@ function renderSelf() {
   // (4 Stellen waren ~11 m Aufloesung → Walker-Bewegung kaum erkennbar.)
   setText('pos', `${s.lat.toFixed(6)}, ${s.lon.toFixed(6)}`);
   setText('agl', `${s.agl_ft.toFixed(0)} ft`);
-  if (s.demo) setStatus('sim', 'Demo (kein Sim)', 'warn');
-  else        setStatus('sim', 'verbunden', 'good');
+  if (s.demo) setStatus('sim', 'Demo (kein Sim)', 'warn', 'status.demo');
+  else        setStatus('sim', 'verbunden', 'good', 'status.connected');
 
   if (s.on_foot) {
     modeEl.innerHTML = '<span class="badge walker">zu Fuß</span>';
@@ -2599,9 +2626,9 @@ function bearingToCompass(deg) {
 
 function renderMeshChip() {
   const n = currentPeerCount();
-  if (n === 0)      setStatus('mesh', 'wartet auf Nachbarn', 'warn');
-  else if (n === 1) setStatus('mesh', '1 Peer', 'good');
-  else              setStatus('mesh', `${n} Peers`, 'good');
+  if (n === 0)      setStatus('mesh', 'wartet auf Nachbarn', 'warn', 'status.mesh_waiting');
+  else if (n === 1) setStatus('mesh', '1 Peer', 'good', 'status.mesh_one');
+  else              setStatus('mesh', `${n} Peers`, 'good', 'status.mesh_many', { n });
 }
 
 function fmtDist(m) {
@@ -3111,6 +3138,17 @@ document.getElementById('settingsDoneBtn')?.addEventListener('click', _closeSett
 _bindSettingsToggle('setAutostart',  'windows_autostart');
 _bindSettingsToggle('setAutoUpdate', 'auto_update');
 _bindSettingsToggle('setSendLogs',   'send_logs_on_error');
+
+// Sprach-Dropdown — clientseitig persistiert ueber i18n.setLang() (localStorage).
+// Kein Backend-Round-Trip; Sprache ist UI-only.
+(function () {
+  const sel = document.getElementById('setLanguage');
+  if (!sel || !window.i18n) return;
+  sel.value = window.i18n.getLang();
+  sel.addEventListener('change', () => {
+    window.i18n.setLang(sel.value);
+  });
+})();
 
 document.getElementById('feedbackSendBtn')?.addEventListener('click', () => {
   const note = (document.getElementById('feedbackNote')?.value || '').trim();

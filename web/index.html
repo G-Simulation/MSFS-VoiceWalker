@@ -272,19 +272,22 @@
     <div class="flex items-start gap-3">
       <div class="w-2 h-2 rounded-full mt-1.5 bg-[color:var(--color-good)] shrink-0 dot-good"></div>
       <div class="flex-1 min-w-0">
-        <div class="text-sm font-semibold">Update verfügbar</div>
+        <div class="text-sm font-semibold" data-i18n="update.available">Update verfügbar</div>
         <div id="updateBannerText" class="text-xs text-[color:var(--color-muted)] mt-0.5"></div>
         <div class="flex gap-2 mt-2">
           <button id="updateInstallBtn"
-                  class="px-2.5 py-1 rounded-md bg-[color:var(--color-good)] text-[#06210f] font-semibold text-xs hover:brightness-110 transition">
+                  class="px-2.5 py-1 rounded-md bg-[color:var(--color-good)] text-[#06210f] font-semibold text-xs hover:brightness-110 transition"
+                  data-i18n="update.install">
             Jetzt installieren
           </button>
           <a id="updateNotesLink" href="#" target="_blank"
-             class="px-2.5 py-1 rounded-md border border-[color:var(--color-border)] text-[color:var(--color-muted)] text-xs hover:bg-white/5 transition">
+             class="px-2.5 py-1 rounded-md border border-[color:var(--color-border)] text-[color:var(--color-muted)] text-xs hover:bg-white/5 transition"
+             data-i18n="update.details">
             Details
           </a>
           <button id="updateDismissBtn"
                   class="px-2 py-1 rounded-md text-[color:var(--color-muted)] text-xs hover:bg-white/5 transition"
+                  data-i18n-attr="aria-label:update.dismiss"
                   aria-label="Schließen">✕</button>
         </div>
       </div>
@@ -295,20 +298,21 @@
 
     <!-- ================= HEADER ================= -->
     <header class="flex items-center gap-4 mb-8">
-      <img src="../brand/voicewalker-logo-mark-light.png" alt="VoiceWalker"
+      <img src="voicewalker-logo-mark-light.png" alt="VoiceWalker"
            class="w-12 h-12" style="object-fit: contain;"/>
       <div class="flex-1 min-w-0">
         <h1 class="text-lg md:text-xl font-bold tracking-tight">MSFSVoiceWalker</h1>
-        <p class="text-xs text-[color:var(--color-muted)]">
+        <p class="text-xs text-[color:var(--color-muted)]" data-i18n="header.subtitle">
           Proximity-Voice für MSFS 2024 · P2P · kein Server
         </p>
       </div>
       <div class="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full glass text-xs text-[color:var(--color-muted)]">
         <span class="w-2 h-2 rounded-full bg-[color:var(--color-good)] dot-good"></span>
-        <span id="appVersion">v0.1.0</span> · online
+        <span id="appVersion">v0.1.0</span> · <span data-i18n="header.online">online</span>
       </div>
       <button id="openSettingsBtn" type="button"
               class="ml-1 w-9 h-9 rounded-full glass flex items-center justify-center text-[color:var(--color-muted)] hover:text-[color:var(--color-fg)] hover:bg-white/5 transition"
+              data-i18n-attr="title:header.tooltip.settings;aria-label:header.tooltip.settings"
               title="Einstellungen" aria-label="Einstellungen">
         <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"/>
@@ -324,19 +328,19 @@
     <div class="glass rounded-xl px-5 py-3 mb-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm">
       <div class="flex items-center gap-2">
         <div id="simDot" class="w-2 h-2 rounded-full bg-[color:var(--color-muted)] shrink-0"></div>
-        <span class="text-[10px] uppercase tracking-wider text-[color:var(--color-muted)]">Sim</span>
-        <span id="simStatus" class="font-semibold tabular-nums">verbinde…</span>
+        <span class="text-[10px] uppercase tracking-wider text-[color:var(--color-muted)]" data-i18n="strip.sim">Sim</span>
+        <span id="simStatus" class="font-semibold tabular-nums" data-i18n="status.connecting">verbinde…</span>
       </div>
       <div class="h-4 w-px bg-[color:var(--color-border)] hidden md:block"></div>
       <div class="flex items-center gap-2">
         <div id="micDot" class="w-2 h-2 rounded-full bg-[color:var(--color-muted)] shrink-0"></div>
-        <span class="text-[10px] uppercase tracking-wider text-[color:var(--color-muted)]">Mikro</span>
-        <span id="micStatus" class="font-semibold tabular-nums">initialisiere…</span>
+        <span class="text-[10px] uppercase tracking-wider text-[color:var(--color-muted)]" data-i18n="strip.mic">Mikro</span>
+        <span id="micStatus" class="font-semibold tabular-nums" data-i18n="status.initializing">initialisiere…</span>
       </div>
       <div class="h-4 w-px bg-[color:var(--color-border)] hidden md:block"></div>
       <div class="flex items-center gap-2">
         <div id="meshDot" class="w-2 h-2 rounded-full bg-[color:var(--color-muted)] shrink-0"></div>
-        <span class="text-[10px] uppercase tracking-wider text-[color:var(--color-muted)]">Mesh</span>
+        <span class="text-[10px] uppercase tracking-wider text-[color:var(--color-muted)]" data-i18n="strip.mesh">Mesh</span>
         <span id="meshStatus" class="font-semibold tabular-nums">0 Peers</span>
       </div>
     </div>
@@ -345,9 +349,9 @@
     <div class="glass rounded-2xl p-5 md:p-6 mb-6">
       <div class="flex items-baseline justify-between mb-2">
         <h2 class="text-[11px] font-bold tracking-widest uppercase text-[color:var(--color-muted)]">
-          Radar · <span id="radarRangeLabel">1.25 km</span> · Heading Up
+          <span data-i18n="radar.title">Radar</span> · <span id="radarRangeLabel">1.25 km</span> · <span data-i18n="radar.heading_up">Heading Up</span>
         </h2>
-        <span class="text-[10px] text-[color:var(--color-muted)]">
+        <span class="text-[10px] text-[color:var(--color-muted)]" data-i18n="radar.headphones_hint">
           Kopfhörer für echten Richtungs-Sound · Mausrad = Zoom
         </span>
       </div>
@@ -357,23 +361,23 @@
       <div class="flex flex-wrap justify-center gap-x-5 gap-y-2 mt-4 text-xs">
         <span class="flex items-center gap-2 text-[color:var(--color-muted)]">
           <span class="w-2 h-2 rounded-full bg-[color:var(--color-good)]"></span>
-          beidseitig hörbar
+          <span data-i18n="radar.legend.both">beidseitig hörbar</span>
         </span>
         <span class="flex items-center gap-2 text-[color:var(--color-muted)]">
           <span class="w-2 h-2 rounded-full bg-[color:var(--color-accent)]"></span>
-          nur du hörst ihn
+          <span data-i18n="radar.legend.you_hear">nur du hörst ihn</span>
         </span>
         <span class="flex items-center gap-2 text-[color:var(--color-muted)]">
           <span class="w-2 h-2 rounded-full bg-[color:var(--color-warn)]"></span>
-          nur er hört dich
+          <span data-i18n="radar.legend.he_hears">nur er hört dich</span>
         </span>
         <span class="flex items-center gap-2 text-[color:var(--color-muted)]">
           <span class="w-2 h-2 rounded-full bg-[#6b7896]"></span>
-          außer Reichweite
+          <span data-i18n="radar.legend.out">außer Reichweite</span>
         </span>
         <span class="flex items-center gap-2 text-[color:var(--color-muted)]">
           <span class="w-2 h-2 rounded-full bg-[color:var(--color-speaking)] shadow-[0_0_8px_var(--color-speaking)]"></span>
-          spricht gerade
+          <span data-i18n="radar.legend.speaking">spricht gerade</span>
         </span>
       </div>
     </div>
@@ -384,7 +388,7 @@
       <!-- SELF / PTT -->
       <div class="glass rounded-2xl p-5">
         <div class="flex items-center justify-between mb-3">
-          <h2 class="text-[11px] font-bold tracking-widest uppercase text-[color:var(--color-muted)]">Du</h2>
+          <h2 class="text-[11px] font-bold tracking-widest uppercase text-[color:var(--color-muted)]" data-i18n="self.title">Du</h2>
           <!-- Tracking-Toggle: wenn aus, verschwindet der User aus dem Mesh
                und andere sehen seine Position nicht mehr. Persistiert im
                Backend (config.json). -->
@@ -394,21 +398,22 @@
                          text-[10px] font-semibold uppercase tracking-wider
                          hover:bg-white/5 transition"
                   data-enabled="true"
+                  data-i18n-attr="title:self.tracking.tooltip"
                   title="Tracking ein-/ausschalten">
             <span id="trackingDot"
                   class="w-2 h-2 rounded-full bg-[color:var(--color-good)]
                          shadow-[0_0_8px_var(--color-good)]"></span>
-            <span id="trackingLabel">Sichtbar</span>
+            <span id="trackingLabel" data-i18n="self.tracking.on">Sichtbar</span>
           </button>
         </div>
 
         <dl class="space-y-2 text-sm">
           <div id="posRow" class="flex justify-between">
-            <dt class="text-[color:var(--color-muted)] text-xs">Position</dt>
+            <dt class="text-[color:var(--color-muted)] text-xs" data-i18n="self.position">Position</dt>
             <dd id="pos" class="tabular-nums text-xs">—</dd>
           </div>
           <div id="aglRow" class="flex justify-between">
-            <dt class="text-[color:var(--color-muted)] text-xs">Höhe über Grund</dt>
+            <dt class="text-[color:var(--color-muted)] text-xs" data-i18n="self.agl">Höhe über Grund</dt>
             <dd id="agl" class="tabular-nums text-xs">—</dd>
           </div>
           <div class="flex justify-between">
@@ -416,7 +421,7 @@
             <dd id="mode" class="text-xs">—</dd>
           </div>
           <div id="cellRow" class="flex justify-between">
-            <dt class="text-[color:var(--color-muted)] text-xs">Mesh-Zelle</dt>
+            <dt class="text-[color:var(--color-muted)] text-xs" data-i18n="self.cell">Mesh-Zelle</dt>
             <dd id="cell" class="tabular-nums text-xs">—</dd>
           </div>
           <!-- Nur wenn zu Fuß UND das Flugzeug nennenswert entfernt ist.
@@ -836,13 +841,14 @@
          role="dialog" aria-labelledby="settingsTitle">
       <div class="flex items-start justify-between gap-4 mb-5">
         <div>
-          <h2 id="settingsTitle" class="text-xl font-bold">Einstellungen</h2>
-          <p class="text-xs text-[color:var(--color-muted)] mt-1">
+          <h2 id="settingsTitle" class="text-xl font-bold" data-i18n="settings.title">Einstellungen</h2>
+          <p class="text-xs text-[color:var(--color-muted)] mt-1" data-i18n="settings.subtitle">
             Werden in <code>config.json</code> gespeichert.
           </p>
         </div>
         <button id="settingsCloseBtn" type="button"
                 class="text-[color:var(--color-muted)] hover:text-[color:var(--color-fg)] transition"
+                data-i18n-attr="aria-label:settings.close"
                 aria-label="Schliessen">✕</button>
       </div>
 
@@ -853,8 +859,8 @@
             <span></span>
           </label>
           <div class="flex-1 min-w-0">
-            <div class="text-sm font-semibold">Mit Windows starten</div>
-            <div class="text-xs text-[color:var(--color-muted)] mt-0.5">
+            <div class="text-sm font-semibold" data-i18n="settings.autostart">Mit Windows starten</div>
+            <div class="text-xs text-[color:var(--color-muted)] mt-0.5" data-i18n="settings.autostart.desc">
               MSFSVoiceWalker laeuft nach dem Login automatisch im Tray.
             </div>
           </div>
@@ -865,8 +871,8 @@
             <span></span>
           </label>
           <div class="flex-1 min-w-0">
-            <div class="text-sm font-semibold">Automatisch aktualisieren</div>
-            <div class="text-xs text-[color:var(--color-muted)] mt-0.5">
+            <div class="text-sm font-semibold" data-i18n="settings.autoupdate">Automatisch aktualisieren</div>
+            <div class="text-xs text-[color:var(--color-muted)] mt-0.5" data-i18n="settings.autoupdate.desc">
               Updates werden im Hintergrund installiert. Beim naechsten Start kurzer Hinweis.
             </div>
           </div>
@@ -877,20 +883,43 @@
             <span></span>
           </label>
           <div class="flex-1 min-w-0">
-            <div class="text-sm font-semibold">Logs bei Fehler an Entwickler senden</div>
-            <div class="text-xs text-[color:var(--color-muted)] mt-0.5">
+            <div class="text-sm font-semibold" data-i18n="settings.sendlogs">Logs bei Fehler an Entwickler senden</div>
+            <div class="text-xs text-[color:var(--color-muted)] mt-0.5" data-i18n="settings.sendlogs.desc">
               Bei einem Crash wird das Log automatisch an den Entwickler-Discord geschickt.
               Enthaelt Sim-Pfade, Versionen, Stacktraces — keine Audio-Daten.
             </div>
           </div>
         </li>
+        <li class="flex items-start gap-3">
+          <div class="mt-0.5 w-11 shrink-0 flex items-center justify-center">
+            <svg viewBox="0 0 24 24" class="w-4 h-4 text-[color:var(--color-muted)]" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M2 12h20M12 2a15.3 15.3 0 0 1 0 20M12 2a15.3 15.3 0 0 0 0 20"/>
+            </svg>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold" data-i18n="settings.language">Sprache</div>
+            <div class="text-xs text-[color:var(--color-muted)] mt-0.5 mb-1.5" data-i18n="settings.language.desc">
+              UI-Sprache von MSFSVoiceWalker. Greift sofort.
+            </div>
+            <select id="setLanguage"
+                    class="px-3 py-1.5 text-sm rounded-lg bg-[rgba(7,11,22,0.5)]
+                           border border-[color:var(--color-border)]
+                           focus:border-[color:var(--color-accent)] outline-none">
+              <option value="de">Deutsch</option>
+              <option value="en">English</option>
+            </select>
+          </div>
+        </li>
       </ul>
 
       <div class="border-t border-[color:var(--color-border)] pt-4">
-        <div class="text-xs text-[color:var(--color-muted)] mb-2">Manuell:</div>
+        <div class="text-xs text-[color:var(--color-muted)] mb-2" data-i18n="settings.feedback.manual">Manuell:</div>
         <div class="flex flex-col sm:flex-row gap-2">
           <input id="feedbackNote" type="text" maxlength="500"
                  placeholder="Kurz beschreiben (optional)…"
+                 data-i18n-attr="placeholder:settings.feedback.placeholder"
                  class="flex-1 px-3 py-2 text-sm rounded-lg bg-[rgba(7,11,22,0.5)]
                         border border-[color:var(--color-border)]
                         focus:border-[color:var(--color-accent)] outline-none
@@ -899,7 +928,8 @@
                   class="px-4 py-2 text-sm font-semibold rounded-lg
                          bg-[color:var(--color-accent)] text-[#0b1220]
                          hover:bg-blue-300 transition disabled:opacity-50
-                         disabled:cursor-not-allowed">
+                         disabled:cursor-not-allowed"
+                  data-i18n="settings.feedback.send">
             Logs jetzt senden
           </button>
         </div>
@@ -909,7 +939,8 @@
       <div class="flex justify-end mt-6">
         <button id="settingsDoneBtn" type="button"
                 class="px-4 py-2 text-sm rounded-lg border border-[color:var(--color-border)]
-                       text-[color:var(--color-muted)] hover:bg-white/5 transition">
+                       text-[color:var(--color-muted)] hover:bg-white/5 transition"
+                data-i18n="settings.done">
           Fertig
         </button>
       </div>
@@ -983,6 +1014,7 @@
     </div>
   </div>
 
+  <script src="/i18n.js"></script>
   <script type="module" src="/app.js"></script>
   <script type="module" src="/debug.js"></script>
 </body>
