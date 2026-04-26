@@ -21,7 +21,7 @@ Forks dürfen diese Namen nicht führen.
 
 ---
 
-Proximity-Voice-Chat für **Microsoft Flight Simulator 2020 & 2024** — vollautomatisch,
+Proximity-Voice-Chat für **Microsoft Flight Simulator 2024** — vollautomatisch,
 serverlos, kostenlos. Einmal installieren, beim Start des Sims läuft alles.
 
 Du hörst andere Piloten nur, wenn sie wirklich **in deiner Nähe** sind — wie
@@ -59,7 +59,7 @@ Das Setup
 - trägt MSFSVoiceWalker in die `exe.xml` des Simulators ein, sodass es beim Start von MSFS automatisch mithochgefahren wird,
 - registriert sich in **Apps & Features** für saubere Deinstallation.
 
-Voraussetzungen: **Windows 10/11**, **MSFS 2020 oder 2024** (oder beide), **ein Mikrofon**.
+Voraussetzungen: **Windows 10/11**, **MSFS 2024**, **ein Mikrofon**.
 Kein Account, kein Login, keine Registrierung.
 
 ---
@@ -168,7 +168,7 @@ Das Projekt besteht aus **drei Prozessen** auf dem Rechner des Spielers:
 
 ```
   ┌──────────────────────────┐
-  │  MSFS 2020 / 2024        │
+  │  MSFS 2024        │
   │  (Cockpit, Außenansicht, │
   │   Walker-Modus)          │
   └──────────┬───────────────┘

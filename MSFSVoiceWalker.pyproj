@@ -56,7 +56,11 @@
     <Content Include="web\debug.js" />
     <Content Include="web\overlay.html" />
     <!-- Branding -->
-    <Content Include="brand\voicewalker-logo.svg" />
+    <Content Include="brand\voicewalker-logo.png" />
+    <Content Include="brand\voicewalker-logo-mark.png" />
+    <Content Include="brand\voicewalker-logo-mark-light.png" />
+    <Content Include="brand\voicewalker-logo-horizontal.png" />
+    <Content Include="packaging\build-logo-assets.py" />
     <!-- MSFS-Addon -->
     <Content Include="msfs-addon\README.md" />
     <Content Include="msfs-addon\msfsvoicewalker\manifest.json" />
