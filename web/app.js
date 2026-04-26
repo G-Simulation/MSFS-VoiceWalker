@@ -2145,6 +2145,33 @@ function renderRadar() {
     ctx.fillRect(ax - lblW - 6, ay - 8, lblW + 8, 16);
     ctx.fillStyle = 'rgba(63, 220, 138, 0.95)';
     ctx.fillText(audioLbl, ax - 2, ay);
+
+    // Audio-Cone — 120 deg Front-Highlight in Heading-Richtung. Browser-UI
+    // ist Heading-Up (Welt rotiert), also zeigt der Cone fix nach oben am
+    // Radar. Visualisiert dass HRTF die vorderen Quellen am genauesten
+    // lokalisiert. Liegt OBEN auf dem Bubble-Kreis und ueberzeichnet ihn
+    // im Front-Sektor mit hoeherer Opacity.
+    const coneHalfRad = 60 * Math.PI / 180;
+    const coneCenter  = -Math.PI / 2;             // Heading-Up: oben = vorne
+    const coneStart   = coneCenter - coneHalfRad;
+    const coneEnd     = coneCenter + coneHalfRad;
+    const coneGrad    = ctx.createRadialGradient(cx, cy, 0, cx, cy, rRangePx);
+    coneGrad.addColorStop(0, 'rgba(63, 220, 138, 0.32)');
+    coneGrad.addColorStop(Math.min(0.95, rFullPx/rRangePx), 'rgba(63, 220, 138, 0.22)');
+    coneGrad.addColorStop(1, 'rgba(63, 220, 138, 0.00)');
+    ctx.fillStyle = coneGrad;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, rRangePx, coneStart, coneEnd);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(63, 220, 138, 0.7)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, rRangePx, coneStart, coneEnd);
+    ctx.closePath();
+    ctx.stroke();
   }
 
   // Eigenes Icon im Zentrum — Top-Down-Flugzeug oder Walker-Kreis.

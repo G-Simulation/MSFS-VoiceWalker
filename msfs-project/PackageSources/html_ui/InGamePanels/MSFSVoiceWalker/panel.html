@@ -251,42 +251,78 @@
         border-bottom-color: var(--accent);
       }
       .vw-pane { display: none; flex: 1 1 auto;
-                 flex-direction: column; gap: 8px; min-height: 0; }
+                 flex-direction: column; gap: 10px; min-height: 0;
+                 padding: 8px 2px 4px; overflow-y: auto; }
       .vw-pane.active { display: flex; }
 
-      /* SETUP-Tab Controls */
+      /* SETUP-Tab — Card-Layout fuer klarere Sektionen */
+      .vw-setup-card {
+        background: rgba(15, 25, 48, 0.55);
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        padding: 11px 13px 12px;
+        display: flex; flex-direction: column; gap: 9px;
+      }
+      .vw-setup-card-title {
+        font-size: 9px; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.14em;
+        color: var(--accent);
+        margin-bottom: 2px;
+      }
+
       .vw-setup-row {
-        display: flex; align-items: center; gap: 8px;
+        display: flex; align-items: center; gap: 10px;
         font-size: 11px;
       }
-      .vw-setup-row label {
-        flex: 0 0 70px; color: var(--muted);
+      /* Coherent GT setzt sonst einen Default-Hintergrund auf <label> —
+         explizit zuruecksetzen damit die Labels nicht wie Buttons aussehen. */
+      .vw-setup-row > label,
+      .vw-bind-row > label {
+        flex: 0 0 86px;
+        color: var(--muted);
+        background: transparent !important;
+        border: none !important;
+        padding: 0; margin: 0;
+        font-size: 11px; font-weight: 500;
       }
       .vw-setup-row select,
       .vw-setup-row input[type="text"] {
         flex: 1; min-width: 0;
-        background: rgba(15,25,48,0.7);
+        background: rgba(15, 25, 48, 0.85);
         border: 1px solid var(--border);
-        border-radius: 4px;
-        padding: 3px 6px; color: var(--fg);
-        font: inherit;
+        border-radius: 5px;
+        padding: 6px 9px;
+        color: var(--fg);
+        font: inherit; font-size: 11px;
+        outline: none;
+        transition: border-color 0.12s, background 0.12s;
+      }
+      .vw-setup-row select:hover,
+      .vw-setup-row input[type="text"]:hover {
+        border-color: rgba(106,165,255,0.4);
+      }
+      .vw-setup-row select:focus,
+      .vw-setup-row input[type="text"]:focus {
+        border-color: var(--accent);
+        background: rgba(15, 25, 48, 1);
       }
       .vw-setup-row input[type="range"] {
         flex: 1; min-width: 0;
         accent-color: var(--accent);
       }
       .vw-setup-row .pct {
-        flex: 0 0 36px; text-align: right;
+        flex: 0 0 46px; text-align: right;
         font-family: ui-monospace, "SF Mono", Menlo, monospace;
-        font-size: 10px; color: var(--accent);
+        font-size: 11px; color: var(--accent); font-weight: 600;
       }
+
       .vw-mode-toggle {
-        display: flex; gap: 4px; flex: 1;
+        display: flex; gap: 6px; flex: 1;
       }
       .vw-mode-btn {
-        flex: 1; padding: 6px 8px;
+        flex: 1; padding: 7px 10px;
         background: rgba(106,165,255,0.06);
-        border: 1px solid var(--border); border-radius: 4px;
+        border: 1px solid var(--border); border-radius: 5px;
         color: var(--muted);
         font-size: 11px; font-weight: 600;
         cursor: pointer; user-select: none;
@@ -296,23 +332,37 @@
       .vw-mode-btn:hover {
         background: rgba(106,165,255,0.18);
         color: var(--fg);
+        border-color: rgba(106,165,255,0.35);
       }
       .vw-mode-btn.active {
         background: var(--accent); color: #0b1220;
         border-color: var(--accent);
       }
+
       .vw-bind-row {
-        display: flex; align-items: center; gap: 8px;
-        font-size: 11px;
+        display: flex; align-items: center; gap: 10px;
       }
       .vw-bind-status {
         flex: 1; min-width: 0;
+        background: rgba(15, 25, 48, 0.85);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 6px 9px;
         font-family: ui-monospace, "SF Mono", Menlo, monospace;
         font-size: 10px; color: var(--muted);
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       }
-      .vw-bind-status.waiting { color: var(--warn); }
-      .vw-bind-status.ok { color: var(--good); }
+      .vw-bind-status.waiting {
+        color: var(--warn); border-color: rgba(255,180,84,0.4);
+        background: rgba(255,180,84,0.08);
+      }
+      .vw-bind-status.ok {
+        color: var(--good); border-color: rgba(63,220,138,0.4);
+        background: rgba(63,220,138,0.08);
+      }
+      .vw-bind-row .vw-mode-btn {
+        flex: 0 0 100px;
+      }
 
       /* PRO-Tab */
       .vw-pro-pill {
@@ -415,35 +465,51 @@
 
         <!-- ===== SETUP-PANE ===== -->
         <div class="vw-pane" id="pane-setup">
-          <div class="vw-setup-row">
-            <label for="vw-mic">Mikrofon</label>
-            <select id="vw-mic"><option value="">Standard</option></select>
-          </div>
-          <div class="vw-setup-row">
-            <label for="vw-spk">Lautsprecher</label>
-            <select id="vw-spk"><option value="">Standard</option></select>
-          </div>
-          <div class="vw-setup-row">
-            <label for="vw-vol">Lautstaerke</label>
-            <input type="range" id="vw-vol" min="0" max="150" step="1" value="100">
-            <span class="pct" id="vw-vol-val">100%</span>
-          </div>
-          <div class="vw-setup-row">
-            <label>Modus</label>
-            <div class="vw-mode-toggle">
-              <div class="vw-mode-btn active" id="vw-mode-ptt">PTT</div>
-              <div class="vw-mode-btn" id="vw-mode-vox">Offen (VOX)</div>
+
+          <!-- Audio-Karte: Mic + Speaker + Lautstaerke -->
+          <div class="vw-setup-card">
+            <div class="vw-setup-card-title">Audio</div>
+            <div class="vw-setup-row">
+              <label for="vw-mic">Mikrofon</label>
+              <select id="vw-mic"><option value="">Standard</option></select>
+            </div>
+            <div class="vw-setup-row">
+              <label for="vw-spk">Lautsprecher</label>
+              <select id="vw-spk"><option value="">Standard</option></select>
+            </div>
+            <div class="vw-setup-row">
+              <label for="vw-vol">Lautstaerke</label>
+              <input type="range" id="vw-vol" min="0" max="150" step="1" value="100">
+              <span class="pct" id="vw-vol-val">100%</span>
             </div>
           </div>
-          <div class="vw-bind-row">
-            <label style="flex:0 0 70px;color:var(--muted);font-size:11px">PTT-Taste</label>
-            <span class="vw-bind-status" id="vw-bind-status">keine</span>
-            <div class="vw-mode-btn" id="vw-bind-btn" style="flex:0 0 110px">zuweisen</div>
+
+          <!-- Steuerung-Karte: Modus + PTT-Bind -->
+          <div class="vw-setup-card">
+            <div class="vw-setup-card-title">Steuerung</div>
+            <div class="vw-setup-row">
+              <label>Modus</label>
+              <div class="vw-mode-toggle">
+                <div class="vw-mode-btn active" id="vw-mode-ptt">PTT</div>
+                <div class="vw-mode-btn" id="vw-mode-vox">Offen (VOX)</div>
+              </div>
+            </div>
+            <div class="vw-bind-row">
+              <label>PTT-Taste</label>
+              <span class="vw-bind-status" id="vw-bind-status">keine</span>
+              <div class="vw-mode-btn" id="vw-bind-btn">zuweisen</div>
+            </div>
           </div>
-          <div class="vw-setup-row">
-            <label for="vw-cs">Callsign</label>
-            <input type="text" id="vw-cs" maxlength="16" placeholder="PILOT">
+
+          <!-- Profil-Karte: Callsign -->
+          <div class="vw-setup-card">
+            <div class="vw-setup-card-title">Profil</div>
+            <div class="vw-setup-row">
+              <label for="vw-cs">Callsign</label>
+              <input type="text" id="vw-cs" maxlength="16" placeholder="PILOT">
+            </div>
           </div>
+
         </div>
 
         <!-- ===== PRO & EVENTS PANE ===== -->

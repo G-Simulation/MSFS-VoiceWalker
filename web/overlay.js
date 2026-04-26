@@ -277,20 +277,42 @@
     const selfHeading = (state.mySim && Number.isFinite(+state.mySim.heading_deg))
       ? +state.mySim.heading_deg : 0;
 
-    // --- Hörbarkeits-Kreis (Audio-Bubble) -----------------------------
+    // --- Hörbarkeits-Kreis (Audio-Bubble) + Front-Cone ----------------
     if (state.mySim && state.myRange > 0) {
-      const rAudioPx = R * Math.min(1, state.myRange / radarRangeM);
-      if (rAudioPx > 3) {
-        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, rAudioPx);
-        grad.addColorStop(0, 'rgba(63,220,138,0.22)');
-        grad.addColorStop(1, 'rgba(63,220,138,0.00)');
-        ctx.fillStyle = grad;
-        ctx.beginPath(); ctx.arc(cx, cy, rAudioPx, 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = 'rgba(63,220,138,0.55)';
-        ctx.setLineDash([2, 3]);
-        ctx.beginPath(); ctx.arc(cx, cy, rAudioPx, 0, Math.PI * 2); ctx.stroke();
-        ctx.setLineDash([]);
-      }
+      const rAudioRaw = R * Math.min(1, state.myRange / radarRangeM);
+      // Mindestgroesse damit Walker (10m) auf grossem Zoom sichtbar bleibt.
+      const rAudioPx  = rAudioRaw < 8 ? Math.max(rAudioRaw, 8) : rAudioRaw;
+      // Vollkreis mit Gradient — alle Richtungen
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, rAudioPx);
+      grad.addColorStop(0, 'rgba(63,220,138,0.18)');
+      grad.addColorStop(1, 'rgba(63,220,138,0.00)');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(cx, cy, rAudioPx, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(63,220,138,0.30)';
+      ctx.setLineDash([2, 4]);
+      ctx.beginPath(); ctx.arc(cx, cy, rAudioPx, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+      // 120 deg Front-Cone (Heading-Up: oben am Radar = vorne)
+      const coneHalfRad = 60 * Math.PI / 180;
+      const coneCenter  = -Math.PI / 2;
+      const coneStart   = coneCenter - coneHalfRad;
+      const coneEnd     = coneCenter + coneHalfRad;
+      const coneGrad    = ctx.createRadialGradient(cx, cy, 0, cx, cy, rAudioPx);
+      coneGrad.addColorStop(0, 'rgba(63,220,138,0.34)');
+      coneGrad.addColorStop(1, 'rgba(63,220,138,0.00)');
+      ctx.fillStyle = coneGrad;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, rAudioPx, coneStart, coneEnd);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(63,220,138,0.7)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, rAudioPx, coneStart, coneEnd);
+      ctx.closePath();
+      ctx.stroke();
     }
 
     // --- DU im Zentrum (Walker-Kreis oder Flugzeug-Icon) --------------

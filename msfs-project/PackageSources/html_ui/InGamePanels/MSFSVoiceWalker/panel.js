@@ -256,38 +256,54 @@
     ctx.fillText('E', cx + R - 8, cy);
     ctx.fillText('W', cx - R + 8, cy);
 
-    // Audio-Bubble (Hoerbarkeits-Kreis in gruen). Bei Walker (10 m) auf
-    // grossem Zoom ist die Bubble rechnerisch winzig — wir geben ihr eine
-    // visuelle Mindestgroesse damit der User den Hoerbereich ueberhaupt
-    // sieht. Ab 8 px wird die korrekte Mathe-Groesse gezeichnet.
+    // Audio-Bubble (Hoerbarkeits-Kreis) + Front-Cone. Cone zeigt in
+    // Heading-Richtung — Panel ist North-Up, Cone rotiert mit Pilot.
     if (state.mySim && state.myRange > 0) {
       const rAudioRaw = R * Math.min(1, state.myRange / radarRangeM);
       const rAudio    = rAudioRaw < 8 ? Math.max(rAudioRaw, 8) : rAudioRaw;
-      if (rAudio > 0) {
-        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, rAudio);
-        grad.addColorStop(0, 'rgba(63,220,138,0.22)');
-        grad.addColorStop(1, 'rgba(63,220,138,0.00)');
-        ctx.fillStyle = grad;
-        ctx.beginPath(); ctx.arc(cx, cy, rAudio, 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = 'rgba(63,220,138,0.55)';
-        ctx.setLineDash([2, 3]);
-        ctx.beginPath(); ctx.arc(cx, cy, rAudio, 0, Math.PI * 2); ctx.stroke();
-        ctx.setLineDash([]);
+      // Vollkreis (alle Richtungen, dezent)
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, rAudio);
+      grad.addColorStop(0, 'rgba(63,220,138,0.18)');
+      grad.addColorStop(1, 'rgba(63,220,138,0.00)');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(cx, cy, rAudio, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(63,220,138,0.30)';
+      ctx.setLineDash([2, 4]);
+      ctx.beginPath(); ctx.arc(cx, cy, rAudio, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+      // Front-Cone (120 deg) in Heading-Richtung
+      const coneHalfRad = 60 * Math.PI / 180;
+      const coneCenter  = (selfHeading * Math.PI / 180) - Math.PI / 2;
+      const coneStart   = coneCenter - coneHalfRad;
+      const coneEnd     = coneCenter + coneHalfRad;
+      const coneGrad    = ctx.createRadialGradient(cx, cy, 0, cx, cy, rAudio);
+      coneGrad.addColorStop(0, 'rgba(63,220,138,0.34)');
+      coneGrad.addColorStop(1, 'rgba(63,220,138,0.00)');
+      ctx.fillStyle = coneGrad;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, rAudio, coneStart, coneEnd);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(63,220,138,0.7)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, rAudio, coneStart, coneEnd);
+      ctx.closePath();
+      ctx.stroke();
 
-        // Audio-Bubble-Label
-        // Canvas-Text laeuft nicht durch Glyph-Fallback via <span>, deswegen
-        // hier kein Emoji — nur Text-Label. HTML-Elemente nutzen .vw-emoji.
-        const audioLbl = 'AUDIO ' + fmtRange(state.myRange);
-        const ax = cx - rAudio * 0.707;
-        const ay = cy + rAudio * 0.707 + 2;
-        ctx.font = '600 10px ui-monospace, "SF Mono", Menlo, monospace';
-        ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-        const lblW = ctx.measureText(audioLbl).width;
-        ctx.fillStyle = 'rgba(11, 18, 32, 0.8)';
-        ctx.fillRect(ax - lblW - 6, ay - 8, lblW + 8, 16);
-        ctx.fillStyle = 'rgba(63, 220, 138, 0.95)';
-        ctx.fillText(audioLbl, ax - 2, ay);
-      }
+      // Audio-Bubble-Label — unten links
+      const audioLbl = 'AUDIO ' + fmtRange(state.myRange);
+      const ax = cx - rAudio * 0.707;
+      const ay = cy + rAudio * 0.707 + 2;
+      ctx.font = '600 10px ui-monospace, "SF Mono", Menlo, monospace';
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      const lblW = ctx.measureText(audioLbl).width;
+      ctx.fillStyle = 'rgba(11, 18, 32, 0.8)';
+      ctx.fillRect(ax - lblW - 6, ay - 8, lblW + 8, 16);
+      ctx.fillStyle = 'rgba(63, 220, 138, 0.95)';
+      ctx.fillText(audioLbl, ax - 2, ay);
     }
 
     // DU im Zentrum — North-Up: das Symbol rotiert mit dem Heading,
@@ -660,63 +676,7 @@
     canvas.title = 'Mausrad = Zoom · Doppelklick = Reset';
   }
 
-  // --- Action-Buttons --------------------------------------------------
-  function setupButtons() {
-    const pttBtn   = $('vw-ptt');
-    const trackBtn = $('vw-track');
-    const farBtn   = $('vw-far');
-
-    // PTT: down = press, up/leave = release
-    if (pttBtn) {
-      const press = function () {
-        pttBtn.classList.add('live');
-        sendAction('ptt-down');
-      };
-      const release = function () {
-        pttBtn.classList.remove('live');
-        sendAction('ptt-up');
-      };
-      pttBtn.addEventListener('mousedown',  press);
-      pttBtn.addEventListener('mouseup',    release);
-      pttBtn.addEventListener('mouseleave', release);
-      pttBtn.addEventListener('touchstart', function (e) { press();   e.preventDefault(); });
-      pttBtn.addEventListener('touchend',   function (e) { release(); e.preventDefault(); });
-    }
-
-    if (trackBtn) {
-      trackBtn.addEventListener('click', function () {
-        sendAction('toggle-tracking');
-      });
-    }
-
-    if (farBtn) {
-      farBtn.addEventListener('click', function () {
-        sendAction('toggle-far');
-      });
-    }
-  }
-
-  // --- Tab-Switch ------------------------------------------------------
-  function setupTabs() {
-    const tabs  = document.querySelectorAll('.vw-tab');
-    const panes = document.querySelectorAll('.vw-pane');
-    tabs.forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        tabs.forEach(function (b) { b.classList.remove('active'); });
-        panes.forEach(function (p) { p.classList.remove('active'); });
-        btn.classList.add('active');
-        const target = document.getElementById('pane-' + btn.dataset.pane);
-        if (target) target.classList.add('active');
-        // Beim Wechsel auf Radar-Tab: Re-Layout, falls Canvas-Groesse stimmt nicht
-        if (btn.dataset.pane === 'radar') {
-          resizeCanvas();
-          scheduleRender();
-        }
-      });
-    });
-  }
-
-  // --- Setup-Tab Wiring ------------------------------------------------
+  // --- Setup-Tab Helpers ------------------------------------------------
   function sendActionPayload(extra) {
     if (!VW.ws || VW.ws.readyState !== 1) return;
     try { VW.ws.send(JSON.stringify(Object.assign({ type: 'panel_action' }, extra))); }
@@ -731,52 +691,117 @@
   }
   let lastMicHash = '', lastSpkHash = '';
 
-  function setupSetupTab() {
-    const mic = $('vw-mic');
-    const spk = $('vw-spk');
-    const vol = $('vw-vol');
-    const volV = $('vw-vol-val');
-    const mPtt = $('vw-mode-ptt');
-    const mVox = $('vw-mode-vox');
-    const bindBtn = $('vw-bind-btn');
-    const cs  = $('vw-cs');
-    const proOpen = $('vw-pro-open');
+  function applyTabSwitch(tabBtn) {
+    const tabs  = document.querySelectorAll('.vw-tab');
+    const panes = document.querySelectorAll('.vw-pane');
+    tabs.forEach(function (b) { b.classList.remove('active'); });
+    panes.forEach(function (p) { p.classList.remove('active'); });
+    tabBtn.classList.add('active');
+    const target = document.getElementById('pane-' + tabBtn.dataset.pane);
+    if (target) target.classList.add('active');
+    if (tabBtn.dataset.pane === 'radar') {
+      resizeCanvas();
+      scheduleRender();
+    }
+  }
 
-    // Live-Updates — jedes Input/Click sendet sofort an Browser via Backend
-    if (mic) mic.addEventListener('change', function () {
-      sendActionPayload({ action: 'select-mic', deviceId: mic.value });
-    });
-    if (spk) spk.addEventListener('change', function () {
-      sendActionPayload({ action: 'select-speaker', deviceId: spk.value });
-    });
-    if (vol) {
-      const onVol = function () {
-        const pct = parseInt(vol.value, 10) || 0;
+  // --- Globaler Event-Router (Capture-Phase) ----------------------------
+  // Coherent GT's <ingame-ui>-Wrapper kann pro-element addEventListener
+  // schlucken (race condition bei DOM-Ready, oder Wrapper faengt selbst
+  // ab). Loesung: ein einziger Capture-Phase-Listener auf window, der
+  // anhand der Element-ID/Klasse routet — feuert garantiert vor jedem
+  // anderen Handler.
+  function setupEventRouter() {
+    // PTT-Button braucht mousedown/up statt click (halten zum sprechen)
+    window.addEventListener('mousedown', function (e) {
+      const t = e.target && e.target.closest && e.target.closest('#vw-ptt');
+      if (!t) return;
+      t.classList.add('live');
+      sendAction('ptt-down');
+    }, { capture: true });
+    const releasePtt = function () {
+      const t = document.getElementById('vw-ptt');
+      if (t) t.classList.remove('live');
+      sendAction('ptt-up');
+    };
+    window.addEventListener('mouseup', releasePtt, { capture: true });
+    window.addEventListener('mouseleave', function (e) {
+      // mouseleave bubbelt nicht; wir hoeren auf den eigentlichen Btn separat
+      if (e.target && e.target.id === 'vw-ptt') releasePtt();
+    }, { capture: true });
+
+    // Click-Router fuer alle Buttons + Tabs
+    window.addEventListener('click', function (e) {
+      if (!e.target || !e.target.closest) return;
+
+      // Tab-Wechsel
+      const tabBtn = e.target.closest('.vw-tab');
+      if (tabBtn && tabBtn.dataset && tabBtn.dataset.pane) {
+        applyTabSwitch(tabBtn);
+        return;
+      }
+
+      const idEl = e.target.closest('[id]');
+      if (!idEl) return;
+      const id = idEl.id;
+
+      // Action-Buttons (Radar-Pane)
+      if (id === 'vw-track')      { sendAction('toggle-tracking'); return; }
+      if (id === 'vw-far')        { sendAction('toggle-far');      return; }
+
+      // Setup-Tab
+      if (id === 'vw-mode-ptt') {
+        if (state.ui && state.ui.voxMode) sendActionPayload({ action: 'toggle-vox' });
+        return;
+      }
+      if (id === 'vw-mode-vox') {
+        if (!(state.ui && state.ui.voxMode)) sendActionPayload({ action: 'toggle-vox' });
+        return;
+      }
+      if (id === 'vw-bind-btn') {
+        if (state.ui && state.ui.bindingInProgress) {
+          sendActionPayload({ action: 'ptt-bind-cancel' });
+        } else {
+          sendActionPayload({ action: 'ptt-bind-start' });
+        }
+        return;
+      }
+      if (id === 'vw-pro-open') {
+        sendActionPayload({ action: 'open-browser-license' });
+        return;
+      }
+    }, { capture: true });
+
+    // Change-Router fuer Selects + Callsign
+    window.addEventListener('change', function (e) {
+      const id = e.target && e.target.id;
+      if (id === 'vw-mic') {
+        sendActionPayload({ action: 'select-mic', deviceId: e.target.value });
+      } else if (id === 'vw-spk') {
+        sendActionPayload({ action: 'select-speaker', deviceId: e.target.value });
+      } else if (id === 'vw-cs') {
+        sendActionPayload({ action: 'set-callsign', value: e.target.value });
+      }
+    }, { capture: true });
+
+    // Input-Router fuer Volume-Slider (live)
+    window.addEventListener('input', function (e) {
+      if (e.target && e.target.id === 'vw-vol') {
+        const pct = parseInt(e.target.value, 10) || 0;
+        const volV = document.getElementById('vw-vol-val');
         if (volV) volV.textContent = pct + '%';
         sendActionPayload({ action: 'set-master-volume', value: pct / 100 });
-      };
-      vol.addEventListener('input', onVol);
-    }
-    if (mPtt) mPtt.addEventListener('click', function () {
-      // Wenn aktuell VOX → toggle (Wechsel zu PTT)
-      if (state.ui && state.ui.voxMode) sendActionPayload({ action: 'toggle-vox' });
-    });
-    if (mVox) mVox.addEventListener('click', function () {
-      if (!(state.ui && state.ui.voxMode)) sendActionPayload({ action: 'toggle-vox' });
-    });
-    if (bindBtn) bindBtn.addEventListener('click', function () {
-      // Wenn schon im Bind-Mode: cancel; sonst start
-      if (state.ui && state.ui.bindingInProgress) {
-        sendActionPayload({ action: 'ptt-bind-cancel' });
-      } else {
-        sendActionPayload({ action: 'ptt-bind-start' });
       }
-    });
-    if (cs) cs.addEventListener('change', function () {
-      sendActionPayload({ action: 'set-callsign', value: cs.value });
-    });
-    if (proOpen) proOpen.addEventListener('click', function () {
-      sendActionPayload({ action: 'open-browser-license' });
+    }, { capture: true });
+  }
+  // Backward-compat aliases — werden in boot() weiter aufgerufen
+  function setupButtons()  { /* ersetzt durch setupEventRouter */ }
+  function setupTabs()     { /* ersetzt durch setupEventRouter */ }
+  function setupSetupTab() {
+    // unused legacy — alle Listener jetzt zentral in setupEventRouter().
+    // Diese Funktion bleibt nur als no-op, falls sie noch von boot() gerufen
+    // wird (Aufrufer wird gleich auf setupEventRouter umgestellt).
+    return;
     });
   }
 
@@ -906,6 +931,7 @@
     setConn('offline', 'offline');
     resizeCanvas();
     setupWheelZoom();
+    setupEventRouter();
     setupButtons();
     setupTabs();
     setupSetupTab();
