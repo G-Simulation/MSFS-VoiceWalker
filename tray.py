@@ -64,17 +64,27 @@ def _edge_user_data_dir(suffix: str = "") -> str:
 
 def _open_app_window(url: str, size: Tuple[int, int],
                      profile_suffix: str = "") -> bool:
-    """Edge --app=URL Modus. Gibt True zurueck wenn Edge gefunden + gestartet."""
+    """Edge --app=URL Modus. Gibt True zurueck wenn Edge gefunden + gestartet.
+
+    creationflags=CREATE_NO_WINDOW verhindert dass Windows kurzzeitig ein
+    Konsolen-Fenster fuer den Subprocess oeffnet, wenn die Parent-App
+    selbst windowed (console=False) ist.
+    """
     edge = _edge_path()
     if not edge:
         return False
     try:
-        subprocess.Popen([
-            edge,
-            f"--app={url}",
-            f"--window-size={size[0]},{size[1]}",
-            f"--user-data-dir={_edge_user_data_dir(profile_suffix)}",
-        ])
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        subprocess.Popen(
+            [
+                edge,
+                f"--app={url}",
+                f"--window-size={size[0]},{size[1]}",
+                f"--user-data-dir={_edge_user_data_dir(profile_suffix)}",
+            ],
+            creationflags=flags,
+            close_fds=True,
+        )
         return True
     except Exception as e:
         log.warning("tray: Edge konnte nicht gestartet werden: %s", e)
