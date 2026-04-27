@@ -30,6 +30,16 @@ import urllib.request
 
 log = logging.getLogger("license")
 
+# Build-time gate: DEV-PRO-* / DEV-FREE Bypass-Keys und User-konfigurierbare
+# LICENSE_API_URL sind nur in Debug-Builds aktiv. Im Public-Build (gesignte
+# Setup.exe) wird der Bypass stillgelegt — sonst koennte jeder mit Source-
+# Zugang sich `DEV-PRO-foo` als Pro-Key zaubern oder die API auf einen eigenen
+# Server umlenken.
+try:
+    from build_config import DEBUG_BUILD as _DEBUG_BUILD  # type: ignore
+except Exception:
+    _DEBUG_BUILD = False
+
 CACHE_FILENAME   = "license_cache.json"
 GRACE_SECONDS    = 7 * 24 * 3600       # offline grace
 DEV_PRO_SECONDS  = 30 * 24 * 3600      # dev keys last 30 days each validate
@@ -188,14 +198,20 @@ def validate(key: str, config_dir: pathlib.Path) -> dict:
     """Validate a license key. Returns dict with at least:
        is_pro, key, reason, mode, validated_at, expires_at."""
     now = time.time()
-    _reload_env_from_secrets(config_dir)
-    _purge_legacy_lmfwc_url()
-    api_url = os.environ.get("LICENSE_API_URL", "").strip() or DEFAULT_API_URL
+    if _DEBUG_BUILD:
+        # Nur in Dev-Builds: env-Datei nachladen + LICENSE_API_URL-Override
+        # erlaubt. Im Public-Build laeuft alles strikt gegen DEFAULT_API_URL.
+        _reload_env_from_secrets(config_dir)
+        _purge_legacy_lmfwc_url()
+        api_url = os.environ.get("LICENSE_API_URL", "").strip() or DEFAULT_API_URL
+    else:
+        api_url = DEFAULT_API_URL
 
-    # Dev-keys umgehen den Backend-Call auch wenn der konfiguriert ist —
-    # so koennen wir Features lokal testen ohne die Prod-API zu belasten.
+    # Dev-keys (DEV-PRO-* / DEV-FREE) umgehen den Backend-Call — nur in Dev-
+    # Builds! Im Public-Build wuerde sich sonst jeder mit Source-Zugang einen
+    # gueltigen Pro-Key zaubern (`DEV-PRO-foo`).
     k_up = (key or "").strip().upper()
-    if k_up.startswith("DEV-PRO-") or k_up == "DEV-FREE":
+    if _DEBUG_BUILD and (k_up.startswith("DEV-PRO-") or k_up == "DEV-FREE"):
         result = _dev_validate(key)
         _save_cache(config_dir, result)
         return result
@@ -225,7 +241,15 @@ def validate(key: str, config_dir: pathlib.Path) -> dict:
                 "mode": "backend", "validated_at": now, "expires_at": 0,
             }
 
-    # No backend configured → dev-mode
-    result = _dev_validate(key)
+    # No backend configured (kann nur im Debug-Build passieren, weil Public
+    # immer DEFAULT_API_URL hat) → dev-mode fallback. Im Public-Build koennen
+    # wir hier nicht ankommen, aber falls doch: hart als not-pro ablehnen.
+    if _DEBUG_BUILD:
+        result = _dev_validate(key)
+    else:
+        result = {
+            "is_pro": False, "key": key, "reason": "no api configured",
+            "mode": "none", "validated_at": now, "expires_at": 0,
+        }
     _save_cache(config_dir, result)
     return result
