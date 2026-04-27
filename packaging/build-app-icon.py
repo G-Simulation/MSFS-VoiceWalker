@@ -29,11 +29,10 @@ BORDER = (255, 255, 255, 255)  # weisser Rahmen
 
 img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
 d = ImageDraw.Draw(img)
-# Rahmen-Stroke-Width passend zur Linienstaerke des Logo-Kreises: am
-# voicewalker-logo-mark.png misst der Kreis-Outline 14 px (von 512 px),
-# das Mark wird im Icon auf 72 % der Seite skaliert (184 px) → 14 * 184/512 ≈ 5 px.
+# Rahmen-Stroke 5 px weiss — passt zur Linienstaerke des Logo-Kreises
+# (gemessen am mark.png: 14 px / 512 px → bei mark-target 184 px ≈ 5 px).
 border_w = 5
-pad = 6  # gibt dem Rahmen etwas Luft zum Bildrand fuer sauberes Antialiasing
+pad = 6
 radius = 56
 d.rounded_rectangle((pad, pad, S - pad, S - pad), radius=radius,
                     fill=BG, outline=BORDER, width=border_w)
