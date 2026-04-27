@@ -2668,10 +2668,11 @@ function renderPeers() {
     if (Math.abs(lat) < 0.0001 && Math.abs(lon) < 0.0001) continue;
     all.push([id, p]);
   }
+  const T = (k) => (window.i18n ? window.i18n.t(k) : k);
   if (all.length === 0) {
     host.innerHTML =
       '<p class="text-center text-xs text-[color:var(--color-muted)] py-4">' +
-      'Warte auf andere Piloten in deiner Nähe…</p>';
+      T('peers.waiting') + '</p>';
     return;
   }
   // Drei Kategorien:
@@ -2708,7 +2709,7 @@ function renderPeers() {
     const cs = p.sim?.callsign || id.slice(0, 8);
     const d  = p.currentDistance != null ? fmtDist(p.currentDistance) : '—';
     const v  = Math.max(0, Math.min(1, p.currentVolume ?? 0));
-    const modeTag = p.sim?.on_foot ? '<span class="badge walker">zu Fuß</span>' : '';
+    const modeTag = p.sim?.on_foot ? `<span class="badge walker">${T('peer.badge.foot')}</span>` : '';
     const speakingCls = p.speaking && p.currentVolume > 0.05 ? ' speaking' : '';
     return `
       <div class="peer-row ${cls}${speakingCls}">
@@ -2723,20 +2724,20 @@ function renderPeers() {
 
   let html = '';
   if (inRange.length) {
-    html += section('in Hörweite', inRange.length);
+    html += section(T('peers.section.in_range'), inRange.length);
     html += inRange.map(e => row(e, 'in-range')).join('');
   } else {
-    html += section('in Hörweite', 0);
-    html += '<p class="text-center text-xs text-[color:var(--color-muted)] py-2">niemand in Hörweite</p>';
+    html += section(T('peers.section.in_range'), 0);
+    html += `<p class="text-center text-xs text-[color:var(--color-muted)] py-2">${T('peers.none_in_range')}</p>`;
   }
   // Andere Audio-Welt — sichtbar aber nicht hoerbar (Walker ↔ Cockpit-Split)
   if (otherMode.length) {
-    const label = mineOnFoot ? 'im Cockpit (andere Welt)' : 'zu Fuß (andere Welt)';
+    const label = mineOnFoot ? T('peers.section.cockpit_other') : T('peers.section.foot_other');
     html += section(label, otherMode.length);
     html += otherMode.map(e => row(e, 'far')).join('');
   }
   if (state.showFar && far.length) {
-    html += section('außer Reichweite', far.length);
+    html += section(T('peers.section.out_range'), far.length);
     html += far.map(e => row(e, 'far')).join('');
   }
   host.innerHTML = html;

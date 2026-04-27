@@ -756,10 +756,10 @@
        aria-hidden="true">
     <div class="glass rounded-2xl max-w-2xl w-full p-6 md:p-8 border border-[color:var(--color-border)]"
          role="dialog" aria-labelledby="consentTitle">
-      <h2 id="consentTitle" class="text-xl md:text-2xl font-bold mb-1">
+      <h2 id="consentTitle" class="text-xl md:text-2xl font-bold mb-1" data-i18n="consent.title">
         Kurz zur Einordnung
       </h2>
-      <p class="text-sm text-[color:var(--color-muted)] mb-5">
+      <p class="text-sm text-[color:var(--color-muted)] mb-5" data-i18n="consent.intro">
         Bevor MSFSVoiceWalker loslegt, hier was im Hintergrund passiert.
         Keine langen AGB, nur das Wichtige:
       </p>
@@ -768,57 +768,59 @@
         <li class="flex gap-3">
           <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--color-accent)] mt-2 shrink-0"></span>
           <div>
-            <strong>Dein Mikrofon wird an Piloten in deiner Nähe übertragen.</strong>
-            Stimme gilt nach DSGVO als biometrisches Datum — wir fragen deshalb
-            hier ausdrücklich. Du kannst jederzeit stumm schalten oder den
-            <em>Sichtbar/Verborgen</em>-Schalter nutzen.
+            <strong data-i18n="consent.b1.bold">Dein Mikrofon wird an Piloten in deiner Nähe übertragen.</strong>
+            <span data-i18n="consent.b1.body">Stimme gilt nach DSGVO als biometrisches Datum — wir fragen deshalb
+            hier ausdrücklich. Du kannst jederzeit stumm schalten oder den</span>
+            <em data-i18n="consent.b1.italic">Sichtbar/Verborgen</em><span data-i18n="consent.b1.tail">-Schalter nutzen.</span>
           </div>
         </li>
         <li class="flex gap-3">
           <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--color-accent)] mt-2 shrink-0"></span>
           <div>
-            <strong>Peer-to-Peer, kein zentraler Server.</strong>
-            Für das Finden anderer Piloten kontaktiert dein Browser öffentliche
-            WebTorrent-Tracker (<code>openwebtorrent.com</code> u. ä.) — dabei
+            <strong data-i18n="consent.b2.bold">Peer-to-Peer, kein zentraler Server.</strong>
+            <span data-i18n="consent.b2.body">Für das Finden anderer Piloten kontaktiert dein Browser öffentliche
+            WebTorrent-Tracker (openwebtorrent.com u. ä.) — dabei
             wird deine IP-Adresse kurz sichtbar. Keine Namen, kein Callsign,
             keine Audio-Daten landen bei diesen Trackern. Nach dem Matchmaking
-            geht alles direkt zwischen dir und den Mitspielern.
+            geht alles direkt zwischen dir und den Mitspielern.</span>
           </div>
         </li>
         <li class="flex gap-3">
           <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--color-accent)] mt-2 shrink-0"></span>
           <div>
-            <strong>Nichts wird dauerhaft gespeichert.</strong>
-            Weder wir noch irgendein Server kennen deine Flüge, Positionen
+            <strong data-i18n="consent.b3.bold">Nichts wird dauerhaft gespeichert.</strong>
+            <span data-i18n="consent.b3.body">Weder wir noch irgendein Server kennen deine Flüge, Positionen
             oder Gespräche. Was lokal auf deinem Rechner bleibt: Callsign,
-            gewähltes Audiogerät, Tracking-Schalter (in <code>config.json</code>
-            und <code>localStorage</code>).
+            gewähltes Audiogerät, Tracking-Schalter (in config.json und localStorage).</span>
           </div>
         </li>
         <li class="flex gap-3">
           <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--color-accent)] mt-2 shrink-0"></span>
           <div>
-            <strong>Virtuelle Sim-Koordinaten, nicht dein echter Ort.</strong>
-            Die Position die geteilt wird ist die deines virtuellen Flugzeugs /
-            Avatars in MSFS — keine echten GPS-Daten vom PC.
+            <strong data-i18n="consent.b4.bold">Virtuelle Sim-Koordinaten, nicht dein echter Ort.</strong>
+            <span data-i18n="consent.b4.body">Die Position die geteilt wird ist die deines virtuellen Flugzeugs /
+            Avatars in MSFS — keine echten GPS-Daten vom PC.</span>
           </div>
         </li>
       </ul>
 
       <div class="flex flex-col sm:flex-row gap-3 items-center justify-end">
         <a href="https://www.gsimulations.de/datenschutzerklaerung/" target="_blank" rel="noopener"
-           class="text-xs text-[color:var(--color-muted)] hover:text-[color:var(--color-accent)] underline decoration-dotted">
+           class="text-xs text-[color:var(--color-muted)] hover:text-[color:var(--color-accent)] underline decoration-dotted"
+           data-i18n="consent.privacy_link">
           Vollständige Datenschutzerklärung
         </a>
         <button id="consentDeclineBtn" type="button"
                 class="px-4 py-2 text-sm rounded-lg border border-[color:var(--color-border)]
-                       text-[color:var(--color-muted)] hover:bg-white/5 transition">
+                       text-[color:var(--color-muted)] hover:bg-white/5 transition"
+                data-i18n="consent.decline">
           Nein danke
         </button>
         <button id="consentAcceptBtn" type="button"
                 class="px-5 py-2 text-sm font-semibold rounded-lg
                        bg-[color:var(--color-accent)] text-[#0b1220]
-                       hover:bg-blue-300 transition">
+                       hover:bg-blue-300 transition"
+                data-i18n="consent.accept">
           Verstanden &amp; Starten
         </button>
       </div>
@@ -833,7 +835,7 @@
     <div class="flex items-start gap-3">
       <div class="w-2 h-2 rounded-full mt-1.5 bg-[color:var(--color-good)] shrink-0 dot-good"></div>
       <div class="flex-1 min-w-0">
-        <div class="text-sm font-semibold text-[color:var(--color-good)]">Update installiert</div>
+        <div class="text-sm font-semibold text-[color:var(--color-good)]" data-i18n="update.installed">Update installiert</div>
         <div id="updateCompletedText" class="text-xs text-[color:var(--color-muted)] mt-0.5"></div>
       </div>
       <button id="updateCompletedDismiss" type="button"
@@ -971,10 +973,10 @@
        aria-hidden="true">
     <div class="glass rounded-2xl max-w-xl w-full p-6 md:p-8 border border-[color:var(--color-border)]"
          role="dialog" aria-labelledby="firstRunTitle">
-      <h2 id="firstRunTitle" class="text-xl md:text-2xl font-bold mb-1">
+      <h2 id="firstRunTitle" class="text-xl md:text-2xl font-bold mb-1" data-i18n="firstrun.title">
         Letzter Schritt
       </h2>
-      <p class="text-sm text-[color:var(--color-muted)] mb-6">
+      <p class="text-sm text-[color:var(--color-muted)] mb-6" data-i18n="firstrun.intro">
         Drei Schalter — du kannst sie spaeter im Zahnrad-Menue jederzeit anpassen.
       </p>
 
@@ -985,8 +987,8 @@
             <span></span>
           </label>
           <div class="flex-1 min-w-0">
-            <div class="text-sm font-semibold">Mit Windows starten</div>
-            <div class="text-xs text-[color:var(--color-muted)] mt-0.5">
+            <div class="text-sm font-semibold" data-i18n="firstrun.autostart">Mit Windows starten</div>
+            <div class="text-xs text-[color:var(--color-muted)] mt-0.5" data-i18n="firstrun.autostart.desc">
               Laeuft nach dem Login automatisch im Tray, bereit fuer MSFS.
             </div>
           </div>
@@ -997,8 +999,8 @@
             <span></span>
           </label>
           <div class="flex-1 min-w-0">
-            <div class="text-sm font-semibold">Automatisch aktualisieren</div>
-            <div class="text-xs text-[color:var(--color-muted)] mt-0.5">
+            <div class="text-sm font-semibold" data-i18n="firstrun.autoupdate">Automatisch aktualisieren</div>
+            <div class="text-xs text-[color:var(--color-muted)] mt-0.5" data-i18n="firstrun.autoupdate.desc">
               Empfohlen — kleines Update (≈30 MB) wird still installiert.
             </div>
           </div>
@@ -1009,8 +1011,8 @@
             <span></span>
           </label>
           <div class="flex-1 min-w-0">
-            <div class="text-sm font-semibold">Logs bei Fehler senden</div>
-            <div class="text-xs text-[color:var(--color-muted)] mt-0.5">
+            <div class="text-sm font-semibold" data-i18n="firstrun.sendlogs">Logs bei Fehler senden</div>
+            <div class="text-xs text-[color:var(--color-muted)] mt-0.5" data-i18n="firstrun.sendlogs.desc">
               Hilft mir Probleme schneller zu finden — du kannst das jederzeit zurueckdrehen.
             </div>
           </div>
@@ -1021,7 +1023,8 @@
         <button id="firstRunDoneBtn" type="button"
                 class="px-5 py-2 text-sm font-semibold rounded-lg
                        bg-[color:var(--color-accent)] text-[#0b1220]
-                       hover:bg-blue-300 transition">
+                       hover:bg-blue-300 transition"
+                data-i18n="firstrun.save">
           Speichern und starten
         </button>
       </div>
