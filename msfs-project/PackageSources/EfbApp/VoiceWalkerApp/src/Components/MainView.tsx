@@ -8,7 +8,11 @@ import { FSComponent, VNode } from "@microsoft/msfs-sdk";
 
 declare const BASE_URL: string;
 
-const BACKEND_URL = "http://127.0.0.1:7801/";
+// Same-origin coui:// statt http://localhost — Coherent GT im EFB blockt
+// http-iframes silent. Die Web-UI wird via build.js ins EFB-Bundle
+// mitkopiert (./dist/web/) und liegt dann unter BASE_URL/web/index.html.
+// Sie verbindet sich von dort aus via WebSocket zu localhost:7801.
+const BACKEND_URL = `${BASE_URL}/web/index.html`;
 const RECONNECT_MS = 4000;
 
 interface MainViewProps extends RequiredProps<UiViewProps, "appViewService"> {}
@@ -65,7 +69,7 @@ export class MainView extends GamepadUiView<HTMLDivElement, MainViewProps> {
   }
 
   private tryConnect(): void {
-    this.iframeRef.instance.src = `${BACKEND_URL}?t=${Date.now()}`;
+    this.iframeRef.instance.src = BACKEND_URL;
   }
 
   private setConnected(connected: boolean): void {

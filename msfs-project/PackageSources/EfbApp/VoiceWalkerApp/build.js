@@ -33,6 +33,16 @@ const baseConfig = {
       src: "./src/Assets",
       dest: "./dist/Assets",
     }),
+    // Die volle Web-UI (gleicher Code wie Tray-App) ins EFB-Bundle
+    // mitkopieren. iframe laedt die dann via coui:// (same-origin),
+    // weil http://localhost von Coherent GT im EFB silent geblockt
+    // wird. Die UI darin verbindet sich via WebSocket zu localhost:7801
+    // — das ist erlaubt weil der Frame selbst keine Cross-Origin-
+    // Restriktionen mehr hat.
+    copyStaticFiles({
+      src: "../../../../web",
+      dest: "./dist/web",
+    }),
     globalExternals.globalExternals({
       "@microsoft/msfs-sdk": {
         varName: "msfssdk",
