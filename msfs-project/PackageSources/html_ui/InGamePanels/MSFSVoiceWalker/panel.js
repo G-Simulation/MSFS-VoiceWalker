@@ -515,12 +515,13 @@
     // Status-Koord-Zeile unten
     const st = $('vw-status');
     if (st) {
+      const T = (k) => (window.i18n ? window.i18n.t(k) : k);
       if (state.trackingOff) {
-        st.innerHTML = '<span style="color:var(--warn)">Tracking aus</span>';
+        st.innerHTML = '<span style="color:var(--warn)">' + T('panel.peers.tracking_off') + '</span>';
       } else if (state.mySim) {
         const la = (+state.mySim.lat).toFixed(5);
         const lo = (+state.mySim.lon).toFixed(5);
-        const mode = state.mySim.on_foot ? '  |  zu Fuss' : '';
+        const mode = state.mySim.on_foot ? ('  |  ' + T('peer.badge.foot')) : '';
         st.textContent = la + ', ' + lo + mode;
       } else {
         st.textContent = '-';
@@ -531,8 +532,9 @@
   function renderPeerList() {
     const host = $('vw-peers');
     if (!host) return;
+    const T = (k) => (window.i18n ? window.i18n.t(k) : k);
     if (state.trackingOff) {
-      host.innerHTML = '<div id="vw-peers-empty" style="color:var(--warn)">Im Browser aktivieren</div>';
+      host.innerHTML = '<div id="vw-peers-empty" style="color:var(--warn)">' + T('panel.peers.activate_browser') + '</div>';
       return;
     }
     const peers = [];
@@ -543,7 +545,7 @@
       peers.push({ p: p, d: d });
     });
     if (peers.length === 0) {
-      host.innerHTML = '<div id="vw-peers-empty">niemand in der Naehe</div>';
+      host.innerHTML = '<div id="vw-peers-empty">' + T('panel.peers.empty') + '</div>';
       return;
     }
     peers.sort(function (a, b) { return a.d - b.d; });
@@ -940,25 +942,26 @@
     const bs = $('vw-bind-status');
     const bb = $('vw-bind-btn');
     if (bs && bb) {
+      const T = (k) => (window.i18n ? window.i18n.t(k) : k);
       if (ui.bindingInProgress) {
-        bs.textContent = 'druecke jetzt eine Taste...';
+        bs.textContent = T('panel.bind.press');
         bs.className = 'vw-bind-status waiting';
-        bb.textContent = 'abbrechen';
+        bb.textContent = T('panel.bind.cancel');
       } else if (ui.pttBinding) {
         const b = ui.pttBinding;
         if (b.type === 'keyboard') {
-          bs.textContent = 'Taste: ' + (b.key || '?');
+          bs.textContent = T('panel.bind.key_prefix') + ': ' + (b.key || '?');
         } else if (b.type === 'joystick') {
           bs.textContent = (b.device_name || 'Joystick') + ' Btn ' + b.button;
         } else {
-          bs.textContent = 'gebunden';
+          bs.textContent = T('panel.bind.bound');
         }
         bs.className = 'vw-bind-status ok';
-        bb.textContent = 'aendern';
+        bb.textContent = T('panel.bind.change');
       } else {
-        bs.textContent = 'keine';
+        bs.textContent = T('ptt.binding.none');
         bs.className = 'vw-bind-status';
-        bb.textContent = 'zuweisen';
+        bb.textContent = T('panel.bind.assign');
       }
     }
 
@@ -972,21 +975,23 @@
     // Pro-Pill + Privater Raum
     const pill = $('vw-pro-pill');
     if (pill) {
+      const T = (k) => (window.i18n ? window.i18n.t(k) : k);
       if (ui.isPro) {
-        pill.textContent = 'Pro aktiv';
+        pill.textContent = T('panel.pro.pill_active');
         pill.className = 'vw-pro-pill';
       } else {
-        pill.textContent = 'Free';
+        pill.textContent = T('panel.pro.pill_free');
         pill.className = 'vw-pro-pill free';
       }
     }
     const room = $('vw-pro-room');
     if (room) {
+      const T = (k) => (window.i18n ? window.i18n.t(k) : k);
       if (ui.privateRoom) {
         const pr = String(ui.privateRoom);
-        room.textContent = 'Raum: ' + (pr.length > 18 ? pr.slice(0, 16) + '...' : pr);
+        room.textContent = T('panel.private.room_prefix') + ': ' + (pr.length > 18 ? pr.slice(0, 16) + '...' : pr);
       } else {
-        room.textContent = 'kein Raum aktiv';
+        room.textContent = T('panel.private.empty');
       }
     }
   }

@@ -200,3 +200,11 @@ for dst in [
 ]:
     shutil.copy2(light_out, dst)
     print(f"[logo] copied to {dst}")
+
+# i18n.js — Source liegt in web/, Panel braucht eigene Kopie weil Coherent
+# GT relative Pfade zum Panel-HTML aufloest. Single source of truth: web/i18n.js
+i18n_src = ROOT / "web" / "i18n.js"
+if i18n_src.is_file():
+    i18n_dst = ROOT / "msfs-project" / "PackageSources" / "html_ui" / "InGamePanels" / "MSFSVoiceWalker" / "i18n.js"
+    shutil.copy2(i18n_src, i18n_dst)
+    print(f"[i18n] copied to {i18n_dst}")
