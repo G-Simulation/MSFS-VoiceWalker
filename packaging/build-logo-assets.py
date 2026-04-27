@@ -105,6 +105,21 @@ light_out = BRAND / "voicewalker-logo-mark-light.png"
 mark_rgba.save(light_out, format="PNG", optimize=True)
 print(f"[logo] wrote {light_out} ({light_out.stat().st_size} bytes, {mark_rgba.size})")
 
+# Gruene Variante (gleiche Logik wie light, aber mit Akzent-Gruen statt
+# Weiss) — fuer den InGame-Panel-Header, passt zur dot-good Farbe.
+mark_green = mark.convert("RGBA")
+gpx = mark_green.load()
+gw, gh = mark_green.size
+GREEN = (63, 220, 138)  # #3fdc8a, panel.css --good
+for y in range(gh):
+    for x in range(gw):
+        r, g, b, a = gpx[x, y]
+        lum = (r + g + b) // 3
+        gpx[x, y] = (GREEN[0], GREEN[1], GREEN[2], 255 - lum)
+green_out = BRAND / "voicewalker-logo-mark-green.png"
+mark_green.save(green_out, format="PNG", optimize=True)
+print(f"[logo] wrote {green_out} ({green_out.stat().st_size} bytes, {mark_green.size})")
+
 # 1b) Full-Logo: Mark + neuer "VoiceWalker"-Text drunter. Layout-Verhaeltnisse
 #     so wie im Original (siehe Quell-PNG): Mark oben, Text unten, gleiche
 #     Schrift-Hoehe wie im Originaltext.
@@ -201,6 +216,11 @@ for dst in [
     shutil.copy2(light_out, dst)
     print(f"[logo] copied to {dst}")
 
+# Gruene Variante ins Panel-Verzeichnis (wird im Panel-Header verwendet)
+panel_green = ROOT / "msfs-project" / "PackageSources" / "html_ui" / "InGamePanels" / "MSFSVoiceWalker" / "voicewalker-logo-mark-green.png"
+shutil.copy2(green_out, panel_green)
+print(f"[logo] copied to {panel_green}")
+
 # i18n.js — Source liegt in web/, Panel braucht eigene Kopie weil Coherent
 # GT relative Pfade zum Panel-HTML aufloest. Single source of truth: web/i18n.js
 i18n_src = ROOT / "web" / "i18n.js"
@@ -208,3 +228,26 @@ if i18n_src.is_file():
     i18n_dst = ROOT / "msfs-project" / "PackageSources" / "html_ui" / "InGamePanels" / "MSFSVoiceWalker" / "i18n.js"
     shutil.copy2(i18n_src, i18n_dst)
     print(f"[i18n] copied to {i18n_dst}")
+
+# 5) MSFS-Toolbar-Icon (ICON_TOOLBAR_MSFSVOICEWALKER.svg) — Coherent GT
+# erzwingt Monochrom-Weiss-mit-Alpha-Rendering. Das neue PNG ist bereits
+# weiss auf transparent (mark-light) — wir betten es als base64-image in
+# einem 24x24-SVG ein. Coherent rendert das als weisse Silhouette.
+import base64
+mark_light_bytes = light_out.read_bytes()
+b64 = base64.b64encode(mark_light_bytes).decode("ascii")
+toolbar_svg = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+    '<!-- MSFS Toolbar-Icon: erzeugt von packaging/build-logo-assets.py.\n'
+    '     Coherent GT rendert Toolbar-Icons monochrom-weiss + Alpha. Wir\n'
+    '     betten das mark-light-PNG (weiss auf transparent) als base64\n'
+    '     ein, sodass die Logo-Silhouette korrekt erscheint. -->\n'
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" '
+    'preserveAspectRatio="xMidYMid meet">\n'
+    f'  <image href="data:image/png;base64,{b64}" '
+    'x="0" y="0" width="24" height="24"/>\n'
+    '</svg>\n'
+)
+toolbar_svg_dst = ROOT / "msfs-project" / "PackageSources" / "html_ui" / "icons" / "toolbar" / "ICON_TOOLBAR_MSFSVOICEWALKER.svg"
+toolbar_svg_dst.write_text(toolbar_svg, encoding="utf-8")
+print(f"[toolbar-icon] wrote {toolbar_svg_dst} ({toolbar_svg_dst.stat().st_size} bytes)")
