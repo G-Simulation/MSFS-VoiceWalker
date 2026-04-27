@@ -171,8 +171,14 @@
     <Message Condition="!Exists('$(FsPackageTool)')"
              Text="==&gt; fspackagetool.exe nicht gefunden unter $(FsPackageTool) — MSFS-Package-Build wird uebersprungen, Legacy-Fallback wird verwendet."
              Importance="high" />
+    <!-- Override-Pfad fuer fspackagetool eintragen, sonst startet er MSFS
+         via Microsoft-Store-Launcher und Windows zeigt die Custom-Args-
+         Warnung + Sim crasht. Mit Override startet er die EXE direkt. -->
+    <Exec Condition="Exists('$(FsPackageTool)')"
+          Command="python &quot;$(RepoRoot)\tools\setup-fspackagetool-override.py&quot;"
+          IgnoreExitCode="true" />
     <Message Condition="Exists('$(FsPackageTool)')"
-             Text="==&gt; Baue MSFS-Package via fspackagetool.exe... (MSFS 2024 muss laufen, im Hauptmenu stehen, Dev Mode aktiv)"
+             Text="==&gt; Baue MSFS-Package via fspackagetool.exe..."
              Importance="high" />
     <!-- -rebuild erzwingt frischen Build (ignoriert Timestamps).
          ContinueOnError=true damit wir ExitCode pruefen und bei Fehler einen
