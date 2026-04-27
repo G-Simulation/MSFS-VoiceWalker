@@ -202,12 +202,13 @@ toolbar_svg_dst = ROOT / "msfs-project" / "PackageSources" / "html_ui" / "icons"
 toolbar_svg_dst.write_text(toolbar_clean, encoding="utf-8")
 print(f"[toolbar-icon] wrote {toolbar_svg_dst} ({toolbar_svg_dst.stat().st_size} bytes)")
 
-# 6b) EFB-App-Icon — gleiche SVG-Logik wie Toolbar (monochrom weisse Pfade,
-#     fill="?" am Root, EFB toent das App-Icon analog zur Toolbar). Wird
-#     vom EFB-App-TSX als BASE_URL/Assets/app-icon.svg referenziert.
+# 6b) EFB-App-Icon — anders als Toolbar: EFB toent NICHT (kein fill="?"-
+#     Trick), das Icon wird so gerendert wie es ist. Daher die mark-light
+#     Variante: schwarze Pfade -> weiss, weisse Negativraeume -> transparent
+#     (statt weiss bleiben). Sonst sieht's im EFB wie ein weisser Block aus.
 efb_icon_dst = ROOT / "msfs-project" / "PackageSources" / "EfbApp" / "VoiceWalkerApp" / "src" / "Assets" / "app-icon.svg"
 if efb_icon_dst.parent.exists():
-    efb_icon_dst.write_text(toolbar_clean, encoding="utf-8")
+    efb_icon_dst.write_text(mark_light_svg, encoding="utf-8")
     print(f"[efb-icon] wrote {efb_icon_dst} ({efb_icon_dst.stat().st_size} bytes)")
 
 # 7) MSFS-Marketplace/Package-Thumbnail (412x170 JPG, Konvention aus

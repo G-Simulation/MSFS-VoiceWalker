@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0.00 0.00 512.00 512.00" fill="?">
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0.00 0.00 512.00 512.00">
 <g stroke-width="2.00" fill="none" stroke-linecap="butt">
 
 
@@ -15,7 +15,7 @@
 
 
 </g>
-<path fill="#ffffff" d="
+<path fill="none" d="
   M 512.00 0.00
   L 512.00 512.00
   L 0.00 512.00
@@ -200,7 +200,7 @@
   A 0.60 0.60 0.0 0 0 451.96 266.63
   Z"
 />
-<path fill="#ffffff" d="
+<path fill="none" d="
   M 260.50 291.21
   A 0.38 0.37 57.0 0 0 259.81 291.06
   Q 256.56 296.38 251.09 299.79
@@ -514,7 +514,7 @@
   C 220.69 99.51 237.14 83.95 256.05 83.95
   Z"
 />
-<path fill="#ffffff" d="
+<path fill="none" d="
   M 452.57 267.21
   Q 452.79 273.66 451.15 284.46
   C 438.26 369.47 372.22 439.40 287.14 454.38
