@@ -423,11 +423,18 @@
       .vw-select-label {
         flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       }
+      /* Pfeil als CSS-Border-Triangle — keine Font-Glyphe noetig.
+         Coherent GT hat nicht alle Unicode-Symbole in der Fallback-Font
+         (Down-Triangle ▾ rendert als leeres Quadrat). */
       .vw-select-arrow {
-        flex-shrink: 0; color: var(--muted); font-size: 9px;
-        transition: color 0.12s;
+        flex-shrink: 0;
+        width: 0; height: 0;
+        border-left: 4px solid transparent;
+        border-right: 4px solid transparent;
+        border-top: 5px solid var(--muted);
+        transition: border-top-color 0.12s;
       }
-      .vw-select.open .vw-select-arrow { color: var(--accent); }
+      .vw-select.open .vw-select-arrow { border-top-color: var(--accent); }
       .vw-select-menu {
         position: absolute; top: calc(100% + 3px); left: 0; right: 0;
         z-index: 100;
@@ -527,7 +534,7 @@
               <div class="vw-select" id="vw-mic" data-value="">
                 <div class="vw-select-trigger">
                   <span class="vw-select-label" data-i18n="audio.default">Standard</span>
-                  <span class="vw-select-arrow">&#9662;</span>
+                  <span class="vw-select-arrow"></span>
                 </div>
                 <div class="vw-select-menu">
                   <div class="vw-select-item selected" data-value="" data-i18n="audio.default">Standard</div>
@@ -539,7 +546,7 @@
               <div class="vw-select" id="vw-spk" data-value="">
                 <div class="vw-select-trigger">
                   <span class="vw-select-label" data-i18n="audio.default">Standard</span>
-                  <span class="vw-select-arrow">&#9662;</span>
+                  <span class="vw-select-arrow"></span>
                 </div>
                 <div class="vw-select-menu">
                   <div class="vw-select-item selected" data-value="" data-i18n="audio.default">Standard</div>
@@ -582,7 +589,7 @@
               <div class="vw-select" id="vw-lang" data-value="de">
                 <div class="vw-select-trigger">
                   <span class="vw-select-label">Deutsch</span>
-                  <span class="vw-select-arrow">&#9662;</span>
+                  <span class="vw-select-arrow"></span>
                 </div>
                 <div class="vw-select-menu">
                   <div class="vw-select-item selected" data-value="de">Deutsch</div>

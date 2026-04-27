@@ -808,6 +808,10 @@
     // Fallback: wenn currentValue nicht in items, nimm erstes Item als Label
     if (!activeLabel && items.length) activeLabel = items[0].label;
     label.textContent = activeLabel;
+    // data-i18n vom Label entfernen — sonst wuerde i18n.applyDOM() bei einem
+    // spaeteren Sprachwechsel den dynamisch gesetzten Geraete-Namen mit dem
+    // Default-Translation-Key ueberschreiben (Label wird leer).
+    label.removeAttribute('data-i18n');
   }
 
   function applyTabSwitch(tabBtn) {
