@@ -119,7 +119,8 @@ def _edge_user_data_dir(suffix: str = "") -> str:
 
 
 def _open_app_window(url: str, size: Tuple[int, int],
-                     profile_suffix: str = "") -> bool:
+                     profile_suffix: str = "",
+                     start_off_screen: bool = False) -> bool:
     """Edge --app=URL Modus. Gibt True zurueck wenn Edge gefunden + gestartet.
 
     Doppelklick-Schutz: pro profile_suffix wird der Subprocess gemerkt.
@@ -129,6 +130,11 @@ def _open_app_window(url: str, size: Tuple[int, int],
     creationflags=CREATE_NO_WINDOW verhindert dass Windows kurzzeitig ein
     Konsolen-Fenster fuer den Subprocess oeffnet, wenn die Parent-App
     selbst windowed (console=False) ist.
+
+    start_off_screen: wenn True, wird --window-position=-32000,-32000
+    gesetzt, sodass das Fenster sofort ausserhalb des Bildschirms erscheint
+    und nie kurz aufflackert bevor _hide_window_when_ready ShowWindow(SW_HIDE)
+    drauf macht. show_ui() positioniert es spaeter zurueck auf 80,80.
     """
     edge = _edge_path()
     if not edge:
@@ -141,18 +147,24 @@ def _open_app_window(url: str, size: Tuple[int, int],
         # gehoert oft dem child, nicht dem Launcher. Wir versuchen erst
         # unsere bekannte PID, dann breit alle msedge.exe.
         if not _bring_window_to_front(proc.pid):
-            _bring_msedge_to_front()
+            _bring_msedge_to_front(profile_suffix)
         return True
 
     try:
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        args = [
+            edge,
+            f"--app={url}",
+            f"--window-size={size[0]},{size[1]}",
+            f"--user-data-dir={_edge_user_data_dir(profile_suffix)}",
+        ]
+        if start_off_screen:
+            # Off-screen, damit das Fenster zwischen Edge-Start und unserem
+            # SW_HIDE nicht sichtbar aufflackert. show_ui() positioniert
+            # es zurueck wenn der User auf das Tray-Icon klickt.
+            args.append("--window-position=-32000,-32000")
         new_proc = subprocess.Popen(
-            [
-                edge,
-                f"--app={url}",
-                f"--window-size={size[0]},{size[1]}",
-                f"--user-data-dir={_edge_user_data_dir(profile_suffix)}",
-            ],
+            args,
             creationflags=flags,
             close_fds=True,
         )
@@ -163,9 +175,44 @@ def _open_app_window(url: str, size: Tuple[int, int],
         return False
 
 
-def _find_voicewalker_hwnd():
-    """Sucht das Top-Level-Fenster mit "VoiceWalker" im Titel. Gibt HWND
-    oder None zurueck. Genutzt zum Hide/Show beim Auto-Start."""
+def _collect_descendant_pids(root_pid: int) -> set:
+    """Sammelt alle Descendant-PIDs (rekursiv) fuer eine Root-PID via
+    psutil falls verfuegbar, sonst nur die Root-PID. Edge --app spawnt
+    eine Reihe von Child-Prozessen (GPU, Renderer, Network-Service);
+    das eigentliche App-Window gehoert oft einem Child, nicht der Root.
+    Wir muessen die ganze Familie kennen damit unser HWND-Match nicht
+    auf fremde Edge-Fenster matched."""
+    pids = {root_pid}
+    try:
+        import psutil  # type: ignore
+        try:
+            parent = psutil.Process(root_pid)
+            for child in parent.children(recursive=True):
+                pids.add(child.pid)
+        except Exception:
+            pass
+    except ImportError:
+        # psutil nicht verfuegbar — fallback nur Root-PID, kann sein dass
+        # wir das App-Window nicht finden. Im pyinstaller-Bundle sollte
+        # psutil dabei sein (siehe requirements.txt).
+        pass
+    return pids
+
+
+def _find_voicewalker_hwnd(profile_suffix: str = ""):
+    """Sucht das Edge --app Top-Level-Fenster zu UNSEREM gestarteten
+    Edge-Process. Gibt HWND oder None zurueck.
+
+    KRITISCH: nur PID-Match, KEIN Title-Match auf "VoiceWalker" — sonst
+    treffen wir z.B. Visual Studio Code mit Title "foo.py - VoiceWalker -
+    Visual Studio Code" oder andere Editor-/Explorer-Fenster die zufaellig
+    den Projekt-Namen im Titel haben. SW_HIDE auf so ein Fenster sieht
+    fuer den User wie ein Crash der fremden App aus."""
+    proc = _running_procs.get(profile_suffix)
+    if proc is None or proc.poll() is not None:
+        return None
+    valid_pids = _collect_descendant_pids(proc.pid)
+
     try:
         import ctypes
         import ctypes.wintypes as wt
@@ -174,12 +221,13 @@ def _find_voicewalker_hwnd():
         found = []
 
         def _cb(hwnd, _lparam):
-            length = user32.GetWindowTextLengthW(hwnd)
-            if length <= 0:
+            wpid = wt.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(wpid))
+            if wpid.value not in valid_pids:
                 return True
-            buf = ctypes.create_unicode_buffer(length + 1)
-            user32.GetWindowTextW(hwnd, buf, length + 1)
-            if "VoiceWalker" in buf.value:
+            # PID matched. Top-Level mit Titel = unser App-Window.
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length > 0:
                 found.append(hwnd)
                 return False
             return True
@@ -191,20 +239,22 @@ def _find_voicewalker_hwnd():
         return None
 
 
-def _hide_window_when_ready(timeout_sec: float = 8.0) -> None:
-    """Background-Thread: wartet bis das Edge --app Fenster erscheint und
-    versteckt es dann via ShowWindow(SW_HIDE) — komplett unsichtbar, auch
-    aus der Taskbar weg. Tray-Klick → show_ui() macht SW_SHOW + SetForeground.
+def _hide_window_when_ready(profile_suffix: str = "",
+                             timeout_sec: float = 8.0) -> None:
+    """Background-Thread: wartet bis das Edge --app Fenster unseres
+    Process erscheint (PID-Match, KEIN Title-Match — sonst koennten wir
+    fremde Fenster wie VS Code treffen) und versteckt es dann via
+    ShowWindow(SW_HIDE) — komplett unsichtbar, auch aus der Taskbar weg.
+    Tray-Klick → show_ui() macht SW_SHOW + SetForeground.
 
     Edge braucht ~0.5-2s zum Window-Erscheinen (kalt-Start). Wir pollen alle
     150ms bis Window da ist oder Timeout. Daemon-Thread, blockiert nicht."""
-    import threading
 
     def _wait_and_hide():
         import ctypes
         deadline = time.time() + timeout_sec
         while time.time() < deadline:
-            hwnd = _find_voicewalker_hwnd()
+            hwnd = _find_voicewalker_hwnd(profile_suffix)
             if hwnd:
                 try:
                     SW_HIDE = 0
@@ -226,9 +276,13 @@ def start_ui_hidden() -> bool:
     aber Fenster nicht sichtbar). Erst Tray-Klick (show_ui) macht das
     Fenster wieder sichtbar.
 
+    Edge wird mit --window-position=-32000,-32000 gestartet (off-screen),
+    sodass das Fenster zwischen Edge-Start und unserem ShowWindow(SW_HIDE)
+    nicht kurz aufflackert.
+
     Beim allerersten Start (User-Profile leer) bleibt das Fenster sichtbar
-    damit der User die Mikrofon-Permission gewaehren kann — sonst hat er
-    keinen Klick-Punkt fuer den Allow-Dialog."""
+    auf normaler Position damit der User die Mikrofon-Permission gewaehren
+    kann — sonst hat er keinen Klick-Punkt fuer den Allow-Dialog."""
     if _active_port is None:
         log.debug("tray.start_ui_hidden: kein active_port gesetzt")
         return False
@@ -236,22 +290,33 @@ def start_ui_hidden() -> bool:
     user_dir = pathlib.Path(_edge_user_data_dir())
     is_first_run = not user_dir.exists() or not any(user_dir.iterdir())
 
-    if not _open_app_window(url, (1100, 800)):
-        log.warning("tray.start_ui_hidden: Edge nicht gefunden, kein Auto-Start")
-        return False
-
     if is_first_run:
+        # Erster Start: sichtbar auf normaler Position
+        if not _open_app_window(url, (1100, 800)):
+            log.warning("tray.start_ui_hidden: Edge nicht gefunden, kein Auto-Start")
+            return False
         log.info("tray: first-run, ui-window sichtbar fuer Mic-Permission-Dialog")
     else:
+        # Folge-Starts: off-screen + danach SW_HIDE
+        if not _open_app_window(url, (1100, 800), start_off_screen=True):
+            log.warning("tray.start_ui_hidden: Edge nicht gefunden, kein Auto-Start")
+            return False
         _hide_window_when_ready()
-        log.info("tray: ui pre-loaded und verborgen via start_ui_hidden")
+        log.info("tray: ui pre-loaded off-screen und verborgen via start_ui_hidden")
     return True
 
 
-def _bring_msedge_to_front() -> None:
-    """Fallback: alle Edge-Fenster mit dem App-Profile-Pfad in den
-    Vordergrund. Wird genutzt wenn die direkte PID-Suche nichts findet
-    (Edge child-Process)."""
+def _bring_msedge_to_front(profile_suffix: str = "") -> None:
+    """Fallback: holt das Fenster unseres Edge --app Process nach vorne.
+
+    KRITISCH: nur Fenster die zur PID-Familie unseres _running_procs[suffix]
+    gehoeren, KEIN Title-Match auf "VoiceWalker" — sonst werden Visual Studio
+    Code, Datei-Explorer-Fenster oder Editor mit "VoiceWalker" im Titel
+    getroffen und versteckt/fokus-genommen."""
+    proc = _running_procs.get(profile_suffix)
+    if proc is None or proc.poll() is not None:
+        return
+    valid_pids = _collect_descendant_pids(proc.pid)
     try:
         import ctypes
         import ctypes.wintypes as wt
@@ -259,24 +324,25 @@ def _bring_msedge_to_front() -> None:
         EnumProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wt.HWND, wt.LPARAM)
 
         def _cb(hwnd, _lparam):
-            # IsWindowVisible bewusst NICHT pruefen — siehe Kommentar in
-            # _bring_window_to_front: Auto-Start versteckt das Fenster
-            # initial via SW_HIDE; wir muessen es trotzdem finden koennen.
+            wpid = wt.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(wpid))
+            if wpid.value not in valid_pids:
+                return True
+            # PID matched. Top-Level mit Titel = unser App-Window.
             length = user32.GetWindowTextLengthW(hwnd)
             if length <= 0:
                 return True
-            buf = ctypes.create_unicode_buffer(length + 1)
-            user32.GetWindowTextW(hwnd, buf, length + 1)
-            # Edge --app benennt das Fenster nach der ersten <title>-Zeile
-            # der geladenen URL — bei uns "VoiceWalker" oder aehnlich.
-            if "VoiceWalker" in buf.value:
-                SW_SHOW    = 5
-                SW_RESTORE = 9
-                user32.ShowWindow(hwnd, SW_SHOW)
-                user32.ShowWindow(hwnd, SW_RESTORE)
-                user32.SetForegroundWindow(hwnd)
-                return False  # ersten Treffer reicht
-            return True
+            SW_SHOW    = 5
+            SW_RESTORE = 9
+            user32.ShowWindow(hwnd, SW_SHOW)
+            user32.ShowWindow(hwnd, SW_RESTORE)
+            # Falls off-screen positioniert: zurueck in sichtbaren Bereich.
+            # SetWindowPos mit SWP_NOSIZE | SWP_NOZORDER, Position 80,80.
+            SWP_NOSIZE   = 0x0001
+            SWP_NOZORDER = 0x0004
+            user32.SetWindowPos(hwnd, 0, 80, 80, 0, 0, SWP_NOSIZE | SWP_NOZORDER)
+            user32.SetForegroundWindow(hwnd)
+            return False
 
         user32.EnumWindows(EnumProc(_cb), 0)
     except Exception as e:
