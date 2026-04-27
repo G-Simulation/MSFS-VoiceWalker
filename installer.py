@@ -74,9 +74,15 @@ def detect_msfs_installs():
         for pat in ("Microsoft.Limitless_*", "Microsoft.FlightSimulator2024_*"):
             for d in _safe_glob(local, f"Packages/{pat}/LocalCache"):
                 candidates.append(("MSFS 2024 (Store)", d))
-    # MSFS 2024 Steam
+    # MSFS 2024 Steam — nur als echte Installation zaehlen wenn auch
+    # UserCfg.opt drin liegt. Sonst ist es nur ein leerer Asobo-Default-
+    # Folder den irgendwer (z.B. eine frueher Version dieses Setup-EXE,
+    # ein anderes Tool, oder fspackagetool) angelegt hat. Ohne diese
+    # Pruefung kopieren wir das Addon faelschlich in einen leeren Roaming-
+    # Folder neben der eigentlichen Installation — Konsequenz: doppelt
+    # geladen, fspackagetool-Reload schlaegt fehl.
     s = roaming / "Microsoft Flight Simulator 2024"
-    if _safe_is_dir(s):
+    if _safe_is_dir(s) and (s / "UserCfg.opt").is_file():
         candidates.append(("MSFS 2024 (Steam)", s))
 
     results = []
