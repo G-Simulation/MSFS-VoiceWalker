@@ -850,6 +850,12 @@
         sendActionPayload({ action: 'select-speaker', deviceId: e.target.value });
       } else if (id === 'vw-cs') {
         sendActionPayload({ action: 'set-callsign', value: e.target.value });
+      } else if (id === 'vw-lang') {
+        // Sprach-Override im Panel — i18n.js setLang() macht reload, sodass
+        // alle dynamisch gerenderten Strings (Peer-Liste, Bind-Status, ...)
+        // sofort in der neuen Sprache erscheinen. Wert persistiert in
+        // Coherent-GT-localStorage (vw.lang).
+        if (window.i18n) window.i18n.setLang(e.target.value);
       }
     }, { capture: true });
 
@@ -1006,6 +1012,10 @@
     setupButtons();
     setupTabs();
     setupSetupTab();
+    // Sprach-Dropdown auf aktuell aktive Sprache setzen (auto-detected aus
+    // navigator.language oder vorher gespeicherter Override).
+    const lng = $('vw-lang');
+    if (lng && window.i18n) lng.value = window.i18n.getLang();
     scheduleRender();
     setTimeout(tryConnect, 300);
   }
