@@ -61,11 +61,82 @@ _running_procs: dict = {}
 _active_port: Optional[int] = None
 
 
-def _bring_window_to_front(pid: int) -> bool:
-    """Findet das Top-Level-Fenster eines Prozesses (per PID) und holt es
-    nach vorne. Funktioniert mit Edge --app weil dessen Window dem
-    msedge.exe-Process gehoert. Stilles Failure auf non-Windows / wenn
-    kein passendes Fenster da ist."""
+def _force_foreground(hwnd) -> None:
+    """SetForegroundWindow funktioniert in Win32 nur wenn der Caller den
+    Foreground-Lock hat. Workaround: kurzzeitig ThreadInput an den Foreground-
+    Thread anhaengen, dann darf SetForegroundWindow zuverlaessig setzen."""
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        fg_hwnd = user32.GetForegroundWindow()
+        target_thr = user32.GetWindowThreadProcessId(hwnd, None)
+        fg_thr = user32.GetWindowThreadProcessId(fg_hwnd, None) if fg_hwnd else 0
+        cur_thr = kernel32.GetCurrentThreadId()
+        attached = False
+        if fg_thr and fg_thr != cur_thr:
+            attached = bool(user32.AttachThreadInput(cur_thr, fg_thr, True))
+        try:
+            user32.BringWindowToTop(hwnd)
+            user32.SetForegroundWindow(hwnd)
+        finally:
+            if attached:
+                user32.AttachThreadInput(cur_thr, fg_thr, False)
+    except Exception as e:
+        log.debug("force_foreground failed: %s", e)
+
+
+def _set_taskbar_visible(hwnd, visible: bool) -> None:
+    """Toggelt das WS_EX_TOOLWINDOW vs WS_EX_APPWINDOW Extended-Style.
+    TOOLWINDOW = kein Taskbar-Icon, APPWINDOW = sichtbares Taskbar-Icon.
+    Wird vor SW_SHOW aufgerufen damit das Fenster mit korrektem Style
+    sichtbar wird (sonst flackert der Eintrag kurz auf)."""
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        GWL_EXSTYLE       = -20
+        WS_EX_TOOLWINDOW  = 0x00000080
+        WS_EX_APPWINDOW   = 0x00040000
+        # GetWindowLongW liefert int32 — auf 64-bit nutzt Python ein int, OK.
+        style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        if visible:
+            style = (style & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW
+        else:
+            style = (style | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
+        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+    except Exception as e:
+        log.debug("_set_taskbar_visible(%s) failed: %s", visible, e)
+
+
+def _show_and_position(hwnd) -> None:
+    """Zeigt ein Fenster und positioniert es zurueck in den sichtbaren
+    Bereich (off-screen-Start setzt -32000,-32000). Reihenfolge:
+      1. WS_EX_APPWINDOW setzen (Taskbar-Icon erlaubt) BEVOR Show
+      2. SW_SHOWNORMAL — kombiniert SHOW+RESTORE, robust fuer hidden+minimiert
+      3. Position zuruecksetzen damit's nicht off-screen bleibt
+      4. Foreground+Fokus erzwingen
+    """
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        SW_SHOWNORMAL = 1
+        SWP_NOSIZE    = 0x0001
+        SWP_NOZORDER  = 0x0004
+        _set_taskbar_visible(hwnd, True)
+        user32.ShowWindow(hwnd, SW_SHOWNORMAL)
+        user32.SetWindowPos(hwnd, 0, 80, 80, 0, 0, SWP_NOSIZE | SWP_NOZORDER)
+        _force_foreground(hwnd)
+    except Exception as e:
+        log.debug("show_and_position failed: %s", e)
+
+
+def _bring_window_to_front(root_pid: int) -> bool:
+    """Findet das Top-Level-Fenster eines Prozesses oder seiner Children
+    (Edge --app spawnt das App-Window oft im Renderer-Child) und holt es
+    nach vorne. Stilles Failure auf non-Windows / wenn kein passendes
+    Fenster da ist."""
+    valid_pids = _collect_descendant_pids(root_pid)
     try:
         import ctypes
         import ctypes.wintypes as wt
@@ -77,12 +148,12 @@ def _bring_window_to_front(pid: int) -> bool:
         def _cb(hwnd, _lparam):
             wpid = wt.DWORD()
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(wpid))
-            if wpid.value == pid:
+            if wpid.value in valid_pids:
                 # IsWindowVisible bewusst NICHT pruefen — beim Auto-Start
                 # haben wir das Fenster mit SW_HIDE versteckt, dann liefert
                 # IsWindowVisible False. Wir wollen es trotzdem finden um
-                # SW_SHOW darauf anzuwenden. Nur Fenster mit Title nehmen
-                # (filtert Edges interne GPU/Service-Helper raus).
+                # SW_SHOWNORMAL darauf anzuwenden. Nur Fenster mit Title
+                # nehmen (filtert Edges interne GPU/Service-Helper raus).
                 length = user32.GetWindowTextLengthW(hwnd)
                 if length > 0:
                     target.value = hwnd
@@ -91,14 +162,7 @@ def _bring_window_to_front(pid: int) -> bool:
 
         user32.EnumWindows(EnumProc(_cb), 0)
         if target.value:
-            # SW_SHOW zeigt auch hidden Fenster (SW_RESTORE wuerde nur
-            # minimierte zuruckholen). Danach RESTORE falls minimiert,
-            # plus SetForegroundWindow um Fokus zu bekommen.
-            SW_SHOW    = 5
-            SW_RESTORE = 9
-            user32.ShowWindow(target.value, SW_SHOW)
-            user32.ShowWindow(target.value, SW_RESTORE)
-            user32.SetForegroundWindow(target.value)
+            _show_and_position(target.value)
             return True
     except Exception as e:
         log.debug("bring-to-front failed: %s", e)
@@ -294,10 +358,16 @@ def _hide_window_when_ready(profile_suffix: str = "",
             if hwnd:
                 try:
                     SW_HIDE = 0
+                    # Reihenfolge: ZUERST WS_EX_TOOLWINDOW setzen (Taskbar-/
+                    # Alt+Tab-Eintrag weg), DANN SW_HIDE. So kann das Fenster
+                    # nie mit App-Window-ExStyle in der Taskbar erscheinen.
+                    # Off-screen-Position aus _open_app_window verhindert
+                    # zusaetzlich dass es waehrend dieser ms sichtbar ist.
+                    _set_taskbar_visible(hwnd, False)
                     ctypes.windll.user32.ShowWindow(hwnd, SW_HIDE)
-                    log.info("tray: ui-window auf SW_HIDE gesetzt (hwnd=%s)", hwnd)
+                    log.info("tray: ui-window versteckt + Taskbar-Icon entfernt (hwnd=%s)", hwnd)
                 except Exception as e:
-                    log.debug("ShowWindow(SW_HIDE) failed: %s", e)
+                    log.debug("Hide failed: %s", e)
                 return
             time.sleep(0.15)
         log.debug("tray: ui-window in %.1fs nicht gefunden, kein Hide", timeout_sec)
@@ -342,47 +412,17 @@ def start_ui_hidden() -> bool:
     return True
 
 
-def _bring_msedge_to_front(profile_suffix: str = "") -> None:
-    """Fallback: holt das Fenster unseres Edge --app Process nach vorne.
-
-    KRITISCH: nur Fenster die zur PID-Familie unseres _running_procs[suffix]
-    gehoeren, KEIN Title-Match auf "VoiceWalker" — sonst werden Visual Studio
-    Code, Datei-Explorer-Fenster oder Editor mit "VoiceWalker" im Titel
-    getroffen und versteckt/fokus-genommen."""
-    proc = _running_procs.get(profile_suffix)
-    if proc is None or proc.poll() is not None:
-        return
-    valid_pids = _collect_descendant_pids(proc.pid)
-    try:
-        import ctypes
-        import ctypes.wintypes as wt
-        user32 = ctypes.windll.user32
-        EnumProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wt.HWND, wt.LPARAM)
-
-        def _cb(hwnd, _lparam):
-            wpid = wt.DWORD()
-            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(wpid))
-            if wpid.value not in valid_pids:
-                return True
-            # PID matched. Top-Level mit Titel = unser App-Window.
-            length = user32.GetWindowTextLengthW(hwnd)
-            if length <= 0:
-                return True
-            SW_SHOW    = 5
-            SW_RESTORE = 9
-            user32.ShowWindow(hwnd, SW_SHOW)
-            user32.ShowWindow(hwnd, SW_RESTORE)
-            # Falls off-screen positioniert: zurueck in sichtbaren Bereich.
-            # SetWindowPos mit SWP_NOSIZE | SWP_NOZORDER, Position 80,80.
-            SWP_NOSIZE   = 0x0001
-            SWP_NOZORDER = 0x0004
-            user32.SetWindowPos(hwnd, 0, 80, 80, 0, 0, SWP_NOSIZE | SWP_NOZORDER)
-            user32.SetForegroundWindow(hwnd)
-            return False
-
-        user32.EnumWindows(EnumProc(_cb), 0)
-    except Exception as e:
-        log.debug("msedge front-bring failed: %s", e)
+def _bring_msedge_to_front(profile_suffix: str = "") -> bool:
+    """Fallback wenn _bring_window_to_front via Root-PID nichts findet.
+    Aktuell ist das Verhalten identisch (beide nutzen _collect_descendant_pids
+    + _show_and_position) — die Funktion bleibt fuer historische Aufrufer
+    drin. Gibt True zurueck wenn ein Fenster gefunden + sichtbar gemacht
+    wurde, sonst False."""
+    hwnd = _find_voicewalker_hwnd(profile_suffix)
+    if hwnd is None:
+        return False
+    _show_and_position(hwnd)
+    return True
 
 
 def _make_icon_image(state: str = "offline", size: int = 64):
