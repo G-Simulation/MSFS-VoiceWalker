@@ -217,6 +217,24 @@
           SkipUnchangedFiles="true" />
     <Message Condition="Exists('$(BuiltMsfsPackage)\manifest.json')"
              Text="==&gt; html_ui/ aus PackageSources ins Paket gespiegelt." Importance="high" />
+    <!-- Sicherheits-Copy 3: EFB-App-dist deterministisch ins Paket
+         spiegeln. fspackagetool macht das normalerweise via die
+         efb_apps_voicewalker-AssetGroup, aber wenn er failed (oder die
+         AssetGroup nicht erkannt hat), wird der alte Build verwendet.
+         Plus: alten Output-Folder vorher loeschen damit keine alten
+         Files (z.B. .css.map mit anderem Hash) zurueckbleiben. -->
+    <RemoveDir Condition="Exists('$(BuiltMsfsPackage)\manifest.json') And Exists('$(EfbAppDistJs)')"
+               Directories="$(BuiltMsfsPackage)\html_ui\efb_ui\efb_apps\VoiceWalkerApp"
+               ContinueOnError="true" />
+    <ItemGroup>
+      <_EfbAppDistFiles Include="$(EfbAppDir)\dist\**\*.*" />
+    </ItemGroup>
+    <Copy Condition="Exists('$(BuiltMsfsPackage)\manifest.json') And Exists('$(EfbAppDistJs)')"
+          SourceFiles="@(_EfbAppDistFiles)"
+          DestinationFiles="@(_EfbAppDistFiles->'$(BuiltMsfsPackage)\html_ui\efb_ui\efb_apps\VoiceWalkerApp\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="false" />
+    <Message Condition="Exists('$(BuiltMsfsPackage)\manifest.json') And Exists('$(EfbAppDistJs)')"
+             Text="==&gt; EFB-App-dist ins Paket gespiegelt." Importance="high" />
     <Message Condition="Exists('$(BuiltMsfsPackage)\manifest.json')"
              Text="==&gt; MSFS-Package fertig: $(BuiltMsfsPackage)" Importance="high" />
   </Target>
