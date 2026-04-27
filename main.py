@@ -1868,8 +1868,6 @@ async def main():
     # Tray-Icon: laeuft in eigenem Thread. Beenden-Button schliesst den
     # websockets-Server, dann faellt asyncio.gather() durch und wir landen
     # im finally. icon.stop() macht dort den pystray-Thread sauber zu.
-    # Browser oeffnet sich NICHT automatisch — der User triggert das ueber
-    # Doppelklick aufs Tray-Icon oder Rechtsklick → "VoiceWalker oeffnen".
     _loop = asyncio.get_event_loop()
     def _quit_from_tray():
         log.info("tray-quit signal: server.close + finalize")
@@ -1878,6 +1876,18 @@ async def main():
     # Globale Reference, damit der HTTP-Endpoint /_/highlight pystray.notify
     # beim Doppelstart-Ping aufrufen kann (siehe http_handler oben).
     globals()["_TRAY_ICON_REF"] = tray_icon
+
+    # Browser-Tab im Hintergrund vorbooten (versteckt). Damit das Sim-Panel
+    # und EFB sofort die echten Audio-Geraete-Listen sehen — die Discovery
+    # laeuft via navigator.mediaDevices.enumerateDevices() im Browser, also
+    # MUSS ein Browser-Tab leben. Mit start_ui_hidden() ist das Fenster
+    # initial nicht sichtbar (auch nicht in der Taskbar). Tray-Klick zeigt
+    # es bei Bedarf. Beim allerersten Run bleibt das Fenster sichtbar damit
+    # der User die Mic-Permission bestaetigen kann.
+    try:
+        tray.start_ui_hidden()
+    except Exception as e:
+        log.debug("tray.start_ui_hidden failed: %s", e)
 
     try:
         await asyncio.gather(

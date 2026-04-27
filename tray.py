@@ -23,6 +23,7 @@ import pathlib
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from typing import Callable, Optional, Tuple
 
@@ -76,9 +77,12 @@ def _bring_window_to_front(pid: int) -> bool:
         def _cb(hwnd, _lparam):
             wpid = wt.DWORD()
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(wpid))
-            if wpid.value == pid and user32.IsWindowVisible(hwnd):
-                # nur das erste Top-Level-Fenster nehmen (Edge hat manchmal
-                # versteckte Helper-Fenster fuer GPU/Service)
+            if wpid.value == pid:
+                # IsWindowVisible bewusst NICHT pruefen — beim Auto-Start
+                # haben wir das Fenster mit SW_HIDE versteckt, dann liefert
+                # IsWindowVisible False. Wir wollen es trotzdem finden um
+                # SW_SHOW darauf anzuwenden. Nur Fenster mit Title nehmen
+                # (filtert Edges interne GPU/Service-Helper raus).
                 length = user32.GetWindowTextLengthW(hwnd)
                 if length > 0:
                     target.value = hwnd
@@ -87,7 +91,12 @@ def _bring_window_to_front(pid: int) -> bool:
 
         user32.EnumWindows(EnumProc(_cb), 0)
         if target.value:
+            # SW_SHOW zeigt auch hidden Fenster (SW_RESTORE wuerde nur
+            # minimierte zuruckholen). Danach RESTORE falls minimiert,
+            # plus SetForegroundWindow um Fokus zu bekommen.
+            SW_SHOW    = 5
             SW_RESTORE = 9
+            user32.ShowWindow(target.value, SW_SHOW)
             user32.ShowWindow(target.value, SW_RESTORE)
             user32.SetForegroundWindow(target.value)
             return True
@@ -154,6 +163,91 @@ def _open_app_window(url: str, size: Tuple[int, int],
         return False
 
 
+def _find_voicewalker_hwnd():
+    """Sucht das Top-Level-Fenster mit "VoiceWalker" im Titel. Gibt HWND
+    oder None zurueck. Genutzt zum Hide/Show beim Auto-Start."""
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+        user32 = ctypes.windll.user32
+        EnumProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wt.HWND, wt.LPARAM)
+        found = []
+
+        def _cb(hwnd, _lparam):
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length <= 0:
+                return True
+            buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
+            if "VoiceWalker" in buf.value:
+                found.append(hwnd)
+                return False
+            return True
+
+        user32.EnumWindows(EnumProc(_cb), 0)
+        return found[0] if found else None
+    except Exception as e:
+        log.debug("_find_voicewalker_hwnd failed: %s", e)
+        return None
+
+
+def _hide_window_when_ready(timeout_sec: float = 8.0) -> None:
+    """Background-Thread: wartet bis das Edge --app Fenster erscheint und
+    versteckt es dann via ShowWindow(SW_HIDE) — komplett unsichtbar, auch
+    aus der Taskbar weg. Tray-Klick → show_ui() macht SW_SHOW + SetForeground.
+
+    Edge braucht ~0.5-2s zum Window-Erscheinen (kalt-Start). Wir pollen alle
+    150ms bis Window da ist oder Timeout. Daemon-Thread, blockiert nicht."""
+    import threading
+
+    def _wait_and_hide():
+        import ctypes
+        deadline = time.time() + timeout_sec
+        while time.time() < deadline:
+            hwnd = _find_voicewalker_hwnd()
+            if hwnd:
+                try:
+                    SW_HIDE = 0
+                    ctypes.windll.user32.ShowWindow(hwnd, SW_HIDE)
+                    log.info("tray: ui-window auf SW_HIDE gesetzt (hwnd=%s)", hwnd)
+                except Exception as e:
+                    log.debug("ShowWindow(SW_HIDE) failed: %s", e)
+                return
+            time.sleep(0.15)
+        log.debug("tray: ui-window in %.1fs nicht gefunden, kein Hide", timeout_sec)
+
+    t = threading.Thread(target=_wait_and_hide, daemon=True, name="vw-hide-ui")
+    t.start()
+
+
+def start_ui_hidden() -> bool:
+    """App-Start: Edge --app im Hintergrund hochfahren + sofort verbergen.
+    Browser laeuft headless-aehnlich (DOM aktiv, mediaDevices/WebRTC aktiv,
+    aber Fenster nicht sichtbar). Erst Tray-Klick (show_ui) macht das
+    Fenster wieder sichtbar.
+
+    Beim allerersten Start (User-Profile leer) bleibt das Fenster sichtbar
+    damit der User die Mikrofon-Permission gewaehren kann — sonst hat er
+    keinen Klick-Punkt fuer den Allow-Dialog."""
+    if _active_port is None:
+        log.debug("tray.start_ui_hidden: kein active_port gesetzt")
+        return False
+    url = f"http://127.0.0.1:{_active_port}/"
+    user_dir = pathlib.Path(_edge_user_data_dir())
+    is_first_run = not user_dir.exists() or not any(user_dir.iterdir())
+
+    if not _open_app_window(url, (1100, 800)):
+        log.warning("tray.start_ui_hidden: Edge nicht gefunden, kein Auto-Start")
+        return False
+
+    if is_first_run:
+        log.info("tray: first-run, ui-window sichtbar fuer Mic-Permission-Dialog")
+    else:
+        _hide_window_when_ready()
+        log.info("tray: ui pre-loaded und verborgen via start_ui_hidden")
+    return True
+
+
 def _bring_msedge_to_front() -> None:
     """Fallback: alle Edge-Fenster mit dem App-Profile-Pfad in den
     Vordergrund. Wird genutzt wenn die direkte PID-Suche nichts findet
@@ -165,8 +259,9 @@ def _bring_msedge_to_front() -> None:
         EnumProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wt.HWND, wt.LPARAM)
 
         def _cb(hwnd, _lparam):
-            if not user32.IsWindowVisible(hwnd):
-                return True
+            # IsWindowVisible bewusst NICHT pruefen — siehe Kommentar in
+            # _bring_window_to_front: Auto-Start versteckt das Fenster
+            # initial via SW_HIDE; wir muessen es trotzdem finden koennen.
             length = user32.GetWindowTextLengthW(hwnd)
             if length <= 0:
                 return True
@@ -175,7 +270,9 @@ def _bring_msedge_to_front() -> None:
             # Edge --app benennt das Fenster nach der ersten <title>-Zeile
             # der geladenen URL — bei uns "VoiceWalker" oder aehnlich.
             if "VoiceWalker" in buf.value:
+                SW_SHOW    = 5
                 SW_RESTORE = 9
+                user32.ShowWindow(hwnd, SW_SHOW)
                 user32.ShowWindow(hwnd, SW_RESTORE)
                 user32.SetForegroundWindow(hwnd)
                 return False  # ersten Treffer reicht
