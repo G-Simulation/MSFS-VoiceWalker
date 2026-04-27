@@ -1,11 +1,11 @@
-# MSFSVoiceWalker v0.1.0 — Alpha
+# MSFSVoiceWalker v0.1.0 — Open Beta
 
 Erste testfertige Version. Funktional komplett, aber nicht produktiv getestet.
 Feedback und Bug-Reports ausdrücklich erwünscht.
 
 ## Was ist drin
 
-- **Proximity-Voice** für MSFS 2020 & MSFS 2024 (Cockpit, Außenansicht,
+- **Proximity-Voice** für MSFS 2024 (Cockpit, Außenansicht,
   Walker/zu-Fuß-Modus)
 - **Realistisches 3D-Audio** mit HRTF (Head-Related Transfer Function) —
   Kopfhörer zeigen echte Richtung, Distanz-Abfall nach Inverse-Distance,
@@ -27,6 +27,8 @@ Feedback und Bug-Reports ausdrücklich erwünscht.
 - **Pro-Lizenz-Validierung** über eigenen WordPress-Plugin-Endpoint auf
   gsimulations.de — keine Consumer-Credentials auf dem Client, nur der
   User-Lizenz-Key wird übertragen. 7 Tage Offline-Grace-Cache.
+- **Mehrsprachig** (Deutsch / English) — UI-Sprache umstellbar im
+  Einstellungs-Dialog, Browser-Sprache wird beim ersten Start automatisch erkannt.
 
 ## Default-Hörweite
 
@@ -47,13 +49,13 @@ Per Slider im Debug-Panel live anpassbar (10 m bis 2 km).
 - **Browser-Tab muss offen bleiben** (mindestens nicht minimiert), sonst
   drosselt Chrome die Timer. Im Sim-Fenster sieht man das Overlay via
   MSFS-Toolbar-Panel, was den Browser-Tab minimiert-OK macht.
-- **MSFS-2024-Walker-SimVars** sind als `CAMERA_POS_*` implementiert; sobald
+- **Walker-SimVars** sind als `CAMERA_POS_*` implementiert; sobald
   Asobo offizielle Walker-SimVars dokumentiert, wird das umgestellt.
 - **pycparser-Hidden-Import-Warnungen** beim PyInstaller-Build — harmlos.
 
 ## Installation
 
-1. [MSFSVoiceWalker-Setup.msi](https://github.com/G-Simulation/MSFS-VoiceWalker/releases/download/v0.1.0/MSFSVoiceWalker-Setup.msi) herunterladen
+1. [MSFSVoiceWalker-Setup.exe](https://github.com/G-Simulation/MSFS-VoiceWalker/releases/download/v0.1.0/MSFSVoiceWalker-Setup.exe) herunterladen
 2. Doppelklick
 3. Durch Windows-SmartScreen-Warnung durchklicken ("Weitere Informationen"
    → "Trotzdem ausführen")
@@ -68,5 +70,5 @@ Debug-Export (`Strg+Shift+D` → Export-Button) anhängen.
 
 ---
 
-Lizenz: Proprietär, source-available. Siehe
-[LICENSE](https://github.com/G-Simulation/MSFS-VoiceWalker/blob/main/LICENSE).
+Lizenz: [Apache-2.0](https://github.com/G-Simulation/MSFS-VoiceWalker/blob/main/LICENSE) — Open Source.
+Drittanbieter-Lizenzen: [THIRD_PARTY_LICENSES.txt](https://github.com/G-Simulation/MSFS-VoiceWalker/blob/main/THIRD_PARTY_LICENSES.txt).
