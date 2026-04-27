@@ -1,4 +1,4 @@
-# MSFSVoiceWalker — Build & Test Anleitung
+# VoiceWalker — Build & Test Anleitung
 
 ## Voraussetzungen
 
@@ -27,13 +27,13 @@ Der Build macht automatisch nacheinander:
 1. **Python-Abhängigkeiten sicherstellen** (pip install requirements.txt)
 2. **Legacy-Addon-Layout generieren** (`tools/build-addon.py`)
 3. **WASM-Bridge kompilieren** (Clang aus MSFS-SDK)
-   → `msfs-project\PackageSources\modules\MSFSVoiceWalkerBridge.wasm`
+   → `msfs-project\PackageSources\modules\VoiceWalkerBridge.wasm`
 4. **MSFS-Package bauen** (`fspackagetool.exe`)
-   → `msfs-project\Packages\gsimulation-msfsvoicewalker\`
+   → `msfs-project\Packages\gsimulation-voicewalker\`
 5. **Python-EXE bauen** (PyInstaller, embeddet das gebaute MSFS-Package)
-   → `dist\MSFSVoiceWalker.exe` + `dist\MSFSVoiceWalker-Setup.exe`
+   → `dist\VoiceWalker.exe` + `dist\VoiceWalker-Setup.exe`
 6. **MSI-Installer bauen**
-   → `installer\bin\x64\Release\MSFSVoiceWalker-Setup.msi`
+   → `installer\bin\x64\Release\VoiceWalker-Setup.msi`
 
 Fehlt die MSFS-2024-SDK, werden die SDK-Steps mit Warning übersprungen — die App
 läuft trotzdem, aber ohne Walker-Position-Tracking (nur Flugzeug-Pos).
@@ -46,8 +46,8 @@ Nach dem VS-Build:
 
 ```
 robocopy ^
-  C:\MSFSVoiceWalker\msfs-project\Packages\gsimulation-msfsvoicewalker ^
-  D:\MSFS\Packages\Community\gsimulation-msfsvoicewalker /MIR
+  C:\VoiceWalker\msfs-project\Packages\gsimulation-voicewalker ^
+  D:\MSFS\Packages\Community\gsimulation-voicewalker /MIR
 ```
 
 (Pfad des Community-Folders entsprechend anpassen)
@@ -55,7 +55,7 @@ robocopy ^
 ### 2. Python-App starten
 
 ```
-C:\MSFSVoiceWalker\start.bat
+C:\VoiceWalker\start.bat
 ```
 
 Im Python-Log musst du sehen:
@@ -67,7 +67,7 @@ INFO [main] SimConnect connected
 
 ### 3. MSFS 2024 starten
 
-Nach Sim-Start in der Toolbar das **MSFSVoiceWalker**-Icon anklicken → Panel lädt
+Nach Sim-Start in der Toolbar das **VoiceWalker**-Icon anklicken → Panel lädt
 das Overlay aus der Python-App.
 
 ### 4. Walker-Position prüfen
@@ -102,7 +102,7 @@ Zeilen „Flugzeug"/„Pilot" in der UI ausgeblendet sind.
 
 ## Aufräumen (Clean Build)
 
-Rechtsklick `MSFSVoiceWalker.Installer` → **Bereinigen**. Das löscht:
+Rechtsklick `VoiceWalker.Installer` → **Bereinigen**. Das löscht:
 - `dist\` (PyInstaller-Output)
 - `build\` (PyInstaller-Temp)
 - `installer\License.rtf`

@@ -1,6 +1,6 @@
-# Mitarbeit an MSFSVoiceWalker
+# Mitarbeit an VoiceWalker
 
-Danke für dein Interesse. MSFSVoiceWalker ist unter der
+Danke für dein Interesse. VoiceWalker ist unter der
 [Apache License 2.0](LICENSE) freigegeben — Beiträge sind
 ausdrücklich willkommen und unkompliziert.
 
@@ -70,4 +70,4 @@ python main.py --debug   REM App im Debug-Modus starten
 build.bat            REM EXEs bauen (PyInstaller)
 ```
 
-Oder einfach in Visual Studio: `MSFSVoiceWalker.sln` öffnen, F5 drücken.
+Oder einfach in Visual Studio: `VoiceWalker.sln` öffnen, F5 drücken.

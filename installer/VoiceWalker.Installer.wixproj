@@ -1,0 +1,312 @@
+<Project Sdk="WixToolset.Sdk/6.0.2">
+
+  <!-- ===========================================================
+       VoiceWalker Installer (WiX v6, SDK-style).
+
+       Ein Rechtsklick "Erstellen" im Solution Explorer fuehrt aus:
+         1) EnsurePythonToolchain   (Python + pip-Deps)
+         2) BuildWasmBridge         (vcxproj -> VoiceWalkerBridge.wasm)
+         3) BuildEfbApp             (npm run build -> EFB-App-Bundle)
+         4) BuildMsfsPackage        (fspackagetool.exe -> gsimulation-voicewalker)
+         5) BuildPythonExes         (PyInstaller: App + Setup-EXE)
+         6) GenerateLicenseRtf      (LICENSE -> License.rtf)
+         7) WiX-Link                (MSI)
+       =========================================================== -->
+
+  <PropertyGroup>
+    <OutputName>VoiceWalker-Setup</OutputName>
+    <OutputType>Package</OutputType>
+
+    <Platforms>x64</Platforms>
+    <Platform Condition=" '$(Platform)' == '' ">x64</Platform>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+
+    <RepoRoot>$(MSBuildProjectDirectory)\..</RepoRoot>
+    <DistDir>$(RepoRoot)\dist</DistDir>
+    <AppExe>$(DistDir)\VoiceWalker.exe</AppExe>
+    <SetupHelperExe>$(DistDir)\VoiceWalker-Setup.exe</SetupHelperExe>
+
+    <MsfsSdk Condition=" '$(MsfsSdk)' == '' ">C:\MSFS 2024 SDK</MsfsSdk>
+    <FsPackageTool>$(MsfsSdk)\Tools\bin\fspackagetool.exe</FsPackageTool>
+    <MsfsProjectXml>$(RepoRoot)\msfs-project\VoiceWalkerProject.xml</MsfsProjectXml>
+    <BuiltMsfsPackage>$(RepoRoot)\msfs-project\Packages\gsimulation-voicewalker</BuiltMsfsPackage>
+
+    <WasmBridgeProject>$(RepoRoot)\msfs-project\Sources\wasm\VoiceWalkerBridge.vcxproj</WasmBridgeProject>
+    <WasmBridgeSource>$(RepoRoot)\msfs-project\Sources\wasm\VoiceWalkerBridge.cpp</WasmBridgeSource>
+    <WasmBridgeOutput>$(RepoRoot)\msfs-project\PackageSources\modules\VoiceWalkerBridge.wasm</WasmBridgeOutput>
+
+    <EfbAppDir>$(RepoRoot)\msfs-project\PackageSources\EfbApp\VoiceWalkerApp</EfbAppDir>
+    <EfbAppDistJs>$(EfbAppDir)\dist\VoiceWalkerApp.js</EfbAppDistJs>
+
+    <SuppressIces>ICE61;ICE91</SuppressIces>
+
+    <!-- Debug-Build-Schalter. Wenn true: debug.js wird ins Bundle eingepackt
+         und /debug/* Endpoints sind in main.py freigegeben. Wenn false
+         (Default fuer Public-Release): debug.js fehlt im Bundle, Endpoints
+         liefern 404 — End-User koennen keinen Backend-State pollen.
+
+         Aktivieren via:  dotnet build /p:VWDebugBuild=true ...
+         oder via Env-Var: set VW_DEBUG_BUILD=1 vor dem Build. -->
+    <VWDebugBuild Condition="'$(VWDebugBuild)' == '' And '$(VW_DEBUG_BUILD)' == '1'">true</VWDebugBuild>
+    <VWDebugBuild Condition="'$(VWDebugBuild)' == ''">false</VWDebugBuild>
+    <_DebugBuildPy Condition="'$(VWDebugBuild)' == 'true'">True</_DebugBuildPy>
+    <_DebugBuildPy Condition="'$(VWDebugBuild)' != 'true'">False</_DebugBuildPy>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="6.0.2" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="6.0.2" />
+  </ItemGroup>
+
+
+  <!-- TARGET 1: Toolchain-Check -->
+  <Target Name="EnsurePythonToolchain" BeforeTargets="BeforeBuild">
+    <Exec Command="python --version" ConsoleToMSBuild="true" ContinueOnError="true">
+      <Output TaskParameter="ExitCode" PropertyName="PythonCheckExitCode" />
+    </Exec>
+    <Error Condition=" '$(PythonCheckExitCode)' != '0' "
+           Text="Python wurde nicht im PATH gefunden. Bitte Python 3.10+ installieren." />
+    <Exec Command="python -c &quot;import PyInstaller&quot;"
+          ConsoleToMSBuild="true" ContinueOnError="true">
+      <Output TaskParameter="ExitCode" PropertyName="PyInstallerCheckExitCode" />
+    </Exec>
+    <Exec Condition=" '$(PyInstallerCheckExitCode)' != '0' "
+          Command="python -m pip install --upgrade pyinstaller"
+          WorkingDirectory="$(RepoRoot)" />
+    <Exec Command="python -m pip install -r &quot;$(RepoRoot)\requirements.txt&quot;"
+          WorkingDirectory="$(RepoRoot)" />
+  </Target>
+
+
+  <!-- Legacy-MSFS-Addon-Target entfernt: msfs-addon\voicewalker\ existiert
+       nicht mehr, fspackagetool.exe baut stattdessen msfs-project\Packages\
+       gsimulation-voicewalker\. -->
+
+
+  <!-- TARGET 2: WASM-Bridge-Modul bauen.
+       Erzeugt VoiceWalkerBridge.wasm via VoiceWalkerBridge.vcxproj
+       (Platform=MSFS, PlatformToolset=MSFS2024). Voraussetzung: MSFS 2024
+       SDK ist installiert UND die MSFS VS-Extension (Platform-Toolset-
+       Registrierung) ist in Visual Studio verfuegbar.
+       Das Modul liest Walker-Avatar-Position und POSTet sie an die Python-App.
+       Output landet in msfs-project\PackageSources\modules\ und wird im
+       naechsten Schritt vom fspackagetool ins Paket gezogen. -->
+  <Target Name="BuildWasmBridge"
+          BeforeTargets="BuildMsfsPackage"
+          DependsOnTargets="EnsurePythonToolchain"
+          Inputs="$(WasmBridgeSource);$(WasmBridgeProject)"
+          Outputs="$(WasmBridgeOutput)">
+    <Message Text="==&gt; Baue WASM-Modul VoiceWalkerBridge.wasm..." Importance="high" />
+    <MSBuild Projects="$(WasmBridgeProject)"
+             Properties="Configuration=Release;Platform=MSFS"
+             RemoveProperties="TargetFramework"
+             Targets="Build" />
+    <Error Condition="!Exists('$(WasmBridgeOutput)')"
+           Text="WASM-Bridge-Build fehlgeschlagen: $(WasmBridgeOutput) wurde nicht erzeugt." />
+    <Message Text="==&gt; WASM-Bridge fertig: $(WasmBridgeOutput)" Importance="high" />
+  </Target>
+
+
+  <!-- TARGET 2b: EFB-App-Bundle bauen (esbuild via npm).
+       Erzeugt PackageSources\EfbApp\VoiceWalkerApp\dist\VoiceWalkerApp.js +
+       .css + Assets/. Wird im naechsten Schritt vom fspackagetool ueber die
+       AssetGroup `efb_apps_voicewalker` nach html_ui/efb_ui/efb_apps/
+       VoiceWalkerApp/ ins Package kopiert.
+       Voraussetzung: Node.js + npm im PATH. Beim ersten Lauf wird npm install
+       ausgefuehrt; danach nur npm run build (inkrementell via Inputs/Outputs).
+       --legacy-peer-deps wegen Asobo-Sample-Pin (esbuild 0.21 vs. neuere
+       esbuild-sass-plugin Peer-Range). -->
+  <Target Name="BuildEfbApp"
+          BeforeTargets="BuildMsfsPackage"
+          Inputs="$(EfbAppDir)\package.json;$(EfbAppDir)\build.js;$(EfbAppDir)\src\VoiceWalkerApp.tsx;$(EfbAppDir)\src\VoiceWalkerApp.scss;$(EfbAppDir)\src\Components\MainView.tsx;$(EfbAppDir)\src\Components\MainView.scss;$(EfbAppDir)\src\Assets\app-icon.svg"
+          Outputs="$(EfbAppDistJs)">
+    <Message Text="==&gt; Baue EFB-App-Bundle (npm run build)..." Importance="high" />
+    <Exec Command="npm --version" ConsoleToMSBuild="true" ContinueOnError="true">
+      <Output TaskParameter="ExitCode" PropertyName="NpmCheckExitCode" />
+    </Exec>
+    <Error Condition=" '$(NpmCheckExitCode)' != '0' "
+           Text="npm wurde nicht im PATH gefunden. Node.js (mit npm) installieren — z.B. https://nodejs.org/ — oder PATH erweitern." />
+    <Exec Condition="!Exists('$(EfbAppDir)\node_modules\esbuild\package.json')"
+          Command="npm install --legacy-peer-deps"
+          WorkingDirectory="$(EfbAppDir)" />
+    <Exec Command="npm run build"
+          WorkingDirectory="$(EfbAppDir)" />
+    <Error Condition="!Exists('$(EfbAppDistJs)')"
+           Text="EFB-App-Build fehlgeschlagen: $(EfbAppDistJs) wurde nicht erzeugt." />
+    <Message Text="==&gt; EFB-App fertig: $(EfbAppDistJs)" Importance="high" />
+  </Target>
+
+
+  <!-- TARGET 3: MSFS-Package via fspackagetool.exe bauen.
+       Laeuft nur wenn das SDK installiert ist. Ergebnis landet unter
+       msfs-project\Packages\gsimulation-voicewalker\ und wird im
+       naechsten Schritt ins Setup-EXE eingebunden.
+
+       Robustheit:
+       - Wenn fspackagetool fehlschlaegt UND es gibt bereits ein gueltiges
+         Package → Warnung, weiter mit altem Package.
+       - Wenn fspackagetool fehlschlaegt UND es gibt KEIN Package → Fehler.
+       - html_ui/ wird zusaetzlich IMMER aus PackageSources deterministisch
+         ins Package kopiert, damit HTML/CSS/JS-Iteration auch dann live
+         wird, wenn fspackagetool nur inkrementell/partiell laeuft oder haengt.
+       - WASM-Bridge wird aus Staging ins Package kopiert (Sicherheits-Copy). -->
+  <Target Name="BuildMsfsPackage"
+          BeforeTargets="BeforeBuild"
+          DependsOnTargets="EnsurePythonToolchain;BuildWasmBridge;BuildEfbApp">
+    <Message Condition="!Exists('$(FsPackageTool)')"
+             Text="==&gt; fspackagetool.exe nicht gefunden unter $(FsPackageTool) — MSFS-Package-Build wird uebersprungen, Legacy-Fallback wird verwendet."
+             Importance="high" />
+    <Message Condition="Exists('$(FsPackageTool)')"
+             Text="==&gt; Baue MSFS-Package via fspackagetool.exe... (MSFS 2024 muss laufen, im Hauptmenu stehen, Dev Mode aktiv)"
+             Importance="high" />
+    <!-- -rebuild erzwingt frischen Build (ignoriert Timestamps).
+         ContinueOnError=true damit wir ExitCode pruefen und bei Fehler einen
+         Fallback auf das existierende Package machen koennen. -->
+    <Exec Condition="Exists('$(FsPackageTool)')"
+          Command="&quot;$(FsPackageTool)&quot; &quot;$(MsfsProjectXml)&quot; -rebuild -nopause"
+          WorkingDirectory="$(RepoRoot)\msfs-project"
+          ContinueOnError="true"
+          IgnoreExitCode="true">
+      <Output TaskParameter="ExitCode" PropertyName="FsPackageToolExitCode" />
+    </Exec>
+    <Message Condition="Exists('$(FsPackageTool)') And '$(FsPackageToolExitCode)' == '0'"
+             Text="==&gt; fspackagetool.exe OK." Importance="high" />
+    <Warning Condition="Exists('$(FsPackageTool)') And '$(FsPackageToolExitCode)' != '0' And Exists('$(BuiltMsfsPackage)\manifest.json')"
+             Text="fspackagetool.exe lieferte ExitCode $(FsPackageToolExitCode). Nutze vorhandenes Paket als Fallback — ACHTUNG: enthaelt eventuell nicht alle Aenderungen aus PackageSources. Fuer kompletten Neubau: MSFS 2024 starten, ins HAUPTMENUE, Dev Mode an, Rebuild. (html_ui/ wird im naechsten Schritt aus PackageSources nachgezogen.)" />
+    <Error Condition="Exists('$(FsPackageTool)') And '$(FsPackageToolExitCode)' != '0' And !Exists('$(BuiltMsfsPackage)\manifest.json')"
+           Text="fspackagetool.exe ist fehlgeschlagen (ExitCode $(FsPackageToolExitCode)) und es existiert kein vorheriges Paket unter $(BuiltMsfsPackage). Starte MSFS 2024, geh ins Hauptmenue (kein Flug), Dev Mode aktivieren, dann rebuild." />
+    <!-- Sicherheits-Copy 1: die .wasm aus dem Staging direkt ins Paket-Output
+         kopieren, falls fspackagetool die wasm-AssetGroup nicht verarbeitet hat.
+         Nur wenn das Paket-Output und die Staging-.wasm existieren. -->
+    <MakeDir Condition="Exists('$(BuiltMsfsPackage)\manifest.json') And Exists('$(WasmBridgeOutput)')"
+             Directories="$(BuiltMsfsPackage)\modules" />
+    <Copy Condition="Exists('$(BuiltMsfsPackage)\manifest.json') And Exists('$(WasmBridgeOutput)')"
+          SourceFiles="$(WasmBridgeOutput)"
+          DestinationFolder="$(BuiltMsfsPackage)\modules" />
+    <!-- Sicherheits-Copy 2: html_ui/ aus PackageSources deterministisch
+         ins Package spiegeln. Das garantiert dass panel.html/panel.js/panel.css
+         und sonstige UI-Assets aktuell sind, auch wenn fspackagetool sie nicht
+         (mehr) kopiert hat oder gecrasht ist. -->
+    <ItemGroup>
+      <_HtmlUiSourceFiles Include="$(RepoRoot)\msfs-project\PackageSources\html_ui\**\*.*" />
+    </ItemGroup>
+    <Copy Condition="Exists('$(BuiltMsfsPackage)\manifest.json')"
+          SourceFiles="@(_HtmlUiSourceFiles)"
+          DestinationFiles="@(_HtmlUiSourceFiles->'$(BuiltMsfsPackage)\html_ui\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Message Condition="Exists('$(BuiltMsfsPackage)\manifest.json')"
+             Text="==&gt; html_ui/ aus PackageSources ins Paket gespiegelt." Importance="high" />
+    <Message Condition="Exists('$(BuiltMsfsPackage)\manifest.json')"
+             Text="==&gt; MSFS-Package fertig: $(BuiltMsfsPackage)" Importance="high" />
+  </Target>
+
+
+  <!-- TARGET 4: PyInstaller-Build (inkrementell).
+       Setup-EXE embeddet entweder das gebaute MSFS-Package (bevorzugt) oder
+       den Legacy-Hand-Ordner als Fallback. -->
+  <Target Name="BuildPythonExes"
+          BeforeTargets="BeforeBuild"
+          DependsOnTargets="EnsurePythonToolchain;BuildMsfsPackage"
+          Inputs="$(RepoRoot)\main.py;$(RepoRoot)\debug.py;$(RepoRoot)\ptt_backend.py;$(RepoRoot)\installer.py;$(RepoRoot)\requirements.txt"
+          Outputs="$(AppExe);$(SetupHelperExe)">
+
+    <Message Text="==&gt; Baue Python-EXEs mit PyInstaller (DebugBuild=$(VWDebugBuild))..." Importance="high" />
+
+    <!-- Falls eine vorherige App- oder Setup-Instanz noch laeuft, blockiert
+         sie dist\*.exe und PyInstaller (Clean-Schritt) schlaegt mit
+         "Zugriff verweigert" fehl. Wir killen die EXEs zuerst silent
+         (errorlevel ignoriert, /T = Children, /F = force). Existiert
+         keiner der Prozesse, ist taskkill harmlos. -->
+    <Exec Command="taskkill /F /T /IM VoiceWalker.exe 2&gt;nul &amp; taskkill /F /T /IM VoiceWalker-Setup.exe 2&gt;nul &amp; exit /b 0"
+          IgnoreExitCode="true" />
+
+    <!-- Build-Time-Flag in build_config.py schreiben. Wird von main.py
+         beim Start gelesen; steuert ob /debug/* Endpoints offen sind. -->
+    <WriteLinesToFile File="$(RepoRoot)\build_config.py"
+                      Lines="DEBUG_BUILD = $(_DebugBuildPy)"
+                      Overwrite="true" />
+    <Message Text="==&gt; build_config.py: DEBUG_BUILD = $(_DebugBuildPy)" Importance="high" />
+
+    <!-- Logo-Assets (PNG-Varianten + Web/Panel-Kopien) generieren — sonst
+         fehlt das Logo in der gepackten EXE wenn web/voicewalker-logo-mark-
+         light.png aus Versehen geloescht oder das Source-PNG geaendert wurde. -->
+    <Exec Command="python packaging\build-logo-assets.py"
+          WorkingDirectory="$(RepoRoot)"
+          IgnoreExitCode="true" />
+
+    <!-- Web-Source fuer PyInstaller vorbereiten. Public-Build: debug.js
+         wird AUSGESCHLOSSEN, sodass das Frontend-Debug-Panel im Bundle
+         nicht existiert. Dev-Build: alle web-Dateien rein. -->
+    <RemoveDir Directories="$(RepoRoot)\dist\web_for_build" />
+    <ItemGroup>
+      <_WebFilesPublic Include="$(RepoRoot)\web\**\*.*"
+                       Exclude="$(RepoRoot)\web\debug.js"
+                       Condition="'$(VWDebugBuild)' != 'true'" />
+      <_WebFilesDev Include="$(RepoRoot)\web\**\*.*"
+                    Condition="'$(VWDebugBuild)' == 'true'" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_WebFilesPublic)"
+          DestinationFiles="@(_WebFilesPublic->'$(RepoRoot)\dist\web_for_build\%(RecursiveDir)%(Filename)%(Extension)')"
+          Condition="'$(VWDebugBuild)' != 'true'" />
+    <Copy SourceFiles="@(_WebFilesDev)"
+          DestinationFiles="@(_WebFilesDev->'$(RepoRoot)\dist\web_for_build\%(RecursiveDir)%(Filename)%(Extension)')"
+          Condition="'$(VWDebugBuild)' == 'true'" />
+
+    <!-- App-EXE: noconsole + Tray-Modul + App-Icon eingebunden.
+         pystray + PIL muessen mit collect-all rein damit das Windows-Tray-
+         Backend in der gefrorenen EXE verfuegbar ist. tray + pynput + license_client
+         als hidden-import weil sie nur dynamisch geladen werden. -->
+    <Exec Command="python -m PyInstaller --noconfirm --clean --name VoiceWalker --onefile --noconsole --icon &quot;packaging\app-icon.ico&quot; --add-data &quot;dist\web_for_build;web&quot; --collect-all SimConnect --collect-all pygame --collect-all websockets --collect-all pystray --collect-all PIL --hidden-import ptt_backend --hidden-import debug --hidden-import tray --hidden-import pynput --hidden-import license_client --hidden-import build_config main.py"
+          WorkingDirectory="$(RepoRoot)" />
+
+    <Error Condition="!Exists('$(AppExe)')"
+           Text="PyInstaller hat $(AppExe) nicht erzeugt." />
+
+    <!-- Setup-EXE: embeddet nur das neue fspackagetool-Output.
+         Wenn's fehlt → klarer Fehler statt Legacy-Fallback auf nicht-
+         existierenden Ordner. -->
+    <Error Condition="!Exists('$(BuiltMsfsPackage)\manifest.json')"
+           Text="MSFS-Package nicht gefunden unter $(BuiltMsfsPackage). fspackagetool.exe hat nichts gebaut — pruefe ob MSFS 2024 laeuft und Dev Mode aktiv ist, dann erneut bauen." />
+
+    <!-- Setup/Integrator-EXE: noconsole, weil installer.py jetzt eine
+         native Win32-MessageBox zeigt statt stdout/input zu nutzen. -->
+    <Exec Command="python -m PyInstaller --noconfirm --clean --name VoiceWalker-Setup --onefile --noconsole --icon &quot;packaging\app-icon.ico&quot; --add-data &quot;dist\VoiceWalker.exe;.&quot; --add-data &quot;msfs-project\Packages\gsimulation-voicewalker;gsimulation-voicewalker&quot; installer.py"
+          WorkingDirectory="$(RepoRoot)" />
+
+    <Error Condition="!Exists('$(SetupHelperExe)')"
+           Text="PyInstaller hat $(SetupHelperExe) nicht erzeugt." />
+
+    <Message Text="==&gt; Python-EXEs fertig." Importance="high" />
+  </Target>
+
+
+  <!-- TARGET 5: License-RTF -->
+  <Target Name="GenerateLicenseRtf"
+          BeforeTargets="BeforeBuild"
+          DependsOnTargets="EnsurePythonToolchain"
+          Inputs="$(RepoRoot)\LICENSE;$(MSBuildProjectDirectory)\gen-license-rtf.py"
+          Outputs="$(MSBuildProjectDirectory)\License.rtf">
+    <Message Text="==&gt; Generiere License.rtf..." Importance="high" />
+    <Exec Command="python &quot;$(MSBuildProjectDirectory)\gen-license-rtf.py&quot;"
+          WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+
+
+  <!-- TARGET 6: Clean -->
+  <Target Name="CleanPythonArtifacts" AfterTargets="Clean">
+    <RemoveDir Directories="$(RepoRoot)\build" ContinueOnError="true" />
+    <RemoveDir Directories="$(RepoRoot)\dist" ContinueOnError="true" />
+    <Delete Files="$(RepoRoot)\VoiceWalker.spec" ContinueOnError="true" />
+    <Delete Files="$(RepoRoot)\VoiceWalker-Setup.spec" ContinueOnError="true" />
+    <Delete Files="$(MSBuildProjectDirectory)\License.rtf" ContinueOnError="true" />
+    <!-- WASM-Build-Artefakte -->
+    <MSBuild Projects="$(WasmBridgeProject)"
+             Properties="Configuration=Release;Platform=MSFS"
+             Targets="Clean"
+             ContinueOnError="true" />
+    <Delete Files="$(WasmBridgeOutput)" ContinueOnError="true" />
+    <!-- EFB-App-Build-Artefakte (node_modules bleibt — nur dist loeschen) -->
+    <RemoveDir Directories="$(EfbAppDir)\dist" ContinueOnError="true" />
+  </Target>
+
+</Project>

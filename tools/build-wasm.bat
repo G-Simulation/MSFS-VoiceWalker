@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================================
-REM MSFSVoiceWalker — WASM-Modul-Build (direkter clang-cl + wasm-ld Aufruf)
+REM VoiceWalker — WASM-Modul-Build (direkter clang-cl + wasm-ld Aufruf)
 REM ============================================================================
 REM
 REM Warum diese .bat statt ein vcxproj?
@@ -34,9 +34,9 @@ set "SRC_DIR=%REPO%\msfs-project\Sources\wasm"
 set "OUT_DIR=%SRC_DIR%\bin\Release"
 set "PKG_DIR=%REPO%\msfs-project\PackageSources\modules"
 
-set "SOURCE=%SRC_DIR%\MSFSVoiceWalkerBridge.cpp"
-set "OBJ=%OUT_DIR%\MSFSVoiceWalkerBridge.o"
-set "WASM=%OUT_DIR%\MSFSVoiceWalkerBridge.wasm"
+set "SOURCE=%SRC_DIR%\VoiceWalkerBridge.cpp"
+set "OBJ=%OUT_DIR%\VoiceWalkerBridge.o"
+set "WASM=%OUT_DIR%\VoiceWalkerBridge.wasm"
 
 REM --- Praechecks -------------------------------------------------------------
 if not exist "%CLANG%" (
@@ -67,7 +67,7 @@ if not exist "%PKG_DIR%" mkdir "%PKG_DIR%"
 
 REM --- Compile ----------------------------------------------------------------
 echo.
-echo [WASM] === Compile MSFSVoiceWalkerBridge.cpp ===
+echo [WASM] === Compile VoiceWalkerBridge.cpp ===
 "%CLANG%" ^
   /c /O2 /Zc:__cplusplus ^
   /DNDEBUG /D_MSFS_WASM ^
@@ -102,7 +102,7 @@ if errorlevel 1 (
 
 REM --- Link -------------------------------------------------------------------
 echo.
-echo [WASM] === Link MSFSVoiceWalkerBridge.wasm ===
+echo [WASM] === Link VoiceWalkerBridge.wasm ===
 "%WASMLD%" ^
   --no-entry ^
   --stack-guard-page ^
@@ -146,5 +146,5 @@ if errorlevel 1 (
 )
 
 echo.
-echo [WASM] BUILD OK: %PKG_DIR%\MSFSVoiceWalkerBridge.wasm
+echo [WASM] BUILD OK: %PKG_DIR%\VoiceWalkerBridge.wasm
 exit /b 0

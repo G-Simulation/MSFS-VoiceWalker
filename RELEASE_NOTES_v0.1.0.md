@@ -1,4 +1,4 @@
-# MSFSVoiceWalker v0.1.0 — Open Beta
+# VoiceWalker v0.1.0 — Open Beta
 
 Erste testfertige Version. Funktional komplett, aber nicht produktiv getestet.
 Feedback und Bug-Reports ausdrücklich erwünscht.
@@ -55,17 +55,17 @@ Per Slider im Debug-Panel live anpassbar (10 m bis 2 km).
 
 ## Installation
 
-1. [MSFSVoiceWalker-Setup.exe](https://github.com/G-Simulation/MSFS-VoiceWalker/releases/download/v0.1.0/MSFSVoiceWalker-Setup.exe) herunterladen
+1. [VoiceWalker-Setup.exe](https://github.com/G-Simulation/MSFS-VoiceWalker/releases/download/v0.1.0/VoiceWalker-Setup.exe) herunterladen
 2. Doppelklick
 3. Durch Windows-SmartScreen-Warnung durchklicken ("Weitere Informationen"
    → "Trotzdem ausführen")
 4. Setup-Assistent: Pfad bestätigen, Desktop-Icon optional
-5. Beim nächsten MSFS-Start läuft MSFSVoiceWalker automatisch mit
+5. Beim nächsten MSFS-Start läuft VoiceWalker automatisch mit
 
 ## Feedback
 
 Bugs: [Issues auf GitHub](https://github.com/G-Simulation/MSFS-VoiceWalker/issues).
-Bei Abstürzen bitte `%LOCALAPPDATA%\MSFSVoiceWalker\voicewalker.log` und
+Bei Abstürzen bitte `%LOCALAPPDATA%\VoiceWalker\voicewalker.log` und
 Debug-Export (`Strg+Shift+D` → Export-Button) anhängen.
 
 ---

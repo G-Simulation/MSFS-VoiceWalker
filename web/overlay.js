@@ -1,4 +1,4 @@
-// MSFSVoiceWalker — Overlay fuer das MSFS-Toolbar-Panel
+// VoiceWalker — Overlay fuer das MSFS-Toolbar-Panel
 // ===========================================================================
 // Laeuft in iframe im MSFS Coherent GT; bekommt seine Daten per WebSocket von
 // der lokalen Python-App auf /ui. BroadcastChannel funktioniert zwischen

@@ -1,7 +1,7 @@
 """
-MSFSVoiceWalker — Community-Folder-Addon-Builder.
+VoiceWalker — Community-Folder-Addon-Builder.
 
-Generiert aus den Dateien in msfs-addon/msfsvoicewalker/ eine GUELTIGE
+Generiert aus den Dateien in msfs-addon/voicewalker/ eine GUELTIGE
 layout.json (mit echten Dateigroessen und Timestamps) und aktualisiert
 den total_package_size im manifest.json. Ohne diese Validierung lehnt
 MSFS das Paket beim Laden still ab — das Addon erscheint nicht in der
@@ -11,7 +11,7 @@ Aufruf:
     python tools/build-addon.py
 
 Danach:
-    Den Ordner msfs-addon/msfsvoicewalker/ in deinen MSFS-Community-Folder
+    Den Ordner msfs-addon/voicewalker/ in deinen MSFS-Community-Folder
     kopieren und MSFS neu starten (Community-Folder-Aenderungen werden nur
     beim Start geladen).
 
@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ADDON = ROOT / "msfs-addon" / "msfsvoicewalker"
+ADDON = ROOT / "msfs-addon" / "voicewalker"
 
 MANIFEST = ADDON / "manifest.json"
 LAYOUT   = ADDON / "layout.json"

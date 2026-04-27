@@ -1,4 +1,4 @@
-MSFSVoiceWalker
+VoiceWalker
 Copyright 2026 G-Simulation
 
 This product includes software developed by G-Simulation and is
@@ -79,7 +79,7 @@ Microsoft Flight Simulator
 --------------------------
 
 "Microsoft Flight Simulator" is a trademark of Microsoft Corporation.
-MSFSVoiceWalker is an independent third-party tool and is not affiliated
+VoiceWalker is an independent third-party tool and is not affiliated
 with, endorsed by, or sponsored by Microsoft.
 
 SimConnect is part of the Microsoft Flight Simulator SDK and is used
@@ -95,7 +95,7 @@ All other trademarks are the property of their respective owners.
 Donations
 ---------
 
-MSFSVoiceWalker is free software. Development is a volunteer effort;
+VoiceWalker is free software. Development is a volunteer effort;
 donations are welcome but never required. Donating grants no additional
 rights beyond those in the Apache License 2.0. Links to current donation
 channels (if any) can be found in the project README.

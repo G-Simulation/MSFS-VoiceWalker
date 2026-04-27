@@ -1,7 +1,7 @@
-# MSFSVoiceWalker — Press Kit
+# VoiceWalker — Press Kit
 
 <p align="center">
-  <img src="../brand/voicewalker-logo.png" alt="MSFSVoiceWalker Logo" width="180"/>
+  <img src="../brand/voicewalker-logo.png" alt="VoiceWalker Logo" width="180"/>
 </p>
 
 **Proximity-Voice für Microsoft Flight Simulator — Peer-to-Peer, ohne Server, ohne Registrierung.**
@@ -27,7 +27,7 @@ Schreib mich dort kurz an, ich schalte dich frei und gebe dir die Beta-Installer
 
 ---
 
-## Was ist MSFSVoiceWalker?
+## Was ist VoiceWalker?
 
 Ein Add-on für MSFS, das aus Sim-Position + Heading echte räumliche Sprachkommunikation macht — angepasst an die Situation, in der du gerade bist. Drei Komponenten arbeiten zusammen:
 
@@ -112,4 +112,4 @@ Im Server gibt es einen `#beta`-Channel und einen direkten Draht zu mir für Bug
 
 ---
 
-<sub>MSFSVoiceWalker · Open Beta · v0.1.0 · Stand: April 2026</sub>
+<sub>VoiceWalker · Open Beta · v0.1.0 · Stand: April 2026</sub>

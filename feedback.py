@@ -133,7 +133,7 @@ def send(user_note: str = "", *, app_version: str = "?",
 
     # Discord-Embed: kompakt, gut lesbar im Channel
     embed = {
-        "title": "MSFSVoiceWalker — Log Submission",
+        "title": "VoiceWalker — Log Submission",
         "color": 4756863,  # weiches Blau passend zum App-Branding
         "fields": [
             {"name": "Reason",   "value": reason or "manual", "inline": True},
@@ -169,7 +169,7 @@ def send(user_note: str = "", *, app_version: str = "?",
             headers={
                 "Content-Type":   content_type,
                 "Content-Length": str(len(body)),
-                "User-Agent":     f"MSFSVoiceWalker/{app_version}",
+                "User-Agent":     f"VoiceWalker/{app_version}",
             },
         )
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_S) as r:

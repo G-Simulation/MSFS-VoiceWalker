@@ -1,7 +1,7 @@
-MSFSVoiceWalker — Third-Party Licenses
+VoiceWalker — Third-Party Licenses
 =======================================
 
-MSFSVoiceWalker enthält und verwendet die folgenden Drittanbieter-Komponenten.
+VoiceWalker enthält und verwendet die folgenden Drittanbieter-Komponenten.
 Jede behält ihre jeweilige Lizenz; die entsprechenden Notices sind unten
 aufgeführt bzw. werden mit der Distribution mitgeliefert.
 
@@ -81,7 +81,7 @@ License:  LGPL 2.1+
     (at your option) any later version.
 
     Hinweis zur Einhaltung (dynamische Einbindung):
-    Die mit PyInstaller gebündelte MSFSVoiceWalker.exe bindet pygame als
+    Die mit PyInstaller gebündelte VoiceWalker.exe bindet pygame als
     dynamische Bibliothek ein. Nutzer können die pygame-Binaries im
     _internal-Ordner (bzw. im entpackten PyInstaller-PKG) durch eigene
     austauschen, um diese LGPL-Anforderung zu erfüllen.
@@ -122,4 +122,4 @@ Vollständige Lizenztexte
 ========================
 Die Volltexte der oben genannten Lizenzen (MIT, BSD-3, Apache-2.0, LGPL-2.1)
 sind auf den jeweiligen Projekt-Webseiten verfügbar. Bei Fragen zur
-MSFSVoiceWalker-eigenen Lizenz siehe LICENSE.
+VoiceWalker-eigenen Lizenz siehe LICENSE.

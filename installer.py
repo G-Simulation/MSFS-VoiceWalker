@@ -1,15 +1,15 @@
 """
-MSFSVoiceWalker — automatischer Installer.
+VoiceWalker — automatischer Installer.
 
 Was passiert beim Ausführen:
   1) Erkennt alle MSFS 2024-Installationen (Store und Steam).
-  2) Kopiert MSFSVoiceWalker.exe nach %LOCALAPPDATA%\\MSFSVoiceWalker\\.
+  2) Kopiert VoiceWalker.exe nach %LOCALAPPDATA%\\VoiceWalker\\.
   3) Kopiert das Community-Folder-Addon in jeden gefundenen Community-Ordner.
-  4) Fügt MSFSVoiceWalker in die exe.xml jeder Sim-Installation ein
+  4) Fügt VoiceWalker in die exe.xml jeder Sim-Installation ein
      (bestehende Einträge bleiben erhalten).
   5) Meldet sauber, was gemacht wurde und was nicht ging.
 
-Fertig gebündelt als MSFSVoiceWalker-Setup.exe via PyInstaller.
+Fertig gebündelt als VoiceWalker-Setup.exe via PyInstaller.
 """
 
 from __future__ import annotations
@@ -21,12 +21,12 @@ import traceback
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-APP_NAME      = "MSFSVoiceWalker"
-# Package-Name nach fspackagetool-Build: gsimulation-msfsvoicewalker.
+APP_NAME      = "VoiceWalker"
+# Package-Name nach fspackagetool-Build: gsimulation-voicewalker.
 # Fallback auf den alten Hand-Ordner-Namen wenn das neue Build-Output fehlt.
-ADDON_NAME    = "gsimulation-msfsvoicewalker"
-ADDON_NAME_LEGACY = "msfsvoicewalker"
-APP_EXE_FILE  = "MSFSVoiceWalker.exe"
+ADDON_NAME    = "gsimulation-voicewalker"
+ADDON_NAME_LEGACY = "voicewalker"
+APP_EXE_FILE  = "VoiceWalker.exe"
 
 
 # -----------------------------------------------------------------------------
@@ -212,7 +212,7 @@ def app_install_dir() -> Path:
 
 
 def copy_app_exe() -> Path:
-    """Kopiert die gebündelte MSFSVoiceWalker.exe an die Ziel-Stelle und gibt
+    """Kopiert die gebündelte VoiceWalker.exe an die Ziel-Stelle und gibt
     den Ziel-Pfad zurück."""
     src = bundled_root() / APP_EXE_FILE
     if not src.is_file():
@@ -341,7 +341,7 @@ def install() -> int:
         print()
 
     print(f"Fertig — {success}/{len(sims)} MSFS-Instanzen eingerichtet.")
-    print("Beim nächsten Start des Simulators läuft MSFSVoiceWalker automatisch mit.")
+    print("Beim nächsten Start des Simulators läuft VoiceWalker automatisch mit.")
     return 0 if success > 0 else 3
 
 
@@ -370,7 +370,7 @@ def uninstall() -> int:
         except Exception as e:
             print(f"[FEHLER] App-Ordner konnte nicht entfernt werden: {e}")
     if not removed_any:
-        print("Nichts zu tun — MSFSVoiceWalker war nicht installiert.")
+        print("Nichts zu tun — VoiceWalker war nicht installiert.")
     return 0
 
 
@@ -408,25 +408,25 @@ def main() -> int:
     if mode == "install":
         if rc == 0:
             _show_message(
-                "MSFSVoiceWalker — Installation",
+                "VoiceWalker — Installation",
                 "Installation erfolgreich abgeschlossen.\n\n"
-                "MSFSVoiceWalker startet beim naechsten Sim-Start automatisch mit.\n"
+                "VoiceWalker startet beim naechsten Sim-Start automatisch mit.\n"
                 "Du kannst die App auch ueber das Tray-Icon oder die Desktop-"
                 "Verknuepfung manuell oeffnen.",
                 "info",
             )
         else:
             _show_message(
-                "MSFSVoiceWalker — Installation",
+                "VoiceWalker — Installation",
                 "Bei der Installation ist ein Problem aufgetreten "
                 f"(Code {rc}).\n\nBitte das Setup als Administrator ausfuehren "
-                "oder die Logs in %LOCALAPPDATA%\\MSFSVoiceWalker\\ pruefen.",
+                "oder die Logs in %LOCALAPPDATA%\\VoiceWalker\\ pruefen.",
                 "error",
             )
     elif mode == "uninstall":
         _show_message(
-            "MSFSVoiceWalker — Deinstallation",
-            "MSFSVoiceWalker wurde entfernt.",
+            "VoiceWalker — Deinstallation",
+            "VoiceWalker wurde entfernt.",
             "info",
         )
 

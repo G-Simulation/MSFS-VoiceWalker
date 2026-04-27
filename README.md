@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="brand/voicewalker-logo.png" alt="MSFSVoiceWalker Logo" width="320"/>
+  <img src="brand/voicewalker-logo.png" alt="VoiceWalker Logo" width="320"/>
 </p>
 
 <p align="center">
@@ -10,12 +10,12 @@
   <a href="https://www.paypal.com/donate/?hosted_button_id=F2GPDVV6BUSAQ"><img src="https://img.shields.io/badge/donate-PayPal-00457C?logo=paypal&logoColor=white" alt="Donate"/></a>
 </p>
 
-# MSFSVoiceWalker
+# VoiceWalker
 
 Copyright 2026 Patrick Gottberg / [G-Simulation](https://www.gsimulations.de).
 Lizenziert unter der [Apache License 2.0](LICENSE) — freie, offene Software.
 Benutzen, forken, weiterentwickeln, verteilen: alles erlaubt, solange
-Copyright-Hinweis und LICENSE mitkopiert werden. Der Name "MSFSVoiceWalker"
+Copyright-Hinweis und LICENSE mitkopiert werden. Der Name "VoiceWalker"
 und "G-Simulation" sind über die Apache-2.0-Markenklausel (§6) geschützt —
 Forks dürfen diese Namen nicht führen.
 
@@ -47,16 +47,16 @@ und im Walker-/Zu-Fuß-Modus von MSFS 2024.
 
 ## Für Endnutzer
 
-1. `MSFSVoiceWalker-Setup.msi` doppelklicken (oder `MSFSVoiceWalker-Setup.exe`, wenn du eine ältere Version hast).
+1. `VoiceWalker-Setup.msi` doppelklicken (oder `VoiceWalker-Setup.exe`, wenn du eine ältere Version hast).
 2. Fertig.
 
 Das Setup
 
-- installiert die App nach `%LOCALAPPDATA%\MSFSVoiceWalker\`,
+- installiert die App nach `%LOCALAPPDATA%\VoiceWalker\`,
 - legt eine Start-Menü-Verknüpfung an (Desktop-Icon optional),
 - erkennt automatisch deine MSFS 2024-Installation (Store und Steam),
 - kopiert das Community-Folder-Addon in den jeweils richtigen Community-Ordner,
-- trägt MSFSVoiceWalker in die `exe.xml` des Simulators ein, sodass es beim Start von MSFS automatisch mithochgefahren wird,
+- trägt VoiceWalker in die `exe.xml` des Simulators ein, sodass es beim Start von MSFS automatisch mithochgefahren wird,
 - registriert sich in **Apps & Features** für saubere Deinstallation.
 
 Voraussetzungen: **Windows 10/11**, **MSFS 2024**, **ein Mikrofon**.
@@ -105,7 +105,7 @@ Kein Account, kein Login, keine Registrierung.
 - **Zukünftige Features** eingeschlossen (lifetime).
 
 Pro-Key erhältst du nach Kauf auf
-[gsimulations.de/msfsvoicewalker](https://www.gsimulations.de/msfsvoicewalker)
+[gsimulations.de/voicewalker](https://www.gsimulations.de/voicewalker)
 per E-Mail. Im UI unter **"Pro freischalten"** eintragen → sofort aktiv.
 Validation läuft über die eigene LMFWC-Instanz auf gsimulations.de; 7 Tage
 Offline-Grace-Period falls der Server mal nicht erreichbar ist.
@@ -175,7 +175,7 @@ Das Projekt besteht aus **drei Prozessen** auf dem Rechner des Spielers:
              │ SimConnect (Shared-Memory / Named-Pipe)
              ▼
   ┌──────────────────────────┐
-  │  MSFSVoiceWalker.exe     │   Python, PyInstaller-gebündelt
+  │  VoiceWalker.exe     │   Python, PyInstaller-gebündelt
   │  - SimConnect-Reader     │   • liest 10x/s Position, AGL,
   │  - HTTP + WS auf :7801   │     Kamera-State, Walker-Flag
   │  - PTT-Backend (pygame)  │   • serviert Web-UI lokal
@@ -243,14 +243,14 @@ Das Projekt besteht aus **drei Prozessen** auf dem Rechner des Spielers:
 
 - Das MSFS-SDK-Projekt (`msfs-project/`) wird mit dem offiziellen
   Package-Compiler zu einem Community-Folder-Paket kompiliert und enthält:
-  - **WASM-Bridge** (`PackageSources/wasm/MSFSVoiceWalkerBridge.cpp`) die
+  - **WASM-Bridge** (`PackageSources/wasm/VoiceWalkerBridge.cpp`) die
     Avatar-Position via SimConnect ClientData an die Python-App publisht.
   - **HTML-Panel** das in der Sim-Toolbar erscheint und per `<iframe>` die
     Overlay-Seite der lokal laufenden App lädt.
 - Das Panel lädt per `<iframe>` die Seite `http://127.0.0.1:7801/overlay.html`
   der lokal laufenden App — also eine kompakte Version der Peer-Liste und
   Sprech-Indikatoren direkt im Sim.
-- Die `exe.xml`-Einbindung sorgt dafür, dass `MSFSVoiceWalker.exe` beim
+- Die `exe.xml`-Einbindung sorgt dafür, dass `VoiceWalker.exe` beim
   Start von MSFS automatisch mithochgefahren wird.
 
 ---
@@ -258,15 +258,15 @@ Das Projekt besteht aus **drei Prozessen** auf dem Rechner des Spielers:
 ## Projektstruktur
 
 ```
-C:\MSFSVoiceWalker\
+C:\VoiceWalker\
 ├── README.md                      ← diese Datei
 ├── LICENSE                        ← proprietäre, source-available Lizenz
 ├── NOTICE                         ← Drittanbieter-Attributionen
 ├── SECURITY.md                    ← Sicherheitsmodell im Detail
 ├── CONTRIBUTING.md                ← wie man Bugs/Fixes einbringt (CLA-basiert)
 │
-├── MSFSVoiceWalker.sln            ← Visual Studio Solution (öffnet alles zusammen)
-├── MSFSVoiceWalker.pyproj         ← VS-Python-Projekt (PTVS)
+├── VoiceWalker.sln            ← Visual Studio Solution (öffnet alles zusammen)
+├── VoiceWalker.pyproj         ← VS-Python-Projekt (PTVS)
 │
 ├── main.py                        ← App-Einstiegspunkt, SimConnect + HTTP/WS
 ├── debug.py                       ← Logging, Self-Test, Ring-Buffer
@@ -276,8 +276,8 @@ C:\MSFSVoiceWalker\
 ├── installer.py                   ← Python-Integrator (Community-Folder + exe.xml)
 │
 ├── requirements.txt               ← Python-Dependencies
-├── build.bat / build-all.bat      ← baut dist\MSFSVoiceWalker.exe + Setup.exe via PyInstaller
-├── tools/build-wasm.bat           ← baut MSFSVoiceWalkerBridge.wasm (MSFS-SDK)
+├── build.bat / build-all.bat      ← baut dist\VoiceWalker.exe + Setup.exe via PyInstaller
+├── tools/build-wasm.bat           ← baut VoiceWalkerBridge.wasm (MSFS-SDK)
 │
 ├── web/                           ← Browser-UI (HTML/JS/CSS)
 │   ├── index.html                 ← Haupt-UI (Radar, Peer-Liste, Pro-Settings)
@@ -289,17 +289,17 @@ C:\MSFSVoiceWalker\
 │   └── voicewalker-logo.svg
 │
 ├── msfs-project/                  ← MSFS-SDK-Projekt (WASM-Bridge + Toolbar-Panel)
-│   ├── MSFSVoiceWalkerProject.xml
+│   ├── VoiceWalkerProject.xml
 │   ├── PackageDefinitions/        ← Package-Metadaten für MSFS-Compiler
 │   ├── PackageSources/            ← HTML/CSS/JS + WASM-Source für den In-Sim-Panel
-│   │   ├── wasm/MSFSVoiceWalkerBridge.cpp   ← SimConnect-ClientData-Publisher
-│   │   └── html_ui/InGamePanels/MSFSVoiceWalker/   ← Toolbar-Panel-Source
+│   │   ├── wasm/VoiceWalkerBridge.cpp   ← SimConnect-ClientData-Publisher
+│   │   └── html_ui/InGamePanels/VoiceWalker/   ← Toolbar-Panel-Source
 │   └── Sources/wasm/              ← WASM-Build-Projekt (Visual Studio)
 │
-├── MSFS/Release/MSFSVoiceWalkerBridge.wasm   ← kompilierte WASM-Bridge
+├── MSFS/Release/VoiceWalkerBridge.wasm   ← kompilierte WASM-Bridge
 │
 └── installer/                     ← WiX-v7-MSI-Installer-Projekt
-    ├── MSFSVoiceWalker.Installer.wixproj
+    ├── VoiceWalker.Installer.wixproj
     ├── Package.wxs                ← WiX-Source (Komponenten, UI, Custom Actions)
     └── build-exes.bat             ← PyInstaller-Launcher für Installer-EXEs
 ```
@@ -316,11 +316,11 @@ Du hast drei gleichwertige Wege, am Projekt zu arbeiten. Such dir einen aus.
    für WiX installieren (Extensions → Manage Extensions → nach "HeatWave" suchen).
 2. **[Python-Workload](https://learn.microsoft.com/en-us/visualstudio/python/installation)**
    im Visual Studio Installer sicherstellen (liefert PTVS mit).
-3. `MSFSVoiceWalker.sln` doppelklicken.
+3. `VoiceWalker.sln` doppelklicken.
 4. Im Solution Explorer erscheinen zwei Projekte:
-   - **MSFSVoiceWalker** (Python) — `main.py` als Startdatei. F5 zum Starten
+   - **VoiceWalker** (Python) — `main.py` als Startdatei. F5 zum Starten
      + Debuggen (Breakpoints in Python funktionieren direkt).
-   - **MSFSVoiceWalker.Installer** (WiX) — Rechtsklick → **Build** erzeugt
+   - **VoiceWalker.Installer** (WiX) — Rechtsklick → **Build** erzeugt
      die MSI. Details unten.
 
 Die Web-UI (`web/index.html`, `app.js`, `debug.js`, `overlay.html`) ist im
@@ -369,24 +369,24 @@ build.bat
 
 Produziert im `dist\`-Ordner:
 
-- `MSFSVoiceWalker.exe` — die Haupt-App (Python + alle Dependencies in einer EXE)
-- `MSFSVoiceWalker-Setup.exe` — der Python-Integrator (CLI-Tool für
+- `VoiceWalker.exe` — die Haupt-App (Python + alle Dependencies in einer EXE)
+- `VoiceWalker-Setup.exe` — der Python-Integrator (CLI-Tool für
   Community-Folder + exe.xml; wird vom MSI als Custom Action aufgerufen)
 
 ### Schritt 2: MSI-Installer bauen (WiX)
 
 Nachdem Schritt 1 die EXEs erzeugt hat, im Visual Studio:
 
-- Rechtsklick auf **MSFSVoiceWalker.Installer** → **Build**
+- Rechtsklick auf **VoiceWalker.Installer** → **Build**
 
 Oder aus dem Terminal:
 
 ```bat
 cd installer
-dotnet build MSFSVoiceWalker.Installer.wixproj -c Release -p:Platform=x64
+dotnet build VoiceWalker.Installer.wixproj -c Release -p:Platform=x64
 ```
 
-Ergebnis: `installer\bin\x64\Release\MSFSVoiceWalker-Setup.msi`
+Ergebnis: `installer\bin\x64\Release\VoiceWalker-Setup.msi`
 
 Details zur Installer-Logik siehe [installer/README.md](installer/README.md).
 
@@ -418,7 +418,7 @@ python main.py
 **Python-Seite:**
 
 - DEBUG-Level-Log in der Konsole (jeder WS-Frame, jede SimConnect-Variable, jeder PTT-Event)
-- Rotierende Log-Datei unter `%LOCALAPPDATA%\MSFSVoiceWalker\voicewalker.log` (5 × 1 MB)
+- Rotierende Log-Datei unter `%LOCALAPPDATA%\VoiceWalker\voicewalker.log` (5 × 1 MB)
 - Globaler Excepthook fängt sonst stumme Crashes ab, inkl. asyncio-Tasks
 - Self-Test beim Start prüft: Port frei, Web-Assets vorhanden, SimConnect
   importierbar, pygame importierbar, Schreibrechte im Data-Dir
@@ -439,7 +439,7 @@ python main.py
 ## Deinstallieren
 
 **Via Windows:**
-Apps & Features → "MSFSVoiceWalker" → Deinstallieren.
+Apps & Features → "VoiceWalker" → Deinstallieren.
 Das MSI räumt automatisch alles wieder weg, inklusive Community-Folder-Addon
 und `exe.xml`-Eintrag (letzteres über dieselbe Custom Action wie beim Install,
 nur mit `uninstall`-Parameter).
@@ -447,7 +447,7 @@ nur mit `uninstall`-Parameter).
 **Manuell (ohne MSI):**
 
 ```bat
-MSFSVoiceWalker-Setup.exe uninstall
+VoiceWalker-Setup.exe uninstall
 ```
 
 Die `exe.xml` wird vor der ersten Änderung immer als `exe.xml.bak` gesichert,
@@ -459,7 +459,7 @@ d.h. selbst wenn etwas schiefgeht, kannst du manuell zurückrollen.
 
 **Erledigt:**
 
-- [x] **WASM-Bridge** `MSFSVoiceWalkerBridge.wasm` publisht Avatar-Position via
+- [x] **WASM-Bridge** `VoiceWalkerBridge.wasm` publisht Avatar-Position via
   SimConnect ClientData direkt an die Python-App (ersetzt die alte HTTP-Probe).
 - [x] **MSFS-Toolbar-Panel** rendert Radar + Peer-Liste direkt im Sim.
 - [x] **3D-HRTF-Positional-Audio** mit Kardioid-Richtcharakteristik.
@@ -486,7 +486,7 @@ d.h. selbst wenn etwas schiefgeht, kannst du manuell zurückrollen.
 - [ ] **Radio-Sound-Effekt** (Funkgeräusche, Squelch-Rauschen) — aktuell
   ist die Stimme "clean". Aviation-Feeling-Sahne.
 - [ ] **Session-Recording** (Pro-Feature, langfristig).
-- [ ] **Landing-Page** `gsimulations.de/msfsvoicewalker` + Press-Kit.
+- [ ] **Landing-Page** `gsimulations.de/voicewalker` + Press-Kit.
 
 ---
 
@@ -528,6 +528,6 @@ kritische Komponente ist eingebunden.
   und kommerziell einsetzen.
 - Copyright-Hinweise und der Lizenztext müssen in Derivaten mitgegeben
   werden; modifizierte Dateien müssen entsprechend gekennzeichnet sein.
-- Die Namen "MSFSVoiceWalker" und "G-Simulation" sind über Apache 2.0 §6
+- Die Namen "VoiceWalker" und "G-Simulation" sind über Apache 2.0 §6
   (Trademarks) geschützt — Forks dürfen sich nicht so nennen.
 - Keine Haftung, keine Gewährleistung.

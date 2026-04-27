@@ -10,20 +10,20 @@ REM   zu lassen, starten wir das Public-Repo mit einem flachen
 REM   Initial-Commit aus der aktuellen Working-Copy.
 REM
 REM   Was es tut:
-REM     1) Temp-Clone der aktuellen Working-Copy in ..\MSFSVoiceWalker-public
+REM     1) Temp-Clone der aktuellen Working-Copy in ..\VoiceWalker-public
 REM     2) Dort git-Historie killen, frischer Initial-Commit
 REM     3) Push auf neues GitHub-Repo (muss vorher angelegt sein)
 REM
 REM   VORAUSSETZUNG:
 REM     - Neues GitHub-Repo angelegt:
-REM       https://github.com/G-Simulation/MSFSVoiceWalker (public, leer)
+REM       https://github.com/G-Simulation/VoiceWalker (public, leer)
 REM     - gh CLI oder SSH-Key fuer github.com eingerichtet
 REM ============================================================
 setlocal
 cd /d "%~dp0.."
 
-set "TARGET=..\MSFSVoiceWalker-public"
-set "REMOTE=git@github.com:G-Simulation/MSFSVoiceWalker.git"
+set "TARGET=..\VoiceWalker-public"
+set "REMOTE=git@github.com:G-Simulation/VoiceWalker.git"
 
 if exist "%TARGET%" (
     echo [ERROR] Ziel-Ordner existiert schon: %TARGET%
@@ -58,7 +58,7 @@ echo       (Das Public-Repo muss bereits existieren und leer sein.)
 git push -u origin main
 if errorlevel 1 (
     echo [ERROR] Push fehlgeschlagen. Pruefe:
-    echo   - Repo existiert: https://github.com/G-Simulation/MSFSVoiceWalker
+    echo   - Repo existiert: https://github.com/G-Simulation/VoiceWalker
     echo   - Repo ist leer (keine README / LICENSE vorinitialisiert)
     echo   - SSH-Key bei GitHub hinterlegt
     exit /b 1
@@ -67,7 +67,7 @@ if errorlevel 1 (
 echo.
 echo ============================================================
 echo  Public-Repo erzeugt und gepusht.
-echo  URL: https://github.com/G-Simulation/MSFSVoiceWalker
+echo  URL: https://github.com/G-Simulation/VoiceWalker
 echo.
 echo  Das alte (private) Repo 'MSFS-VoiceWalker' bleibt als
 echo  Arbeitsrepo lokal bestehen und ist NICHT betroffen.

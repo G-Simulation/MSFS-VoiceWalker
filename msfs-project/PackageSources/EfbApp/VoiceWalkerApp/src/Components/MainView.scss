@@ -1,0 +1,63 @@
+.vw-main-view {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: #0d1a2b;
+  overflow: hidden;
+}
+
+.vw-iframe {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background-color: transparent;
+}
+
+.vw-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.2rem;
+  padding: 2rem;
+  text-align: center;
+  color: #e8eef5;
+  background-color: #0d1a2b;
+}
+
+.vw-fallback-logo {
+  display: block;
+  max-width: 220px;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  filter: brightness(1.1);
+}
+
+.vw-fallback-message {
+  font-size: 1.2rem;
+  font-weight: 500;
+}
+
+.vw-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid rgba(232, 238, 245, 0.2);
+  border-top: 4px solid #3fdc8a;
+  border-radius: 50%;
+  animation: vw-spin 1s linear infinite;
+}
+
+@keyframes vw-spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}

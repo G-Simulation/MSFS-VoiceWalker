@@ -1,4 +1,4 @@
-// MSFSVoiceWalker — browser client.
+// VoiceWalker — browser client.
 //
 //   1. WebSocket to local Python (/ui) — sim snapshots + PTT events from backend.
 //   2. Auto-join geohash rooms via Trystero → independent meshes per region.
@@ -20,7 +20,7 @@ import { joinRoom } from 'https://cdn.jsdelivr.net/npm/trystero@0.15.0/+esm';
 // alle 2 s einen Heartbeat ueber BroadcastChannel. Neue Tabs fragen beim Load
 // kurz an — hoeren sie einen Heartbeat, zeigen sie einen Blocker-Screen und
 // booten die eigentliche App nicht.
-const LOCK_CHANNEL = 'msfsvoicewalker-instance-lock';
+const LOCK_CHANNEL = 'voicewalker-instance-lock';
 const HEARTBEAT_MS = 2000;
 const PROBE_WAIT_MS = 350;
 let _isPrimaryTab = false;
@@ -41,7 +41,7 @@ function showInstanceBlocker(mode) {
   const isDeact = mode === 'deactivated';
   const title   = isDeact
     ? 'Tab deaktiviert'
-    : 'MSFSVoiceWalker läuft bereits';
+    : 'VoiceWalker läuft bereits';
   const body    = isDeact
     ? 'Ein anderer Tab hat die Kontrolle übernommen. Diesen Tab bitte schließen — er ist nicht mehr aktiv.'
     : 'Die App ist schon in einem anderen Browser-Fenster oder Tab geöffnet. Um Ghost-Peers im Mesh zu vermeiden, darf nur eine Instanz gleichzeitig laufen.';
@@ -199,7 +199,7 @@ function becomeSecondary(ch) {
 const _instanceLockPromise = acquireInstanceLock();
 
 // --- Config (all times in ms unless noted) -----------------------------------
-const APP_ID = 'msfsvoicewalker-v1';
+const APP_ID = 'voicewalker-v1';
 const GEOHASH_PRECISION = 4;
 // Event-Meshes werden per Geohash geshardet, damit sich bei grossen Events nur
 // wirklich nahe Teilnehmer peer-to-peer verbinden. Voice hat ohnehin max ~5 km
@@ -391,7 +391,7 @@ const MAX_POS_MSGS_PER_SEC  = 15;
 
 // Private-Rooms-Salt (siehe ROADMAP §4). MUSS identisch in allen Client-Builds
 // bleiben — sonst sehen sich Teilnehmer gegenseitig nicht.
-const PRIVATE_ROOM_SALT = 'msfsvoicewalker-private-v1';
+const PRIVATE_ROOM_SALT = 'voicewalker-private-v1';
 const SANE = {
   lat:    [-90,   90],
   lon:    [-180, 180],
@@ -772,11 +772,11 @@ function showUpgradeModal(message) {
         <h2 style="margin:0 0 10px 0; font-size:17px;">Pro-Feature</h2>
         <p id="upgradeModalText" style="color:#8696b8; font-size:13px; line-height:1.5; margin:0 0 16px 0;"></p>
         <p style="color:#8696b8; font-size:12px; line-height:1.5; margin:0 0 18px 0;">
-          Upgrade auf MSFSVoiceWalker Pro: 7,99 € einmalig — unlimitierte Peers,
+          Upgrade auf VoiceWalker Pro: 7,99 € einmalig — unlimitierte Peers,
           Private Rooms, Supporter-Badge.
         </p>
         <div style="display:flex; gap:8px; justify-content:center;">
-          <a href="https://gsimulations.com/msfsvoicewalker" target="_blank" rel="noopener"
+          <a href="https://gsimulations.com/voicewalker" target="_blank" rel="noopener"
              style="padding:8px 16px; border-radius:8px; background:#6aa5ff; color:#0b1220;
                     font-weight:600; text-decoration:none; font-size:13px;">
             Pro holen

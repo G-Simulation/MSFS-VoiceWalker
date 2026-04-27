@@ -3,10 +3,10 @@ setlocal
 cd /d "%~dp0"
 
 echo ==========================================
-echo   MSFSVoiceWalker - Dev-Installation
+echo   VoiceWalker - Dev-Installation
 echo ==========================================
 echo.
-echo Hinweis: Fuer Endnutzer ist MSFSVoiceWalker-Setup.exe gedacht.
+echo Hinweis: Fuer Endnutzer ist VoiceWalker-Setup.exe gedacht.
 echo Dieses Skript ist nur fuer die Entwicklung (Python direkt).
 echo.
 

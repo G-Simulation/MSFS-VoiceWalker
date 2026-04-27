@@ -22,7 +22,7 @@ except Exception:
     log = logging.getLogger("autostart")
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-VALUE_NAME = "MSFSVoiceWalker"
+VALUE_NAME = "VoiceWalker"
 
 
 def _exe_path() -> Optional[str]:

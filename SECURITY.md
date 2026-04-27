@@ -1,4 +1,4 @@
-# Sicherheitsmodell — MSFSVoiceWalker
+# Sicherheitsmodell — VoiceWalker
 
 Dieses Tool ist ein Peer-to-Peer-Voice-System: jeder Spieler spricht direkt
 mit jedem anderen, ohne zentralen Server. Das bringt echte Stärken mit sich
@@ -58,13 +58,13 @@ Eigenarten, über die man Bescheid wissen sollte.
 ## Installer-Verhalten
 
 - Der Installer schreibt ausschließlich in bekannte, dokumentierte Pfade:
-  - `%LOCALAPPDATA%\MSFSVoiceWalker\` (App-Binary)
+  - `%LOCALAPPDATA%\VoiceWalker\` (App-Binary)
   - `%LOCALAPPDATA%\Packages\Microsoft.FlightSimulator_*\LocalCache\exe.xml`
   - der jeweilige Community-Folder (aus `UserCfg.opt` ausgelesen)
 - Die `exe.xml` wird **nicht neu erstellt**, wenn sie schon existiert — wir
   fügen nur einen zusätzlichen `Launch.Addon`-Knoten hinzu und legen vor der
   ersten Änderung ein `.bak`-Backup an.
-- Der Uninstall-Modus (`MSFSVoiceWalker-Setup.exe uninstall`) entfernt
+- Der Uninstall-Modus (`VoiceWalker-Setup.exe uninstall`) entfernt
   ausschließlich unsere eigenen Einträge und unsere eigenen Dateien.
 
 ## Bekannte Risiken und Gegenmaßnahmen
@@ -84,6 +84,6 @@ Eigenarten, über die man Bescheid wissen sollte.
 
 Wenn jemand im Mesh ein Problem verursacht, kannst du die App einfach
 beenden (Fenster schließen oder den MSFS-Auto-Start-Eintrag via
-`MSFSVoiceWalker-Setup.exe uninstall` entfernen). Du bist dann sofort aus
+`VoiceWalker-Setup.exe uninstall` entfernen). Du bist dann sofort aus
 allen Meshes raus, und die andere Person hat keine Möglichkeit, dich
 weiterhin zu erreichen.

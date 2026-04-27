@@ -1,5 +1,5 @@
 """
-MSFSVoiceWalker — zentrales Logging und Debug-Infrastruktur.
+VoiceWalker — zentrales Logging und Debug-Infrastruktur.
 
 Aktivierung:
   - Kommandozeile: python main.py --debug
@@ -7,7 +7,7 @@ Aktivierung:
 
 Was der Debug-Modus macht:
   - DEBUG-Level statt INFO im Log
-  - Log-Datei in %LOCALAPPDATA%\\MSFSVoiceWalker\\voicewalker.log
+  - Log-Datei in %LOCALAPPDATA%\\VoiceWalker\\voicewalker.log
     (rotierend, max. 5 × 1 MB)
   - Detaillierte Traces bei jeder Exception
   - /debug/status-Endpoint ist immer erreichbar; im Debug-Modus enthält
@@ -29,7 +29,7 @@ import traceback
 from collections import deque
 from typing import Deque
 
-APP_NAME = "MSFSVoiceWalker"
+APP_NAME = "VoiceWalker"
 LOG_FORMAT = "%(asctime)s %(levelname)-5s [%(name)s] %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 

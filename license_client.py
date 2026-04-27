@@ -1,4 +1,4 @@
-"""License client for MSFSVoiceWalker Pro.
+"""License client for VoiceWalker Pro.
 
 Validates license keys against either:
   1. DEV mode — accepts any key starting with ``DEV-PRO-`` as Pro for 30 days,

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SimBase.Document Type="InGamePanels" version="1.0">
+    <Filename>voicewalker_panel.spb</Filename>
+    <InGamePanels.InGamePanelDefinition
+        id="PANEL_VOICEWALKER"
+        Name="VoiceWalker"
+        url="html_ui/InGamePanels/VoiceWalker/panel.html"
+        resizeDirections="Both"
+        minWidth="20"
+        minHeight="20"
+        defaultWidth="35"
+        defaultHeight="45"
+        defaultTop="20"
+        defaultRight="5"
+        icon="ICON_TOOLBAR_VOICEWALKER"
+        buttonVisible="true"
+    >
+    </InGamePanels.InGamePanelDefinition>
+</SimBase.Document>

@@ -1,4 +1,4 @@
-"""System-Tray-Icon fuer MSFSVoiceWalker.
+"""System-Tray-Icon fuer VoiceWalker.
 
 Das Tray-Icon ersetzt das Konsolen-Fenster der App, wenn die distributed
 EXE als windowed Build (`console=False`) gebaut wird. Im Tray sieht der
@@ -29,8 +29,8 @@ from typing import Callable, Optional, Tuple
 log = logging.getLogger("tray")
 
 # Konstanten
-ICON_TITLE = "MSFSVoiceWalker"
-ICON_NAME  = "msfsvoicewalker"
+ICON_TITLE = "VoiceWalker"
+ICON_NAME  = "voicewalker"
 
 # Edge im --app=URL Modus oeffnet die UI als chrome-loses App-Fenster
 # (kein URL-Bar, keine Tabs) — sieht aus wie eine native Desktop-App.
@@ -101,7 +101,7 @@ def _edge_user_data_dir(suffix: str = "") -> str:
     Surf-Profil des Users reinhaengt (Cookies/History gemischt) und das
     Mini-Overlay seine eigene Storage-Welt hat."""
     base = pathlib.Path(os.environ.get("LOCALAPPDATA", str(pathlib.Path.home())))
-    target = base / "MSFSVoiceWalker" / f"edge-profile{suffix}"
+    target = base / "VoiceWalker" / f"edge-profile{suffix}"
     try:
         target.mkdir(parents=True, exist_ok=True)
     except Exception:
@@ -173,8 +173,8 @@ def _bring_msedge_to_front() -> None:
             buf = ctypes.create_unicode_buffer(length + 1)
             user32.GetWindowTextW(hwnd, buf, length + 1)
             # Edge --app benennt das Fenster nach der ersten <title>-Zeile
-            # der geladenen URL — bei uns "MSFSVoiceWalker" oder aehnlich.
-            if "MSFSVoiceWalker" in buf.value:
+            # der geladenen URL — bei uns "VoiceWalker" oder aehnlich.
+            if "VoiceWalker" in buf.value:
                 SW_RESTORE = 9
                 user32.ShowWindow(hwnd, SW_RESTORE)
                 user32.SetForegroundWindow(hwnd)
@@ -198,7 +198,7 @@ def _make_icon_image(state: str = "offline", size: int = 64):
     color_map = {
         "offline":   (130, 140, 155, 255),     # neutral grau
         "connected": (255, 180,  60, 255),     # warm orange
-        "online":    ( 63, 220, 138, 255),     # voll-grün, MSFSVoiceWalker-Akzent
+        "online":    ( 63, 220, 138, 255),     # voll-grün, VoiceWalker-Akzent
     }
     fill = color_map.get(state, color_map["offline"])
 
@@ -223,9 +223,9 @@ def set_status(icon, state: str) -> None:
     if icon is None:
         return
     title_map = {
-        "offline":   "MSFSVoiceWalker (offline)",
-        "connected": "MSFSVoiceWalker (Browser verbunden)",
-        "online":    "MSFSVoiceWalker (online)",
+        "offline":   "VoiceWalker (offline)",
+        "connected": "VoiceWalker (Browser verbunden)",
+        "online":    "VoiceWalker (online)",
     }
     try:
         icon.icon = _make_icon_image(state)
@@ -327,7 +327,7 @@ def setup_tray(port: int, on_quit: Callable[[], None]) -> Optional[object]:
 
     menu = pystray.Menu(
         pystray.MenuItem(
-            "MSFSVoiceWalker oeffnen",
+            "VoiceWalker oeffnen",
             _open_web_ui(port),
             default=True,   # Doppelklick aufs Icon ruft diese Action
         ),

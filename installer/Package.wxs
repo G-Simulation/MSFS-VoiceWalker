@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  MSFSVoiceWalker — WiX-v7-Installer-Definition.
+  VoiceWalker — WiX-v7-Installer-Definition.
 
   Baut eine MSI, die:
-    - MSFSVoiceWalker.exe nach %LOCALAPPDATA%\MSFSVoiceWalker\ installiert
-    - den Python-MSFS-Integrator (MSFSVoiceWalker-Setup.exe) mitliefert;
+    - VoiceWalker.exe nach %LOCALAPPDATA%\VoiceWalker\ installiert
+    - den Python-MSFS-Integrator (VoiceWalker-Setup.exe) mitliefert;
       der Integrator bringt das Community-Folder-Addon selbst mit (embedded)
       und verteilt es beim Install in die MSFS-Community-Ordner
     - Start-Menu- und Desktop-Verknuepfung anlegt (Desktop optional)
@@ -19,14 +19,14 @@
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 
   <Package
-      Name="MSFSVoiceWalker"
+      Name="VoiceWalker"
       Manufacturer="G-Simulation"
       Version="0.1.0.0"
       UpgradeCode="F9E8D7C6-B5A4-4392-8170-6F5E4D3C2B1A"
       Scope="perUser"
       Compressed="yes">
 
-    <SummaryInformation Description="MSFSVoiceWalker — Proximity-Voice für MSFS 2024" />
+    <SummaryInformation Description="VoiceWalker — Proximity-Voice für MSFS 2024" />
 
     <!-- Saubere Upgrades: vorherige Version wird automatisch entfernt -->
     <MajorUpgrade
@@ -41,19 +41,19 @@
          — d.h. Icon-Aenderung braucht nur "MSI bauen", nicht PyInstaller. -->
     <Icon Id="AppIcon.ico" SourceFile="..\packaging\app-icon.ico" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
-    <Property Id="ARPHELPLINK" Value="https://github.com/G-Simulation/MSFSVoiceWalker" />
-    <Property Id="ARPURLINFOABOUT" Value="https://github.com/G-Simulation/MSFSVoiceWalker" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/G-Simulation/VoiceWalker" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/G-Simulation/VoiceWalker" />
 
     <!-- ========================================================
          Verzeichnis-Struktur
-         Per-User-Install in %LOCALAPPDATA%\MSFSVoiceWalker
+         Per-User-Install in %LOCALAPPDATA%\VoiceWalker
          ======================================================== -->
     <StandardDirectory Id="LocalAppDataFolder">
-      <Directory Id="INSTALLFOLDER" Name="MSFSVoiceWalker" />
+      <Directory Id="INSTALLFOLDER" Name="VoiceWalker" />
     </StandardDirectory>
 
     <StandardDirectory Id="ProgramMenuFolder">
-      <Directory Id="ApplicationProgramsFolder" Name="MSFSVoiceWalker" />
+      <Directory Id="ApplicationProgramsFolder" Name="VoiceWalker" />
     </StandardDirectory>
 
     <StandardDirectory Id="DesktopFolder" />
@@ -62,7 +62,7 @@
          Features
          ======================================================== -->
     <Feature Id="MainFeature" Title="Anwendung" Level="1"
-             Description="MSFSVoiceWalker selbst. Erforderlich.">
+             Description="VoiceWalker selbst. Erforderlich.">
       <ComponentGroupRef Id="AppComponents" />
       <ComponentRef Id="StartMenuShortcut" />
       <!-- RemoveInstallFolder ist Teil von AppComponents — keine
@@ -87,39 +87,39 @@
     <ComponentGroup Id="AppComponents" Directory="INSTALLFOLDER">
 
       <Component Id="MainExe" Guid="A1B2C301-0001-4000-8000-000000000001">
-        <File Id="MSFSVoiceWalkerExe" Source="..\dist\MSFSVoiceWalker.exe" />
+        <File Id="VoiceWalkerExe" Source="..\dist\VoiceWalker.exe" />
         <RegistryValue Root="HKCU"
-                       Key="Software\G-Simulation\MSFSVoiceWalker\Components"
+                       Key="Software\G-Simulation\VoiceWalker\Components"
                        Name="MainExe" Type="integer" Value="1" KeyPath="yes" />
       </Component>
 
       <Component Id="IntegratorExe" Guid="A1B2C301-0001-4000-8000-000000000002">
         <File Id="IntegratorExeFile"
-              Source="..\dist\MSFSVoiceWalker-Setup.exe"
-              Name="MSFSVoiceWalker-Integrator.exe" />
+              Source="..\dist\VoiceWalker-Setup.exe"
+              Name="VoiceWalker-Integrator.exe" />
         <RegistryValue Root="HKCU"
-                       Key="Software\G-Simulation\MSFSVoiceWalker\Components"
+                       Key="Software\G-Simulation\VoiceWalker\Components"
                        Name="Integrator" Type="integer" Value="1" KeyPath="yes" />
       </Component>
 
       <Component Id="LicenseFile" Guid="A1B2C301-0001-4000-8000-000000000003">
         <File Source="..\LICENSE" />
         <RegistryValue Root="HKCU"
-                       Key="Software\G-Simulation\MSFSVoiceWalker\Components"
+                       Key="Software\G-Simulation\VoiceWalker\Components"
                        Name="License" Type="integer" Value="1" KeyPath="yes" />
       </Component>
 
       <Component Id="NoticeFile" Guid="A1B2C301-0001-4000-8000-000000000004">
         <File Source="..\NOTICE" />
         <RegistryValue Root="HKCU"
-                       Key="Software\G-Simulation\MSFSVoiceWalker\Components"
+                       Key="Software\G-Simulation\VoiceWalker\Components"
                        Name="Notice" Type="integer" Value="1" KeyPath="yes" />
       </Component>
 
       <Component Id="ReadmeFile" Guid="A1B2C301-0001-4000-8000-000000000005">
         <File Source="..\README.md" />
         <RegistryValue Root="HKCU"
-                       Key="Software\G-Simulation\MSFSVoiceWalker\Components"
+                       Key="Software\G-Simulation\VoiceWalker\Components"
                        Name="Readme" Type="integer" Value="1" KeyPath="yes" />
       </Component>
 
@@ -128,7 +128,7 @@
         <RemoveFolder Id="RemoveInstallFolder"
                       Directory="INSTALLFOLDER" On="uninstall" />
         <RegistryValue Root="HKCU"
-                       Key="Software\G-Simulation\MSFSVoiceWalker\Components"
+                       Key="Software\G-Simulation\VoiceWalker\Components"
                        Name="RemoveInstallFolder" Type="integer" Value="1" KeyPath="yes" />
       </Component>
 
@@ -137,14 +137,14 @@
     <!-- Start-Menu-Verknuepfung (immer mitinstalliert) -->
     <Component Id="StartMenuShortcut" Directory="ApplicationProgramsFolder" Guid="*">
       <Shortcut Id="AppStartMenuShortcut"
-                Name="MSFSVoiceWalker"
+                Name="VoiceWalker"
                 Description="Proximity-Voice für MSFS 2024"
-                Target="[INSTALLFOLDER]MSFSVoiceWalker.exe"
+                Target="[INSTALLFOLDER]VoiceWalker.exe"
                 WorkingDirectory="INSTALLFOLDER"
                 Icon="AppIcon.ico" IconIndex="0" />
       <RemoveFolder Id="RemoveStartMenuFolder" On="uninstall" />
       <RegistryValue Root="HKCU"
-                     Key="Software\G-Simulation\MSFSVoiceWalker"
+                     Key="Software\G-Simulation\VoiceWalker"
                      Name="StartMenuShortcut"
                      Type="integer" Value="1" KeyPath="yes" />
     </Component>
@@ -152,13 +152,13 @@
     <!-- Desktop-Verknuepfung (optionales Feature) -->
     <Component Id="DesktopShortcutComp" Directory="DesktopFolder" Guid="*">
       <Shortcut Id="AppDesktopShortcut"
-                Name="MSFSVoiceWalker"
+                Name="VoiceWalker"
                 Description="Proximity-Voice für MSFS 2024"
-                Target="[INSTALLFOLDER]MSFSVoiceWalker.exe"
+                Target="[INSTALLFOLDER]VoiceWalker.exe"
                 WorkingDirectory="INSTALLFOLDER"
                 Icon="AppIcon.ico" IconIndex="0" />
       <RegistryValue Root="HKCU"
-                     Key="Software\G-Simulation\MSFSVoiceWalker"
+                     Key="Software\G-Simulation\VoiceWalker"
                      Name="DesktopShortcut"
                      Type="integer" Value="1" KeyPath="yes" />
     </Component>

@@ -1,6 +1,6 @@
 # G-Sim Events API
 
-Public REST API auf WordPress-Basis für MSFSVoiceWalker-Events. Hosted auf
+Public REST API auf WordPress-Basis für VoiceWalker-Events. Hosted auf
 `https://www.gsimulations.de`.
 
 **Base URL:** `https://www.gsimulations.de/wp-json/gsim-events/v1`
@@ -230,7 +230,7 @@ Fehler-Response-Body:
 
 ## Integration mit der App
 
-Die MSFSVoiceWalker-App liest Event-Parameter direkt aus der URL —
+Die VoiceWalker-App liest Event-Parameter direkt aus der URL —
 `http://127.0.0.1:7801/?join=<passphrase>` lässt die App nach dem Start
 automatisch in den privaten Raum joinen (bei Pro-Lizenz).
 
@@ -238,7 +238,7 @@ Beispiel-Flow für einen Teilnehmer:
 
 1. Event-Organizer erstellt Event via API → bekommt `join_url` zurück
 2. Organizer postet den Link in Discord / Avsim / YouTube-Beschreibung
-3. Teilnehmer klickt → MSFSVoiceWalker öffnet sich → joint den Raum
+3. Teilnehmer klickt → VoiceWalker öffnet sich → joint den Raum
 4. Voice läuft über denselben HRTF-WebRTC-Mesh wie bei Geohash-Rooms,
    nur eben gefiltert auf Teilnehmer mit der gleichen Passphrase
 

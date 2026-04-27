@@ -1,5 +1,5 @@
 """
-MSFSVoiceWalker — PTT backend with global joystick + keyboard input.
+VoiceWalker — PTT backend with global joystick + keyboard input.
 
 Detects every USB device that registers as a game controller / HID joystick
 via SDL/pygame. That covers essentially all flight sim hardware: Thrustmaster

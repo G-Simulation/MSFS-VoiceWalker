@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM   MSFSVoiceWalker — Code-Signing-Helfer
+REM   VoiceWalker — Code-Signing-Helfer
 REM
 REM   Signiert alle Release-Binaries mit dem Certum-Open-Source-Cert
 REM   via SimplySign (Cloud-Signing, kein USB-Token).
@@ -42,9 +42,9 @@ if "%CERT_SHA1%"=="" (
 )
 
 set "TARGETS="
-if exist "dist\MSFSVoiceWalker.exe"          set "TARGETS=!TARGETS! dist\MSFSVoiceWalker.exe"
-if exist "dist\MSFSVoiceWalker-Setup.exe"    set "TARGETS=!TARGETS! dist\MSFSVoiceWalker-Setup.exe"
-if exist "installer\bin\x64\Release\MSFSVoiceWalker-Setup.msi" set "TARGETS=!TARGETS! installer\bin\x64\Release\MSFSVoiceWalker-Setup.msi"
+if exist "dist\VoiceWalker.exe"          set "TARGETS=!TARGETS! dist\VoiceWalker.exe"
+if exist "dist\VoiceWalker-Setup.exe"    set "TARGETS=!TARGETS! dist\VoiceWalker-Setup.exe"
+if exist "installer\bin\x64\Release\VoiceWalker-Setup.msi" set "TARGETS=!TARGETS! installer\bin\x64\Release\VoiceWalker-Setup.msi"
 
 if "%TARGETS%"=="" (
     echo [sign] Keine Binaries zum Signieren gefunden. Erst bauen.
@@ -54,7 +54,7 @@ if "%TARGETS%"=="" (
 echo [sign] Signiere mit Cert %CERT_SHA1:~0,8%... Timestamp %TS_URL%
 for %%F in (%TARGETS%) do (
     echo       --^> %%F
-    signtool sign /sha1 %CERT_SHA1% /fd %SIGN_DIGEST% /tr %TS_URL% /td %SIGN_DIGEST% /d "MSFSVoiceWalker" /du "https://www.gsimulations.de/msfsvoicewalker" "%%F"
+    signtool sign /sha1 %CERT_SHA1% /fd %SIGN_DIGEST% /tr %TS_URL% /td %SIGN_DIGEST% /d "VoiceWalker" /du "https://www.gsimulations.de/voicewalker" "%%F"
     if errorlevel 1 (
         echo [sign] [ERROR] Signierung von %%F fehlgeschlagen.
         exit /b 1

@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM   MSFSVoiceWalker — Alpha Release Script
+REM   VoiceWalker — Alpha Release Script
 REM
 REM   Was es macht:
 REM     1) git init (falls noch nicht)
@@ -23,13 +23,13 @@ cd /d "%~dp0"
 set "REMOTE_SSH=git@github.com:G-Simulation/MSFS-VoiceWalker.git"
 set "REMOTE_HTTPS=https://github.com/G-Simulation/MSFS-VoiceWalker.git"
 set "TAG=v0.1.0"
-set "TITLE=MSFSVoiceWalker v0.1.0 (Alpha)"
-set "MSI=installer\bin\x64\Release\MSFSVoiceWalker-Setup.msi"
+set "TITLE=VoiceWalker v0.1.0 (Alpha)"
+set "MSI=installer\bin\x64\Release\VoiceWalker-Setup.msi"
 set "NOTES=RELEASE_NOTES_v0.1.0.md"
 
 echo.
 echo ============================================================
-echo   MSFSVoiceWalker Alpha Release
+echo   VoiceWalker Alpha Release
 echo   Remote: %REMOTE_SSH%
 echo   Tag:    %TAG%
 echo ============================================================
@@ -75,7 +75,7 @@ if errorlevel 1 (
 
 git diff --cached --quiet
 if errorlevel 1 (
-    git commit -m "Release v0.1.0 (Alpha) — MSFSVoiceWalker" -q
+    git commit -m "Release v0.1.0 (Alpha) — VoiceWalker" -q
     if errorlevel 1 goto :fail
 ) else (
     echo       ^(keine neuen Aenderungen zum Committen^)

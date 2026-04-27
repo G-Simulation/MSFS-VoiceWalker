@@ -17,12 +17,12 @@ VSVersionInfo(
           '040704b0',
           [
             StringStruct('CompanyName',      'Patrick Gottberg'),
-            StringStruct('FileDescription',  'MSFSVoiceWalker Setup'),
+            StringStruct('FileDescription',  'VoiceWalker Setup'),
             StringStruct('FileVersion',      '0.1.0'),
-            StringStruct('InternalName',     'MSFSVoiceWalker-Setup'),
+            StringStruct('InternalName',     'VoiceWalker-Setup'),
             StringStruct('LegalCopyright',   'Copyright (c) 2026 Patrick Gottberg. Licensed under Apache-2.0.'),
-            StringStruct('OriginalFilename', 'MSFSVoiceWalker-Setup.exe'),
-            StringStruct('ProductName',      'MSFSVoiceWalker Setup'),
+            StringStruct('OriginalFilename', 'VoiceWalker-Setup.exe'),
+            StringStruct('ProductName',      'VoiceWalker Setup'),
             StringStruct('ProductVersion',   '0.1.0'),
           ]
         )

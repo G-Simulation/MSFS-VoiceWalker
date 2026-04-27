@@ -1,4 +1,4 @@
-# MSFSVoiceWalker — Roadmap zur Monetarisierung (Freemium + Events)
+# VoiceWalker — Roadmap zur Monetarisierung (Freemium + Events)
 
 Stand: 23. April 2026.
 
@@ -14,7 +14,7 @@ Abgrenzung zu Asobo-internem "Groups/Sessions":
 
 * **Asobo Groups sind privat/geschlossen** — nur eingeladene Gruppen,
   Community-Silos, kein offenes Fliegen miteinander.
-* **MSFSVoiceWalker ist öffentlich** — jeder mit MSFS kann es installieren
+* **VoiceWalker ist öffentlich** — jeder mit MSFS kann es installieren
   und sofort mitfliegen/-sprechen. Keine Anmeldung, kein Login, keine
   Gatekeeper. Das Geohash-Mesh findet Nachbarn automatisch.
 
@@ -45,7 +45,7 @@ bewusst niedrigschwellig: Passphrase wird in der Event-Ankündigung
 
 | Bereich | Status |
 |---|---|
-| WASM-Bridge `MSFSVoiceWalkerBridge.wasm` (Avatar-Position via SimConnect ClientData) | ✅ |
+| WASM-Bridge `VoiceWalkerBridge.wasm` (Avatar-Position via SimConnect ClientData) | ✅ |
 | Python-App (main.py, Ports 7801–7810, WebSocket-Broadcast) | ✅ |
 | 3D-HRTF-Positional-Audio + Zwei-Welten-Audio (Walker 75 m / Cockpit 5 km) | ✅ |
 | MSFS-Toolbar-Panel (ehemaliger Blocker, rendert jetzt sauber) | ✅ |
@@ -85,11 +85,11 @@ Es fehlt nur noch die Shop-Seite + Produkt + Event-Plattform.
 
 ### Priorität 1 — Pro live schalten (Tag-Aufgaben, User-Seite)
 
-1. **WooCommerce-Produkt "MSFSVoiceWalker Pro"** anlegen:
+1. **WooCommerce-Produkt "VoiceWalker Pro"** anlegen:
    - Typ: virtuell + downloadable
    - Preis: 7,99 € (inkl. MwSt.)
    - Kategorie: "Add-ons"
-   - Tab "License Manager" aktivieren → Generator `MSFSVoiceWalker Pro` zuweisen
+   - Tab "License Manager" aktivieren → Generator `VoiceWalker Pro` zuweisen
      (5 Chunks × 5 Zeichen, Charset `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`)
 2. **LMFWC-Generator** anlegen falls noch nicht da:
    - LMFWC → Generators → Add New
@@ -99,7 +99,7 @@ Es fehlt nur noch die Shop-Seite + Produkt + Event-Plattform.
 4. **Test-Bestellung** durchlaufen mit Test-Zahlung oder echter 7,99 €:
    - Order erstellen → Status "Completed" → Key kommt per Mail
    - Key in der App-UI eintragen → muss Pro aktivieren
-5. **Landing-Page** `gsimulations.de/msfsvoicewalker` anlegen (siehe §Landing unten)
+5. **Landing-Page** `gsimulations.de/voicewalker` anlegen (siehe §Landing unten)
 
 **Zeitaufwand:** ~2 Stunden wenn WordPress-Admin-Routine.
 
@@ -313,10 +313,10 @@ realistisch 8.000–12.000 € im zweiten Jahr.
 
 ### WordPress-seitig (User)
 
-- [ ] **MSFSVoiceWalker Pro**-Produkt anlegen (Priorität 1, heute)
+- [ ] **VoiceWalker Pro**-Produkt anlegen (Priorität 1, heute)
 - [ ] TEC + Event Tickets installieren (~15 Min)
 - [ ] "Fly-In Event Hosting"-Produkt anlegen (Priorität 2, diese Woche)
-- [ ] Landing-Page `gsimulations.de/msfsvoicewalker` (Priorität 2)
+- [ ] Landing-Page `gsimulations.de/voicewalker` (Priorität 2)
 
 ### Marketing
 

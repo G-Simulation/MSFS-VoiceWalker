@@ -2,7 +2,7 @@
 Konvertiert die plain-text LICENSE-Datei in License.rtf,
 damit WiX sie in der Lizenzseite des Installers anzeigen kann.
 
-Wird von MSFSVoiceWalker.Installer.wixproj als Pre-Build-Target aufgerufen.
+Wird von VoiceWalker.Installer.wixproj als Pre-Build-Target aufgerufen.
 Kann auch manuell laufen: python gen-license-rtf.py
 """
 from pathlib import Path

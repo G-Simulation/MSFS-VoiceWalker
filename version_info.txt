@@ -1,6 +1,6 @@
 # UTF-8
 #
-# Windows Version-Info fuer MSFSVoiceWalker.exe und MSFSVoiceWalker-Setup.exe.
+# Windows Version-Info fuer VoiceWalker.exe und VoiceWalker-Setup.exe.
 # CompanyName MUSS exakt zum Subject des Code-Signing-Certs passen
 # (Certum Open Source, ausgestellt auf "Patrick Gottberg").
 VSVersionInfo(
@@ -21,12 +21,12 @@ VSVersionInfo(
           '040704b0',
           [
             StringStruct('CompanyName',      'Patrick Gottberg'),
-            StringStruct('FileDescription',  'MSFSVoiceWalker — Proximity Voice Chat fuer MSFS 2024'),
+            StringStruct('FileDescription',  'VoiceWalker — Proximity Voice Chat fuer MSFS 2024'),
             StringStruct('FileVersion',      '0.1.0'),
-            StringStruct('InternalName',     'MSFSVoiceWalker'),
+            StringStruct('InternalName',     'VoiceWalker'),
             StringStruct('LegalCopyright',   'Copyright (c) 2026 Patrick Gottberg. Licensed under Apache-2.0.'),
-            StringStruct('OriginalFilename', 'MSFSVoiceWalker.exe'),
-            StringStruct('ProductName',      'MSFSVoiceWalker'),
+            StringStruct('OriginalFilename', 'VoiceWalker.exe'),
+            StringStruct('ProductName',      'VoiceWalker'),
             StringStruct('ProductVersion',   '0.1.0'),
           ]
         )

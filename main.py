@@ -1,5 +1,5 @@
 """
-MSFSVoiceWalker — unified Python app.
+VoiceWalker — unified Python app.
 
 Prozess tut in einem Rutsch:
   1) SimConnect-Reader (10 Hz) — Spieler-Position in allen Kameramodi inkl.
@@ -198,7 +198,7 @@ WEB_DIR = asset_dir() / "web"
 #
 # Beim Start wird der Port probiert; ist er belegt, werden die naechsten
 # PORT_SEARCH_RANGE Ports durchgegangen. Der tatsaechlich verwendete Port
-# wird nach %LOCALAPPDATA%\MSFSVoiceWalker\port.txt geschrieben, damit das
+# wird nach %LOCALAPPDATA%\VoiceWalker\port.txt geschrieben, damit das
 # MSFS-Toolbar-Panel ihn findet.
 def _port_from_cli_or_env() -> int:
     try:
@@ -274,7 +274,7 @@ class AppState:
     errors_recent: list[dict] = []   # capped at 50
     # Vom WASM-Modul in MSFS gelieferte Aircraft- + Avatar-Position via
     # FS_OBJECT_ID_USER_AIRCRAFT / USER_AVATAR / USER_CURRENT. Transport:
-    # SimConnect ClientData Area "MSFSVoiceWalkerPos", gelesen durch den
+    # SimConnect ClientData Area "VoiceWalkerPos", gelesen durch den
     # AvatarReader-Thread. Wird bei jedem WASM-Tick aktualisiert (~1 Hz).
     wasm_pos: dict | None = None
     wasm_pos_at: float = 0.0
@@ -350,13 +350,13 @@ _SC_RECV_ID_EXCEPTION      = 1   # Fehler-Meldung von SimConnect
 _SC_RECV_ID_SIMOBJECT_DATA = 8
 _SC_RECV_ID_CLIENT_DATA    = 16  # Payload vom WASM-Bridge
 
-# ClientData-Protokoll MIT WASM-Seite (MSFSVoiceWalkerBridge.cpp):
+# ClientData-Protokoll MIT WASM-Seite (VoiceWalkerBridge.cpp):
 #   - Area/Definition-ID muss IDENTISCH sein in beiden Modulen
 #   - Struktur MUSS 17 doubles (136 Bytes) sein, packed
 # 'VWLK' als Zahl (0x56 57 4C 4B)
 _CD_AREA_ID   = 0x56574C4B
 _CD_DEF_ID    = 0x56574C4B
-_CD_NAME      = b"MSFSVoiceWalkerPos"
+_CD_NAME      = b"VoiceWalkerPos"
 _CD_REQ_ID    = 0x56574C4B
 _CD_PERIOD_ON_SET = 3
 _CD_STRUCT_SIZE   = 17 * 8  # 136 Bytes
@@ -460,7 +460,7 @@ def _init_raw_dll(dll):
 
 class AvatarReader:
     """Subscriber auf die SimConnect-ClientData-Area, die unser WASM-Bridge-
-    Modul (MSFSVoiceWalkerBridge.wasm) in MSFS 2024 beschreibt. Laeuft in
+    Modul (VoiceWalkerBridge.wasm) in MSFS 2024 beschreibt. Laeuft in
     eigenem Thread mit eigener SimConnect-Verbindung (raw ctypes).
 
     Das WASM-Modul publiziert bei jedem Sim-Frame (~1 Hz gedrosselt) eine
@@ -508,7 +508,7 @@ class AvatarReader:
             dll = _init_raw_dll(ctypes.WinDLL(dll_path))
 
             hr = dll.SimConnect_Open(
-                ctypes.byref(h), b"MSFSVoiceWalker-CDA",
+                ctypes.byref(h), b"VoiceWalker-CDA",
                 None, 0, None, 0,
             )
             if hr != 0 or not h.value:
@@ -782,33 +782,19 @@ class SimReader:
 
         self._snap_count = getattr(self, "_snap_count", 0) + 1
 
-        # Avatar-Reader-Override (SimObject Index 2 in MSFS 2024 Walker-Modus).
-        # Hat Vorrang vor plane-Position wenn on_foot=True und Daten frisch.
-        # Liefert die echte Walker-Position — das ist der eigentliche Fix
-        # fuer "Position aendert sich nicht wenn ich laufe".
+        # Avatar-Reader-Fallback (SimObject Index 2 in MSFS 2024 Walker-Modus).
+        # Liefert nur die Avatar-Position als Fallback wenn die WASM-Bridge
+        # noch nicht frisch ist. Setzt KEIN on_foot — der Flag kommt unten
+        # ausschliesslich aus der WASM-Identity USER_CURRENT vs USER_AIRCRAFT.
         ar = STATE.avatar_reader
         ar_fresh = ar and ar.data is not None and (time.time() - ar.last_update) < 3.0
-        if ar_fresh:
-            ad = ar.data
-            ac_lat = plane_lat
-            ac_lon = plane_lon
-            av_lat = ad.get("lat", 0.0)
-            av_lon = ad.get("lon", 0.0)
-            # Nur uebernehmen wenn Avatar sich wirklich vom Flugzeug entfernt
-            dlat_m = abs(av_lat - ac_lat) * 111_111.0
-            dlon_m = abs(av_lon - ac_lon) * 111_111.0 * math.cos(math.radians(ac_lat or 0.0))
-            dist_m = math.hypot(dlat_m, dlon_m)
-            if dist_m > 2.0:
-                lat = av_lat
-                lon = av_lon
-                alt = ad.get("alt_ft", alt)
-                head = ad.get("heading_deg", head)
-                agl = ad.get("agl_ft", agl)
-                on_foot = True
 
-        # WASM-Modul-Override: wenn frisch, nehmen wir CUR (aktuelle User-Pos,
-        # automatisch Aircraft<->Avatar) und liefern Aircraft+Avatar getrennt
-        # ans UI fuer vollstaendiges Tracking.
+        # WASM-Modul-Override: wenn frisch, nehmen wir die authoritative
+        # Modus-Quelle USER_CURRENT vs USER_AIRCRAFT.
+        # MSFS pinnt USER_CURRENT atomar an das gerade gesteuerte Objekt
+        # (Aircraft im Cockpit, Avatar im Walker). Damit ist
+        #   on_foot ⇔ cur ≠ ac
+        # ohne Distanz-Heuristik, ohne Hysterese, ohne Frische-Trickserei.
         wp = STATE.wasm_pos
         wasm_fresh = wp and (time.time() - STATE.wasm_pos_at) < 3.0
         aircraft_pos = None
@@ -825,59 +811,72 @@ class SimReader:
             avatar_pos = dict(ar.data)
         if wasm_fresh:
             try:
-                # Priorität: av (echte Walker-Position aus FS_OBJECT_ID_USER_AVATAR)
-                # > cur (USER_CURRENT, kann bei Walker stecken bleiben)
-                # > ac (Aircraft-Position, letzter Fallback)
-                av_lat = wp.get("avLat", 0.0)
-                av_lon = wp.get("avLon", 0.0)
-                cur_lat = wp.get("curLat", 0.0)
-                cur_lon = wp.get("curLon", 0.0)
-                ac_lat = wp.get("acLat", 0.0)
+                EPS = 1e-6  # nur Float-Noise abfangen (~10 cm bei lat/lon)
+                ac_lat_w = wp.get("acLat", 0.0)
+                ac_lon_w = wp.get("acLon", 0.0)
+                av_lat_w = wp.get("avLat", 0.0)
+                av_lon_w = wp.get("avLon", 0.0)
+                cur_lat  = wp.get("curLat", 0.0)
+                cur_lon  = wp.get("curLon", 0.0)
                 wasm_cam = int(wp.get("cam", 0) or 0)
                 if wasm_cam > 0:
                     cam = wasm_cam   # WASM-cam hat Vorrang vor SimConnect/Panel
-                # Walker erkennen: av-Position muss signifikant von
-                # ac-Position abweichen. FS_OBJECT_ID_USER_AVATAR liefert
-                # auch im Cockpit Daten (dann av≈ac); echter Walker-Modus
-                # ergibt Distanzen > paar Meter weil Avatar das Flugzeug
-                # verlassen hat.
-                av_dist_m = 0.0
-                if abs(av_lat) > 0.001 and abs(av_lon) > 0.001 \
-                        and abs(ac_lat) > 0.001:
-                    dlat_m = abs(av_lat - ac_lat) * 111_111.0
-                    dlon_m = abs(av_lon - wp.get("acLon", 0.0)) * 111_111.0 \
-                             * math.cos(math.radians(ac_lat))
-                    av_dist_m = math.hypot(dlat_m, dlon_m)
-                if av_dist_m > 2.0:
-                    lat = av_lat
-                    lon = av_lon
-                    alt = wp.get("avAlt", alt)
+
+                # Identity-Check: USER_CURRENT vs USER_AIRCRAFT.
+                # Nur valide wenn beide Positionen aufgeloest sind (nicht 0/0
+                # waehrend Loading/Hauptmenue).
+                have_ac  = abs(ac_lat_w) > 0.001 and abs(ac_lon_w) > 0.001
+                have_cur = abs(cur_lat)  > 0.001 and abs(cur_lon)  > 0.001
+                if have_ac and have_cur:
+                    on_foot = (
+                        abs(cur_lat - ac_lat_w) > EPS
+                        or abs(cur_lon - ac_lon_w) > EPS
+                    )
+
+                # Position kohaerent zum Flag waehlen.
+                if on_foot:
+                    lat  = av_lat_w if abs(av_lat_w) > 0.001 else cur_lat
+                    lon  = av_lon_w if abs(av_lon_w) > 0.001 else cur_lon
+                    alt  = wp.get("avAlt", alt)
                     head = wp.get("avHdg", head)
-                    agl = wp.get("avAgl", agl)
-                    on_foot = True
-                elif abs(cur_lat) > 0.001 and abs(cur_lon) > 0.001:
-                    # Fallback: USER_CURRENT (normalerweise = Aircraft)
-                    lat = cur_lat
-                    lon = cur_lon
-                    alt = wp.get("curAlt", alt)
-                    head = wp.get("curHdg", head)
-                    agl = wp.get("curAgl", agl)
+                    agl  = wp.get("avAgl", agl)
+                elif have_ac:
+                    lat  = ac_lat_w
+                    lon  = ac_lon_w
+                    alt  = wp.get("acAlt", alt)
+                    head = wp.get("acHdg", head)
+                    agl  = wp.get("acAgl", agl)
+
                 aircraft_pos = {
-                    "lat": wp.get("acLat", 0.0),
-                    "lon": wp.get("acLon", 0.0),
+                    "lat": ac_lat_w,
+                    "lon": ac_lon_w,
                     "alt_ft": wp.get("acAlt", 0.0),
                     "heading_deg": wp.get("acHdg", 0.0),
                     "agl_ft": wp.get("acAgl", 0.0),
                 }
                 avatar_pos = {
-                    "lat": wp.get("avLat", 0.0),
-                    "lon": wp.get("avLon", 0.0),
+                    "lat": av_lat_w,
+                    "lon": av_lon_w,
                     "alt_ft": wp.get("avAlt", 0.0),
                     "heading_deg": wp.get("avHdg", 0.0),
                     "agl_ft": wp.get("avAgl", 0.0),
                 }
             except Exception as e:
                 log.debug("wasm-pos merge failed: %s", e)
+        elif ar_fresh:
+            # Kein WASM, nur AvatarReader: Position-Override OK, Modus-Erkennung
+            # kann AR allein nicht leisten. Wir lassen on_foot=False.
+            ad = ar.data
+            av_lat = ad.get("lat", 0.0)
+            av_lon = ad.get("lon", 0.0)
+            dlat_m = abs(av_lat - plane_lat) * 111_111.0
+            dlon_m = abs(av_lon - plane_lon) * 111_111.0 * math.cos(math.radians(plane_lat or 0.0))
+            if math.hypot(dlat_m, dlon_m) > 2.0:
+                lat = av_lat
+                lon = av_lon
+                alt = ad.get("alt_ft", alt)
+                head = ad.get("heading_deg", head)
+                agl = ad.get("agl_ft", agl)
 
         # Menue-/Ladebildschirm-Erkennung: MSFS liefert im Hauptmenue bzw.
         # wenn kein Flug aktiv ist die Default-Position (-0.0/90.0).
@@ -901,8 +900,12 @@ class SimReader:
 
         if self._snap_count % 20 == 0:
             log.info("cam_state=%d on_foot=%s in_menu=%s lat=%.6f lon=%.6f heading=%.1f "
-                     "wasm_fresh=%s ar_fresh=%s",
-                     cam, on_foot, in_menu, lat, lon, head, wasm_fresh, ar_fresh)
+                     "wasm_fresh=%s ar_fresh=%s cur=%.6f/%.6f ac=%.6f/%.6f",
+                     cam, on_foot, in_menu, lat, lon, head, wasm_fresh, ar_fresh,
+                     (wp.get("curLat", 0.0) if wasm_fresh else 0.0),
+                     (wp.get("curLon", 0.0) if wasm_fresh else 0.0),
+                     (wp.get("acLat", 0.0)  if wasm_fresh else 0.0),
+                     (wp.get("acLon", 0.0)  if wasm_fresh else 0.0))
 
         snap = {
             "t": time.time(),
@@ -963,7 +966,7 @@ CSP = (
 
 def debug_status_payload() -> dict:
     return {
-        "app":          "MSFSVoiceWalker",
+        "app":          "VoiceWalker",
         "version":      updater.APP_VERSION,
         "uptime_s":     round(time.time() - START_TIME, 1),
         "debug":        debug_enabled(),
@@ -1034,8 +1037,8 @@ async def http_handler(connection, request):
             if icon is not None:
                 try:
                     icon.notify(
-                        "MSFSVoiceWalker laeuft bereits — UI im Browser geoeffnet.",
-                        "MSFSVoiceWalker",
+                        "VoiceWalker laeuft bereits — UI im Browser geoeffnet.",
+                        "VoiceWalker",
                     )
                 except Exception as e:
                     log.debug("tray notify failed: %s", e)
@@ -1631,7 +1634,7 @@ _SINGLE_INSTANCE_MUTEX_HANDLE = None
 def _acquire_single_instance_mutex() -> bool:
     """Globaler Single-Instance-Lock auf OS-Ebene per Named Mutex.
     Vorteil gegenueber Port-Probe: keine Race-Condition mehr beim Start.
-    Wenn ein anderer MSFSVoiceWalker-Prozess schon laeuft, returns False.
+    Wenn ein anderer VoiceWalker-Prozess schon laeuft, returns False.
     Andernfalls wird der Mutex bis zum Process-Ende gehalten (Handle bleibt
     in einer Modul-Variable damit der Garbage Collector ihn nicht freigibt).
     """
@@ -1642,7 +1645,7 @@ def _acquire_single_instance_mutex() -> bool:
         ERROR_ALREADY_EXISTS = 183
         # "Global\" prefix funktioniert in normalen User-Sessions auch ohne
         # Admin-Rechte; bei Bedarf weglassen wenn UAC-issues auftauchen.
-        h = kernel32.CreateMutexW(None, False, "Global\\MSFSVoiceWalker-Singleton")
+        h = kernel32.CreateMutexW(None, False, "Global\\VoiceWalker-Singleton")
         if not h:
             return True  # CreateMutex selbst gefailt → besser starten als blockieren
         if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
@@ -1667,7 +1670,7 @@ async def main():
     # Port-Probe-Check unten. Wenn schon eine Instanz laeuft: Highlight-Ping +
     # Beenden, ohne ueberhaupt SimConnect/PTT/Tray zu booten.
     if not _acquire_single_instance_mutex():
-        log.warning("MSFSVoiceWalker laeuft bereits — sende Highlight-Ping und beende")
+        log.warning("VoiceWalker laeuft bereits — sende Highlight-Ping und beende")
         try:
             import urllib.request as _ur
             with _ur.urlopen(
@@ -1680,7 +1683,7 @@ async def main():
         sys.exit(0)
 
     print(BANNER)
-    log.info("MSFSVoiceWalker starting")
+    log.info("VoiceWalker starting")
     log.info("data dir: %s", data_dir())
     log.info("web dir:  %s", WEB_DIR)
     log.info("debug:    %s", debug_enabled())
@@ -1771,7 +1774,7 @@ async def main():
 
     # Single-Instance-Check: Wenn auf PORT_DEFAULT bereits UNSERE eigene App
     # laeuft, oeffnen wir einfach den Browser dort und beenden diese Instanz.
-    # Erkennung ueber /debug/status-Endpoint der "msfsvoicewalker" im Body hat.
+    # Erkennung ueber /debug/status-Endpoint der "voicewalker" im Body hat.
     # Ohne den Check hat der Port-Fallback (7802, 7803, ...) dazu gefuehrt,
     # dass beliebig viele parallele Instanzen liefen — jede mit eigenem Mesh,
     # die sich dann gegenseitig als "Ghost"-Peers sahen.
@@ -1783,13 +1786,13 @@ async def main():
                 timeout=0.5,
             ) as resp:
                 body = resp.read(2048).decode("utf-8", errors="ignore").lower()
-                return "msfsvoicewalker" in body or "sim_connected" in body
+                return "voicewalker" in body or "sim_connected" in body
         except Exception:
             return False
 
     if _own_app_on(PORT_DEFAULT):
         log.warning(
-            "MSFSVoiceWalker laeuft bereits auf Port %d — pinge die laufende "
+            "VoiceWalker laeuft bereits auf Port %d — pinge die laufende "
             "Instanz und beende diese hier.",
             PORT_DEFAULT,
         )
@@ -1855,7 +1858,7 @@ async def main():
     # websockets-Server, dann faellt asyncio.gather() durch und wir landen
     # im finally. icon.stop() macht dort den pystray-Thread sauber zu.
     # Browser oeffnet sich NICHT automatisch — der User triggert das ueber
-    # Doppelklick aufs Tray-Icon oder Rechtsklick → "MSFSVoiceWalker oeffnen".
+    # Doppelklick aufs Tray-Icon oder Rechtsklick → "VoiceWalker oeffnen".
     _loop = asyncio.get_event_loop()
     def _quit_from_tray():
         log.info("tray-quit signal: server.close + finalize")

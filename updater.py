@@ -1,5 +1,5 @@
 """
-MSFSVoiceWalker — Auto-Updater.
+VoiceWalker — Auto-Updater.
 
 Ablauf:
   1) Beim Start der App (nach 30 s Delay) und dann alle 24 h
@@ -48,7 +48,7 @@ RELEASE_API_URL      = f"https://api.github.com/repos/{GITHUB_REPO}/releases/lat
 CHECK_INTERVAL_S     = 24 * 3600          # taeglich
 STARTUP_DELAY_S      = 30                 # erste Pruefung erst nach 30 s
 REQUEST_TIMEOUT_S    = 10
-USER_AGENT           = f"MSFSVoiceWalker/{APP_VERSION} (+github.com/{GITHUB_REPO})"
+USER_AGENT           = f"VoiceWalker/{APP_VERSION} (+github.com/{GITHUB_REPO})"
 
 
 # -----------------------------------------------------------------------------
@@ -256,11 +256,11 @@ def _write_restart_helper(msi_path: Path, exe_path: str) -> Path:
     cmd /c start "" /b. Das uebernimmt sich selbst, wir geben nur den Pfad
     zurueck damit die Aufrufer ihn abfeuern koennen.
     """
-    bat = Path(tempfile.gettempdir()) / "MSFSVoiceWalker-restart.bat"
+    bat = Path(tempfile.gettempdir()) / "VoiceWalker-restart.bat"
     # Doppel-% in batch escapen; "%~f0" expandiert auf das Skript selbst
     bat.write_text(
         "@echo off\r\n"
-        "rem MSFSVoiceWalker silent-update restart helper\r\n"
+        "rem VoiceWalker silent-update restart helper\r\n"
         "rem Wartet bis msiexec fertig ist, startet die neue App, loescht sich selbst.\r\n"
         ":wait\r\n"
         'tasklist /fi "imagename eq msiexec.exe" 2>nul | find /i "msiexec.exe" >nul\r\n'
@@ -297,7 +297,7 @@ async def download_and_install(silent: bool = False) -> bool:
         return False
 
     STATE.installing = True
-    target = Path(tempfile.gettempdir()) / f"MSFSVoiceWalker-{STATE.latest}.msi"
+    target = Path(tempfile.gettempdir()) / f"VoiceWalker-{STATE.latest}.msi"
     try:
         log.info("updater: lade %s → %s", STATE.download_url, target)
         await asyncio.to_thread(_download_blocking, STATE.download_url, target)

@@ -1,7 +1,7 @@
 """
 packaging/build-app-icon.py — baut packaging/app-icon.ico fuer den Windows-
 Desktop-Shortcut (WiX MSI) und das in der EXE eingebettete Icon (PyInstaller
-MSFSVoiceWalker.spec, via icon=...).
+VoiceWalker.spec, via icon=...).
 
 Quelle: brand/voicewalker-logo-mark.png (das schwarze Mark-Logo ohne Text).
 Wir packen es auf einen accent-blauen abgerundeten Quadrat-Hintergrund —

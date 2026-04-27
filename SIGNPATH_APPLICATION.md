@@ -1,4 +1,4 @@
-# SignPath Foundation Application — MSFSVoiceWalker
+# SignPath Foundation Application — VoiceWalker
 
 **Bewerbungsportal:** https://signpath.io/foundation
 **Antragsteller:** Patrick Gottberg (natuerliche Person, Nebengewerbe, Deutschland)
@@ -10,7 +10,7 @@
 
 ## Project Summary
 
-MSFSVoiceWalker is a free, open-source proximity voice chat for Microsoft
+VoiceWalker is a free, open-source proximity voice chat for Microsoft
 Flight Simulator 2024. It lets pilots hear other players only when
 they are physically close in the simulator — mimicking real-life radio
 range and walker-mode conversations — without any central server.
@@ -23,7 +23,7 @@ window that runs the mesh and does 3D-HRTF audio rendering.
 
 ## Why code-signing matters for this project
 
-The installer bundles a PyInstaller-built Python application (`MSFSVoiceWalker.exe`)
+The installer bundles a PyInstaller-built Python application (`VoiceWalker.exe`)
 plus an MSFS Community-Folder package. PyInstaller binaries are frequently
 false-flagged by antivirus engines and trigger Windows SmartScreen on
 first download. For a free, donation-based project targeting the flight
@@ -43,9 +43,9 @@ install at the UAC prompt.
 
 We need signing for these artifacts, produced once per release:
 
-1. `dist/MSFSVoiceWalker.exe` — main application
-2. `dist/MSFSVoiceWalker-Setup.exe` — PyInstaller-wrapped installer (alternative)
-3. `installer/bin/x64/Release/MSFSVoiceWalker-Setup.msi` — WiX-MSI installer (primary)
+1. `dist/VoiceWalker.exe` — main application
+2. `dist/VoiceWalker-Setup.exe` — PyInstaller-wrapped installer (alternative)
+3. `installer/bin/x64/Release/VoiceWalker-Setup.msi` — WiX-MSI installer (primary)
 
 Release cadence: every 2-6 weeks, 1-3 artifacts per release.
 
@@ -58,7 +58,7 @@ making the SignPath cloud-signing adapter a drop-in replacement.
 
 ## Trademark / naming
 
-- "MSFSVoiceWalker" and "G-Simulation" are project names only, **not**
+- "VoiceWalker" and "G-Simulation" are project names only, **not**
   registered trademarks. DPMA and EUIPO searches on 2026-04-24 returned
   zero matches for both terms.
 - The code-signing cert subject must read **"Patrick Gottberg"** (the
@@ -68,7 +68,7 @@ making the SignPath cloud-signing adapter a drop-in replacement.
 ## Links
 
 - **Repository:** https://github.com/G-Simulation/MSFS-VoiceWalker
-- **Project homepage:** https://www.gsimulations.de/msfsvoicewalker
+- **Project homepage:** https://www.gsimulations.de/voicewalker
 - **License:** Apache-2.0
-- **Contact:** patrick.gottberg@gmail.com
+- **Contact:** kontakt@gsimulations.com
 - **Issue tracker:** https://github.com/G-Simulation/MSFS-VoiceWalker/issues

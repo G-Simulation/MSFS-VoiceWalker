@@ -1,4 +1,4 @@
-// MSFSVoiceWalker — Browser-Debug-Menue.
+// VoiceWalker — Browser-Debug-Menue.
 //
 // ============================================================================
 //   DEBUG_PANEL_ENABLED = false  =>  Panel wird gar nicht erst geladen.
@@ -23,7 +23,7 @@ const DEBUG_PANEL_ENABLED = true;   // ← HIER ein/aus
 
 // Fruehzeitig raus, wenn deaktiviert — kein DOM-Setup, kein Console-Wrap.
 if (!DEBUG_PANEL_ENABLED) {
-  console.info('[MSFSVoiceWalker] Debug-Panel deaktiviert (DEBUG_PANEL_ENABLED=false)');
+  console.info('[VoiceWalker] Debug-Panel deaktiviert (DEBUG_PANEL_ENABLED=false)');
 } else {
   initDebugPanel();
 }
@@ -145,7 +145,7 @@ function initDebugPanel() {
     </style>
 
     <div class="dbg-head">
-      <strong>MSFSVoiceWalker · Debug</strong>
+      <strong>VoiceWalker · Debug</strong>
       <button id="dbg-refresh" title="State neu laden">↻</button>
       <button id="dbg-export" title="Log als .txt herunterladen">Export</button>
       <button id="dbg-close" title="Schließen (Strg+Shift+D)">✕</button>
@@ -579,7 +579,7 @@ function initDebugPanel() {
     } catch (e) { backend = 'status fetch failed: ' + e.message; }
 
     const header = [
-      `MSFSVoiceWalker Debug Export`,
+      `VoiceWalker Debug Export`,
       `time: ${new Date().toISOString()}`,
       `url:  ${location.href}`,
       `ua:   ${navigator.userAgent}`,
@@ -616,7 +616,7 @@ function initDebugPanel() {
   }
 
   console.info(
-    '%cMSFSVoiceWalker',
+    '%cVoiceWalker',
     'color:#6aa5ff;font-weight:bold',
     '— Debug-Panel: Strg+Shift+D oder ?debug=1'
   );

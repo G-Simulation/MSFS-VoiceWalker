@@ -1,276 +1,273 @@
 """
-packaging/build-logo-assets.py — erzeugt aus der Quell-PNG des Voicewalker-
-Logos die folgenden Varianten in brand/:
+packaging/build-logo-assets.py — erzeugt aus dem Vektor-SVG des
+VoiceWalker-Marks die Logo-Varianten in brand/ und kopiert sie an die
+Stellen im Repo, wo Web-UI und MSFS-Panel sie laden.
 
-  - brand/voicewalker-logo.png            (mit Text, schwarz auf weiss)  → README, PRESSKIT
-  - brand/voicewalker-logo-mark.png       (nur Kreis, schwarz auf weiss) → light backgrounds
-  - brand/voicewalker-logo-mark-light.png (nur Kreis, weiss auf transparent) → dark mode UI
+Quelle (Single Source of Truth): brand/voicewalker-logo-mark.svg
+  - echte <path>-Daten, viewBox 0 0 512 512
+  - schwarze Logo-Pfade (fill="#000000"), weisse Negativraeume (fill="#ffffff")
+  - graue Outline-Strokes (stroke="#808080") — werden hier ignoriert
+    (sind Konstruktions-Hilfsstrukturen aus dem Authoring-Tool)
 
-Quelle: SOURCE_PNG (siehe unten). Die Mark-Variante wird automatisch ueber
-die Bounding-Box des Kreises ermittelt (alles ueber dem Text-Block).
+Outputs:
+  brand/voicewalker-logo-mark.png        — Mark schwarz auf weiss        (512x512)
+  brand/voicewalker-logo-mark-light.png  — Mark weiss auf transparent    (512x512)
+  brand/voicewalker-logo-mark-green.png  — Mark akzent-gruen auf transp. (512x512)
+  brand/voicewalker-logo.png             — Mark + Text "VoiceWalker"     (512x512)
+  brand/voicewalker-logo-horizontal.png  — Mark links, Text rechts       (~640x256)
 
-Nach Aenderungen am Quell-PNG einmal laufen lassen:
+Toolbar-SVG:
+  msfs-project/.../icons/toolbar/ICON_TOOLBAR_VOICEWALKER.svg
+  — direkt aus dem Quell-SVG abgeleitet (Outlines raus, fills→weiss,
+    fill="?" am Root fuer Toolbar-Idle/Highlight-Toenung).
+
+Panel-Kopien:
+  web/voicewalker-logo-mark-light.png
+  msfs-project/.../InGamePanels/VoiceWalker/voicewalker-logo-mark-light.png
+  msfs-project/.../InGamePanels/VoiceWalker/voicewalker-logo-mark-green.png
+
+Nach Aenderungen am Quell-SVG einmal laufen lassen:
     env\\Scripts\\python packaging/build-logo-assets.py
 """
-from PIL import Image, ImageDraw, ImageFont
+import io
+import re
+import shutil
 from pathlib import Path
 
+import cairosvg
+from PIL import Image, ImageDraw, ImageFont
+
 ROOT = Path(__file__).resolve().parent.parent
-SOURCE_PNG = Path(r"Z:\MSFSVoiceWalker\Voicewalker Logo verbessert.png")
 BRAND = ROOT / "brand"
+SOURCE_SVG = BRAND / "voicewalker-logo-mark.svg"
 
-src = Image.open(SOURCE_PNG).convert("RGBA")
-W, H = src.size
+if not SOURCE_SVG.is_file():
+    raise SystemExit(f"[logo] Quelle fehlt: {SOURCE_SVG}")
 
-# 1) Full-Logo wird WEITER UNTEN gebaut — wir nehmen das gecroppte Mark
-#    und rendern unseren eigenen Text "VoiceWalker" drunter, weil im Original
-#    "Voicewalker" steht.
+src_svg = SOURCE_SVG.read_text(encoding="utf-8")
 
-# 2) Mark-Variante — nur den Kreis. Heuristik: Logo ist schwarz auf weiss.
-#    Wir nehmen das Graustufen-Bild, finden alle dunklen Pixel und ermitteln
-#    daraus die Bounding-Box. Dann croppen wir nur den oberen quadratischen
-#    Teil bis kurz vor den "Voicewalker"-Schriftzug.
-gray = src.convert("L")
-# Maske: dunkle Pixel (Logo + Text)
-mask = gray.point(lambda v: 255 if v < 100 else 0)
-bbox_all = mask.getbbox()
-if not bbox_all:
-    raise SystemExit("[logo] keine dunklen Pixel gefunden — Quelle pruefen")
-x0, y0, x1, y1 = bbox_all
-print(f"[logo] gesamt-bbox dunkler Pixel: {bbox_all}")
 
-# Der Kreis ist der grosse runde Block oben. Wir suchen die vertikale Luecke
-# zwischen Kreis und Text — eine Zeile in der ueber die ganze Breite kein
-# dunkler Pixel auftaucht. Scan von oben nach unten, ab Mitte der Gesamthoehe.
-scan_start = (y0 + y1) // 2
-gap_y = None
-for y in range(scan_start, y1):
-    row = mask.crop((x0, y, x1, y + 1))
-    if row.getbbox() is None:  # leere Zeile = Luecke zwischen Kreis und Text
-        gap_y = y
-        break
-if gap_y is None:
-    print("[logo] WARN: keine Luecke gefunden, croppe nur auf bbox")
-    circle_bbox = bbox_all
-else:
-    # Crop endet kurz vor der Luecke (kleines Padding)
-    pad_below = 4
-    circle_bbox = (x0, y0, x1, max(y0 + 1, gap_y - pad_below))
-    print(f"[logo] Luecke bei y={gap_y}, circle-bbox: {circle_bbox}")
+# -----------------------------------------------------------------------------
+# SVG-Cleanup-Helfer.
+#
+# Das Quell-SVG enthaelt zwei Klassen von Pfaden:
+#   1) <path stroke="#808080" ... fill="none">  → Outline-Hilfslinien
+#   2) <path fill="#000000" oder "#ffffff">     → eigentliches Logo
+#
+# Fuer alle gerenderten Varianten wollen wir nur die fill-Pfade, keine
+# Strokes. Wir entfernen daher alle stroke-only Pfade und stroken nichts.
+# -----------------------------------------------------------------------------
+def _strip_outlines(svg: str) -> str:
+    # alle <path ... /> entfernen die kein fill="#..." haben
+    def keep(m: re.Match) -> str:
+        block = m.group(0)
+        return block if 'fill="#' in block else ''
+    return re.sub(r'<path[^/]*?/>', keep, svg, flags=re.DOTALL)
 
-cx0, cy0, cx1, cy1 = circle_bbox
-# Strikt auf den Logo-Inhalt croppen (NIE ueber gap_y hinaus, sonst
-# kommt der Text wieder rein). KEIN Padding, KEIN auf-Quadrat-padden —
-# das Logo soll im Container so gross wie moeglich erscheinen, auch wenn
-# es horizontal breiter ist als hoch (Wellenform reicht ueber den Kreis).
-# Sicherheitsabstand fuer Antialiasing-Pixel am Kreis-Rand, die der harte
-# Threshold (<100) nicht erfasst — sonst wirkt der Kreis abgeschnitten.
-safety = 18
-cx0 = max(0, cx0 - safety)
-cy0 = max(0, cy0 - safety)
-cx1 = min(W, cx1 + safety)
-cy1 = min(H, cy1 + safety)
-crop = src.crop((cx0, cy0, cx1, cy1))
-cw, ch = crop.size
-# Quadratisch: Quadrat-Seite = Hoehe (= Kreis-Durchmesser), horizontal
-# zentrieren. Damit fuellt der Kreis das Bild voll, Wellenform-Tips werden
-# symmetrisch beschnitten. Plus 8% Rand drumherum.
-side_inner = ch
-pad = round(side_inner * 0.08)
-side = side_inner + 2 * pad
-square = Image.new("RGBA", (side, side), (255, 255, 255, 255))
-ox = (side - cw) // 2  # kann negativ sein wenn cw > side → Wellenform-Tips werden symmetrisch beschnitten
-oy = pad
-square.paste(crop, (ox, oy), crop)
-# Auf 512x512 normieren
-mark = square.resize((512, 512), Image.LANCZOS)
+
+def _recolor_fills(svg: str, new_color: str) -> str:
+    """Ersetzt alle fill="#000000" durch new_color. Weisse Negativ-
+    raeume (fill="#ffffff") bleiben weiss — sind Loecher im Logo."""
+    return svg.replace('fill="#000000"', f'fill="{new_color}"')
+
+
+def _make_transparent_white_bg(svg: str) -> str:
+    """Fuer dark-mode Varianten: die weissen Negativraeume werden
+    transparent gemacht, damit das Logo auf jeden Hintergrund passt."""
+    return svg.replace('fill="#ffffff"', 'fill="none"')
+
+
+# -----------------------------------------------------------------------------
+# Render: SVG → PNG via cairosvg.
+# -----------------------------------------------------------------------------
+def _render(svg: str, size: int, bg: str | None = None) -> Image.Image:
+    """bg: hex wie '#ffffff' fuer weissen Hintergrund, None = transparent."""
+    png_bytes = cairosvg.svg2png(
+        bytestring=svg.encode("utf-8"),
+        output_width=size,
+        output_height=size,
+        background_color=bg,
+    )
+    return Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+
+
+SIZE = 512
+
+def _prep(svg: str, fg: str, transparent_holes: bool) -> str:
+    """Reihenfolge ist kritisch — sonst kollidieren die Farb-Replaces:
+    1) Outlines raus
+    2) (optional) weisse Negativraeume transparent machen — MUSS vor dem
+       recolor passieren, sonst macht recolor alles weiss und der naechste
+       Schritt loescht das ganze Logo.
+    3) schwarze Logo-Pfade auf fg umfaerben."""
+    s = _strip_outlines(svg)
+    if transparent_holes:
+        s = _make_transparent_white_bg(s)
+    s = _recolor_fills(s, fg)
+    return s
+
+
+# 1) Mark schwarz auf weiss (READMEs, light backgrounds)
+mark_black_svg = _strip_outlines(src_svg)
+mark_black_png = _render(mark_black_svg, SIZE, bg="#ffffff")
 mark_out = BRAND / "voicewalker-logo-mark.png"
-mark.save(mark_out, format="PNG", optimize=True)
-print(f"[logo] wrote {mark_out} ({mark_out.stat().st_size} bytes, {mark.size})")
+mark_black_png.save(mark_out, format="PNG", optimize=True)
+print(f"[logo] wrote {mark_out} ({mark_out.stat().st_size} bytes, {mark_black_png.size})")
 
-# 3) Light-Variante (weiss auf transparent) fuer dark-mode UI (web/panel headers)
-# Schwarze Pixel werden weiss, weisse Pixel werden transparent.
-mark_rgba = mark.convert("RGBA")
-px = mark_rgba.load()
-mw, mh = mark_rgba.size
-for y in range(mh):
-    for x in range(mw):
-        r, g, b, a = px[x, y]
-        # Helligkeit: 0=schwarz, 255=weiss. Wir mappen Helligkeit auf Alpha,
-        # invertiert: dunkle Pixel werden opak weiss, helle werden transparent.
-        lum = (r + g + b) // 3
-        new_alpha = 255 - lum
-        px[x, y] = (255, 255, 255, new_alpha)
+# 2) Mark weiss auf transparent (dark-mode UI, Panel-Header)
+mark_light_svg = _prep(src_svg, "#ffffff", transparent_holes=True)
+mark_light_png = _render(mark_light_svg, SIZE, bg=None)
 light_out = BRAND / "voicewalker-logo-mark-light.png"
-mark_rgba.save(light_out, format="PNG", optimize=True)
-print(f"[logo] wrote {light_out} ({light_out.stat().st_size} bytes, {mark_rgba.size})")
+mark_light_png.save(light_out, format="PNG", optimize=True)
+print(f"[logo] wrote {light_out} ({light_out.stat().st_size} bytes, {mark_light_png.size})")
 
-# Gruene Variante (gleiche Logik wie light, aber mit Akzent-Gruen statt
-# Weiss) — fuer den InGame-Panel-Header, passt zur dot-good Farbe.
-mark_green = mark.convert("RGBA")
-gpx = mark_green.load()
-gw, gh = mark_green.size
-GREEN = (63, 220, 138)  # #3fdc8a, panel.css --good
-for y in range(gh):
-    for x in range(gw):
-        r, g, b, a = gpx[x, y]
-        lum = (r + g + b) // 3
-        gpx[x, y] = (GREEN[0], GREEN[1], GREEN[2], 255 - lum)
+# 3) Mark akzent-gruen auf transparent (Panel-Header gruene Variante)
+GREEN = "#3fdc8a"  # panel.css --good
+mark_green_svg = _prep(src_svg, GREEN, transparent_holes=True)
+mark_green_png = _render(mark_green_svg, SIZE, bg=None)
 green_out = BRAND / "voicewalker-logo-mark-green.png"
-mark_green.save(green_out, format="PNG", optimize=True)
-print(f"[logo] wrote {green_out} ({green_out.stat().st_size} bytes, {mark_green.size})")
+mark_green_png.save(green_out, format="PNG", optimize=True)
+print(f"[logo] wrote {green_out} ({green_out.stat().st_size} bytes, {mark_green_png.size})")
 
-# 1b) Full-Logo: Mark + neuer "VoiceWalker"-Text drunter. Layout-Verhaeltnisse
-#     so wie im Original (siehe Quell-PNG): Mark oben, Text unten, gleiche
-#     Schrift-Hoehe wie im Originaltext.
+# 4) Full-Logo: Mark + "VoiceWalker"-Text drunter (schwarz auf weiss)
 TEXT = "VoiceWalker"
-# Originaltext-Hoehe in der Quelle messen: zwischen gap_y und Bottom-bbox
-orig_text_h_src = (1657 - gap_y)  # in Quell-Pixeln (Quelle 2048)
-# Verhaeltnis Text-Hoehe zu Quadratseite des Originals:
-text_h_ratio = orig_text_h_src / H  # ca. 13% der Quadratseite
-# Final-Canvas 512x512 wie Original
 FW = 512
-text_h = round(FW * text_h_ratio)
-# Mark wird so gross gemacht, dass Mark+Text+Padding in 512 reinpasst
-gap = round(FW * -0.015)  # negativ — Text rueckt unter den Kreis-Boden hoch (Font hat internen Top-Whitespace)
-top_pad = round(FW * 0.04)
-bot_pad = round(FW * 0.04)
+top_pad = round(FW * 0.06)
+bot_pad = round(FW * 0.06)
+text_h = round(FW * 0.14)
+gap = round(FW * 0.02)
 mark_target_h = FW - text_h - gap - top_pad - bot_pad
-# Mark ist 512x512, runterskalieren auf mark_target_h Hoehe (quadratisch)
-mark_for_full = mark.resize((mark_target_h, mark_target_h), Image.LANCZOS)
+
+mark_for_full = mark_black_png.resize((mark_target_h, mark_target_h), Image.LANCZOS)
 full = Image.new("RGBA", (FW, FW), (255, 255, 255, 255))
-mx = (FW - mark_target_h) // 2
-my = top_pad
-full.paste(mark_for_full, (mx, my), mark_for_full)
-# Text drunter: Bold sans-serif, schwarz, zentriert
-font_path = "C:/Windows/Fonts/bahnschrift.ttf"  # Bahnschrift — modern, technisch (variable font)
+full.paste(mark_for_full, ((FW - mark_target_h) // 2, top_pad), mark_for_full)
+
+font_path = "C:/Windows/Fonts/bahnschrift.ttf"
 if not Path(font_path).exists():
-    font_path = "C:/Windows/Fonts/segoeuib.ttf"  # Fallback Segoe UI Bold
-
-
-def make_font(size: int) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(font_path, size)
-
-
-# Minimal groesser als die Original-Texthoehe
+    font_path = "C:/Windows/Fonts/segoeuib.ttf"
 font_size = round(text_h * 1.15)
-font = make_font(font_size)
+font = ImageFont.truetype(font_path, font_size)
 draw = ImageDraw.Draw(full)
-# Text-Bbox messen
 tb = draw.textbbox((0, 0), TEXT, font=font)
 tw = tb[2] - tb[0]
-th = tb[3] - tb[1]
 tx = (FW - tw) // 2 - tb[0]
-ty = my + mark_target_h + gap - tb[1]
+ty = top_pad + mark_target_h + gap - tb[1]
 draw.text((tx, ty), TEXT, font=font, fill=(0, 0, 0, 255))
-# Inhalt (Mark + Text) im Quadrat exakt mittig zentrieren — die berechneten
-# Paddings stimmen rechnerisch, aber durch Font-Metriken (Ascent/Descent ohne
-# Glyphen-Verwendung) ist der visuelle Block oft leicht aus der Mitte. Wir
-# messen die echte Pixel-Bbox des Inhalts und shiften.
+
+# Inhalt visuell zentrieren (Font-Metrik korrigieren)
 content_bbox = full.convert("L").point(lambda v: 0 if v > 250 else 255).getbbox()
 if content_bbox:
-    cb_x0, cb_y0, cb_x1, cb_y1 = content_bbox
-    content = full.crop(content_bbox)
-    cw_, ch_ = content.size
+    cb = full.crop(content_bbox)
+    cw_, ch_ = cb.size
     full = Image.new("RGBA", (FW, FW), (255, 255, 255, 255))
-    full.paste(content, ((FW - cw_) // 2, (FW - ch_) // 2), content)
+    full.paste(cb, ((FW - cw_) // 2, (FW - ch_) // 2), cb)
 full_out = BRAND / "voicewalker-logo.png"
 full.save(full_out, format="PNG", optimize=True)
 print(f"[logo] wrote {full_out} ({full_out.stat().st_size} bytes, {full.size})")
 
-# 1c) Horizontal-Variante: Mark links, "VoiceWalker"-Text rechts daneben.
-#     Hoehe = 256, Mark quadratisch, Text vertikal zentriert.
+# 5) Horizontal-Variante: Mark links, Text rechts
 HH = 256
-mark_h = HH
-mark_horiz = mark.resize((mark_h, mark_h), Image.LANCZOS)
+mark_horiz = mark_black_png.resize((HH, HH), Image.LANCZOS)
 gap_h = round(HH * 0.06)
-text_h_h = round(HH * 0.42)  # Text-Hoehe ca. 42% der Bild-Hoehe
-font_h = make_font(text_h_h)
-# Text-Bbox messen mit dummy draw
+text_h_h = round(HH * 0.42)
+font_h = ImageFont.truetype(font_path, text_h_h)
 dummy = Image.new("RGBA", (10, 10))
-dd = ImageDraw.Draw(dummy)
-tb_h = dd.textbbox((0, 0), TEXT, font=font_h)
+tb_h = ImageDraw.Draw(dummy).textbbox((0, 0), TEXT, font=font_h)
 tw_h = tb_h[2] - tb_h[0]
 th_h = tb_h[3] - tb_h[1]
 pad_h = round(HH * 0.06)
-total_w = pad_h + mark_h + gap_h + tw_h + pad_h
+total_w = pad_h + HH + gap_h + tw_h + pad_h
 horiz = Image.new("RGBA", (total_w, HH), (255, 255, 255, 255))
 horiz.paste(mark_horiz, (pad_h, 0), mark_horiz)
-draw_h = ImageDraw.Draw(horiz)
-tx_h = pad_h + mark_h + gap_h - tb_h[0]
-ty_h = (HH - th_h) // 2 - tb_h[1]
-draw_h.text((tx_h, ty_h), TEXT, font=font_h, fill=(0, 0, 0, 255))
+ImageDraw.Draw(horiz).text(
+    (pad_h + HH + gap_h - tb_h[0], (HH - th_h) // 2 - tb_h[1]),
+    TEXT, font=font_h, fill=(0, 0, 0, 255),
+)
 horiz_out = BRAND / "voicewalker-logo-horizontal.png"
 horiz.save(horiz_out, format="PNG", optimize=True)
 print(f"[logo] wrote {horiz_out} ({horiz_out.stat().st_size} bytes, {horiz.size})")
 
-# 4) Kopien an Orte, wo Coherent GT / der Browser sie relativ laden — wir
-#    koennen nicht ueberall ueber ../brand referenzieren, weil der Web-
-#    Bundle (PyInstaller --add-data web) und das MSFS-Panel jeweils ihren
-#    eigenen Asset-Root haben.
-import shutil
+# 6) MSFS-Toolbar-Icon — echtes Vektor-SVG, weisse Pfade, fill="?" am Root
+#    fuer Idle/Highlight-Tönung im Toolbar.
+toolbar_clean = _strip_outlines(src_svg)
+toolbar_clean = _recolor_fills(toolbar_clean, "#ffffff")
+# fill am Root auf "?" — Toolbar-Icons in MSFS werden monochrom getoent
+toolbar_clean = re.sub(
+    r'(<svg\b[^>]*?)(\s*>)',
+    r'\1 fill="?"\2',
+    toolbar_clean,
+    count=1,
+)
+toolbar_svg_dst = ROOT / "msfs-project" / "PackageSources" / "html_ui" / "icons" / "toolbar" / "ICON_TOOLBAR_VOICEWALKER.svg"
+toolbar_svg_dst.write_text(toolbar_clean, encoding="utf-8")
+print(f"[toolbar-icon] wrote {toolbar_svg_dst} ({toolbar_svg_dst.stat().st_size} bytes)")
+
+# 6b) EFB-App-Icon — gleiche SVG-Logik wie Toolbar (monochrom weisse Pfade,
+#     fill="?" am Root, EFB toent das App-Icon analog zur Toolbar). Wird
+#     vom EFB-App-TSX als BASE_URL/Assets/app-icon.svg referenziert.
+efb_icon_dst = ROOT / "msfs-project" / "PackageSources" / "EfbApp" / "VoiceWalkerApp" / "src" / "Assets" / "app-icon.svg"
+if efb_icon_dst.parent.exists():
+    efb_icon_dst.write_text(toolbar_clean, encoding="utf-8")
+    print(f"[efb-icon] wrote {efb_icon_dst} ({efb_icon_dst.stat().st_size} bytes)")
+
+# 7) MSFS-Marketplace/Package-Thumbnail (412x170 JPG, Konvention aus
+#    Community-Packages: Mark links, Text rechts, weisser Hintergrund).
+#    Ziel: ContentInfo/Thumbnail.jpg im Source-Tree des MSFS-Packages.
+TH_W, TH_H = 412, 170
+th_pad = 18                        # aussen
+th_gap = 18                        # zwischen Mark und Text
+th_mark_h = TH_H - 2 * th_pad      # 134 px Mark, vertikal voll
+th_mark = mark_black_png.resize((th_mark_h, th_mark_h), Image.LANCZOS)
+text_col_x0 = th_pad + th_mark_h + th_gap
+text_col_x1 = TH_W - th_pad
+text_col_w = text_col_x1 - text_col_x0
+text_col_h = TH_H - 2 * th_pad
+
+# Auto-fit: groesste Font-Groesse waehlen, bei der "VoiceWalker"
+# horizontal in text_col_w und vertikal in text_col_h passt.
+dummy = Image.new("RGBA", (10, 10))
+dd = ImageDraw.Draw(dummy)
+def _fit_font(size: int) -> bool:
+    f = ImageFont.truetype(font_path, size)
+    bb = dd.textbbox((0, 0), TEXT, font=f)
+    return (bb[2] - bb[0]) <= text_col_w and (bb[3] - bb[1]) <= text_col_h
+
+lo, hi = 12, 200
+while lo < hi:
+    mid = (lo + hi + 1) // 2
+    if _fit_font(mid):
+        lo = mid
+    else:
+        hi = mid - 1
+th_font = ImageFont.truetype(font_path, lo)
+th_tb = dd.textbbox((0, 0), TEXT, font=th_font)
+th_tw = th_tb[2] - th_tb[0]
+th_th = th_tb[3] - th_tb[1]
+
+thumb = Image.new("RGB", (TH_W, TH_H), (255, 255, 255))
+thumb.paste(th_mark, (th_pad, th_pad), th_mark)
+th_tx = text_col_x0 + (text_col_w - th_tw) // 2 - th_tb[0]
+th_ty = (TH_H - th_th) // 2 - th_tb[1]
+ImageDraw.Draw(thumb).text((th_tx, th_ty), TEXT, font=th_font, fill=(0, 0, 0))
+thumb_dst = ROOT / "msfs-project" / "PackageDefinitions" / "gsimulation-voicewalker" / "ContentInfo" / "Thumbnail.jpg"
+thumb.save(thumb_dst, format="JPEG", quality=92, optimize=True)
+print(f"[thumbnail] wrote {thumb_dst} ({thumb_dst.stat().st_size} bytes, {thumb.size}, font={lo}px)")
+
+# 8) Kopien an die UI-Pfade, wo Coherent GT / Web-UI sie relativ laden.
 for dst in [
     ROOT / "web" / "voicewalker-logo-mark-light.png",
-    ROOT / "msfs-project" / "PackageSources" / "html_ui" / "InGamePanels" / "MSFSVoiceWalker" / "voicewalker-logo-mark-light.png",
+    ROOT / "msfs-project" / "PackageSources" / "html_ui" / "InGamePanels" / "VoiceWalker" / "voicewalker-logo-mark-light.png",
 ]:
     shutil.copy2(light_out, dst)
     print(f"[logo] copied to {dst}")
 
-# Gruene Variante ins Panel-Verzeichnis (wird im Panel-Header verwendet)
-panel_green = ROOT / "msfs-project" / "PackageSources" / "html_ui" / "InGamePanels" / "MSFSVoiceWalker" / "voicewalker-logo-mark-green.png"
+panel_green = ROOT / "msfs-project" / "PackageSources" / "html_ui" / "InGamePanels" / "VoiceWalker" / "voicewalker-logo-mark-green.png"
 shutil.copy2(green_out, panel_green)
 print(f"[logo] copied to {panel_green}")
 
-# i18n.js — Source liegt in web/, Panel braucht eigene Kopie weil Coherent
-# GT relative Pfade zum Panel-HTML aufloest. Single source of truth: web/i18n.js
+# i18n.js — Single source of truth: web/i18n.js, ins Panel kopieren
 i18n_src = ROOT / "web" / "i18n.js"
 if i18n_src.is_file():
-    i18n_dst = ROOT / "msfs-project" / "PackageSources" / "html_ui" / "InGamePanels" / "MSFSVoiceWalker" / "i18n.js"
+    i18n_dst = ROOT / "msfs-project" / "PackageSources" / "html_ui" / "InGamePanels" / "VoiceWalker" / "i18n.js"
     shutil.copy2(i18n_src, i18n_dst)
     print(f"[i18n] copied to {i18n_dst}")
-
-# 5) MSFS-Toolbar-Icon (ICON_TOOLBAR_MSFSVOICEWALKER.svg) — Coherent GT
-# erzwingt Monochrom-Weiss-mit-Alpha-Rendering. Wir bauen eine separate
-# padding-lose Variante des Marks: strikt auf den Logo-Inhalt gecroppt
-# (kein 8 %-Rand wie beim normalen mark-light), invertiert auf Weiss-mit-
-# Alpha. So fuellt das Logo das 24x24-Icon-Quadrat voll aus, der Hinter-
-# grund bleibt transparent (kein Plate, nur Logo + Outline).
-import base64
-toolbar_crop = src.crop(circle_bbox)  # circle_bbox: nur Logo, kein Padding
-tb_w, tb_h = toolbar_crop.size
-# Square-pad mit transparent (kein weisser Hintergrund), Logo zentriert
-side = max(tb_w, tb_h)
-toolbar_sq = Image.new("RGBA", (side, side), (0, 0, 0, 0))
-toolbar_sq.paste(toolbar_crop, ((side - tb_w) // 2, (side - tb_h) // 2), toolbar_crop)
-# In Weiss-auf-Alpha umfaerben (analog mark-light)
-tpx = toolbar_sq.load()
-for y in range(side):
-    for x in range(side):
-        r, g, b, a = tpx[x, y]
-        # Originally weisser Hintergrund (a=255, lum=255) → soll transparent;
-        # dunkles Logo → opak weiss.
-        if a == 0:
-            continue
-        lum = (r + g + b) // 3
-        tpx[x, y] = (255, 255, 255, 255 - lum)
-# Auf 256 normieren (kompakter base64) und als PNG bytes serialisieren
-toolbar_sq = toolbar_sq.resize((256, 256), Image.LANCZOS)
-import io
-buf = io.BytesIO()
-toolbar_sq.save(buf, format="PNG", optimize=True)
-b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-toolbar_svg = (
-    '<?xml version="1.0" encoding="UTF-8"?>\n'
-    '<!-- MSFS Toolbar-Icon: erzeugt von packaging/build-logo-assets.py.\n'
-    '     Coherent GT rendert Toolbar-Icons monochrom-weiss + Alpha.\n'
-    '     Padding-lose Mark-Variante (Logo fuellt das Quadrat voll),\n'
-    '     transparenter Hintergrund - kein Plate, nur Logo+Outline. -->\n'
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" '
-    'preserveAspectRatio="xMidYMid meet">\n'
-    f'  <image href="data:image/png;base64,{b64}" '
-    'x="0" y="0" width="24" height="24"/>\n'
-    '</svg>\n'
-)
-toolbar_svg_dst = ROOT / "msfs-project" / "PackageSources" / "html_ui" / "icons" / "toolbar" / "ICON_TOOLBAR_MSFSVOICEWALKER.svg"
-toolbar_svg_dst.write_text(toolbar_svg, encoding="utf-8")
-print(f"[toolbar-icon] wrote {toolbar_svg_dst} ({toolbar_svg_dst.stat().st_size} bytes)")

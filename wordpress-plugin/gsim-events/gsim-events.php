@@ -1,7 +1,7 @@
 <?php
 /**
- * Plugin Name:       G-Sim Events (MSFSVoiceWalker)
- * Description:       Event-Hosting-Plattform für MSFSVoiceWalker. Ermöglicht Veranstaltern, öffentliche Fly-Ins / Air-Races / Formation-Flights anzulegen, Tickets zu verkaufen (via WooCommerce) und Teilnehmer mit Join-Link/Passphrase zu versorgen. Event-Ticketing-Lösung auf WooCommerce-Basis.
+ * Plugin Name:       G-Sim Events (VoiceWalker)
+ * Description:       Event-Hosting-Plattform für VoiceWalker. Ermöglicht Veranstaltern, öffentliche Fly-Ins / Air-Races / Formation-Flights anzulegen, Tickets zu verkaufen (via WooCommerce) und Teilnehmer mit Join-Link/Passphrase zu versorgen. Event-Ticketing-Lösung auf WooCommerce-Basis.
  * Version:           0.1.0
  * Author:            G-Simulation
  * Author URI:        https://www.gsimulations.de
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) exit;
 
 define('GSIM_EVENTS_VERSION',     '0.1.0');
 define('GSIM_EVENTS_APP_URL',     'http://127.0.0.1:7801');      // Local-App-Join-URL (Browser des Teilnehmers)
-define('GSIM_EVENTS_PASS_SALT',   'msfsvoicewalker-private-v1'); // MUSS mit web/app.js::PRIVATE_ROOM_SALT matchen
+define('GSIM_EVENTS_PASS_SALT',   'voicewalker-private-v1'); // MUSS mit web/app.js::PRIVATE_ROOM_SALT matchen
 define('GSIM_EVENTS_ROLE',        'event_organizer');
 define('GSIM_EVENTS_CPT_ATTENDEE','gsim_event_attendee');
 
@@ -129,13 +129,13 @@ add_action('save_post_tribe_events', function ($post_id, $post, $update) {
 }, 10, 3);
 
 // -----------------------------------------------------------------------------
-// Admin-UI: Meta-Box "MSFSVoiceWalker Event-Details" auf tribe_events
+// Admin-UI: Meta-Box "VoiceWalker Event-Details" auf tribe_events
 // -----------------------------------------------------------------------------
 
 add_action('add_meta_boxes_tribe_events', function () {
     add_meta_box(
         'gsim_events_voicewalker',
-        'MSFSVoiceWalker — Event-Details',
+        'VoiceWalker — Event-Details',
         function ($post) {
             $pass     = get_post_meta($post->ID, GSIM_EVENTS_META_PASSPHRASE, true);
             $join     = get_post_meta($post->ID, GSIM_EVENTS_META_JOIN_URL, true);
@@ -174,7 +174,7 @@ add_action('add_meta_boxes_tribe_events', function () {
             </label></p>
 
             <p style="color:#888;font-size:12px;margin-top:12px">
-               Teilnehmer klickt auf den Join-Link → MSFSVoiceWalker-App öffnet sich →
+               Teilnehmer klickt auf den Join-Link → VoiceWalker-App öffnet sich →
                tritt automatisch dem privaten Raum bei + übernimmt (falls gesetzt)
                die Event-Ranges.
             </p>
@@ -227,7 +227,7 @@ add_action('woocommerce_product_options_general_product_data', function () {
     echo '<div class="options_group">';
     woocommerce_wp_select([
         'id'          => GSIM_EVENTS_META_TICKET_EVENT,
-        'label'       => 'MSFSVoiceWalker: Event-Ticket für',
+        'label'       => 'VoiceWalker: Event-Ticket für',
         'description' => 'Mache dieses Produkt zu einem Ticket für ein bestimmtes Event. Beim Kauf bekommt der Teilnehmer automatisch Join-Link + Passphrase per Mail.',
         'desc_tip'    => true,
         'options'     => array_merge(
@@ -283,7 +283,7 @@ add_action('woocommerce_order_status_completed', function ($order_id) {
         $reset_key = get_password_reset_key(get_user_by('id', $user_id));
         $login_url = network_site_url("wp-login.php?action=rp&key=$reset_key&login=" . rawurlencode($login), 'login');
         wp_mail($email,
-            'Willkommen als MSFSVoiceWalker Event-Organizer',
+            'Willkommen als VoiceWalker Event-Organizer',
             "Hallo,\n\n"
             . "danke für den Kauf des Event-Hosting-Pakets.\n\n"
             . "Dein Veranstalter-Account wurde erstellt:\n"
@@ -299,7 +299,7 @@ add_action('woocommerce_order_status_completed', function ($order_id) {
         if (!in_array(GSIM_EVENTS_ROLE, (array) $u->roles)) {
             $u->add_role(GSIM_EVENTS_ROLE);
             wp_mail($email,
-                'Du kannst jetzt Events auf MSFSVoiceWalker veranstalten',
+                'Du kannst jetzt Events auf VoiceWalker veranstalten',
                 "Hallo " . ($user->display_name ?: $user->user_login) . ",\n\n"
                 . "dein Account wurde soeben als Event-Organizer freigeschaltet.\n"
                 . "Nach dem nächsten Login siehst du im Dashboard den Menüpunkt 'Veranstaltungen'.\n\n"
@@ -350,7 +350,7 @@ add_action('woocommerce_order_status_completed', function ($order_id) {
             'Setup-Anleitung: OBS Stream-Integration',
             "$greet\n\n"
             . "danke fuer den Kauf des Stream-Integration-Add-ons. So richtest du es ein:\n\n"
-            . "1) MSFSVoiceWalker-App starten wie gewohnt.\n\n"
+            . "1) VoiceWalker-App starten wie gewohnt.\n\n"
             . "2) Im Browser http://localhost:7801/ oeffnen.\n\n"
             . "3) Oben rechts neben dem VOX-Schalter die Checkbox 'Ducking' aktivieren.\n"
             . "   → Das senkt andere Pilot-Stimmen automatisch, sobald du ins Mic sprichst\n"
@@ -374,7 +374,7 @@ add_action('woocommerce_order_status_completed', function ($order_id) {
             $email,
             'Setup: Live-Tech-Support waehrend deines Events',
             "$greet\n\n"
-            . "du hast den Live-Tech-Support fuer dein MSFSVoiceWalker-Event gebucht.\n"
+            . "du hast den Live-Tech-Support fuer dein VoiceWalker-Event gebucht.\n"
             . "So geht's weiter:\n\n"
             . "1) Antworte auf diese Mail mit folgenden Angaben:\n"
             . "   - Event-Datum + Uhrzeit (mit Zeitzone, z.B. 'Sa 2026-05-20, 18:00 CEST')\n"
@@ -438,7 +438,7 @@ add_action('woocommerce_order_status_completed', function ($order_id) {
             "Hallo %s,\n\n"
             . "danke für deine Anmeldung zu \"%s\" (%s).\n\n"
             . "SO KOMMST DU INS EVENT:\n"
-            . "1) MSFSVoiceWalker installieren: https://www.gsimulations.de/msfsvoicewalker\n"
+            . "1) VoiceWalker installieren: https://www.gsimulations.de/voicewalker\n"
             . "2) App starten\n"
             . "3) Diesen Link im Browser öffnen (App muss laufen):\n"
             . "   %s\n\n"
@@ -1248,9 +1248,9 @@ add_action('template_redirect', function () {
     ]);
     $event = $events[0] ?? null;
     $join_url = GSIM_EVENTS_APP_URL . '/?join=' . rawurlencode($pass);
-    $install_url = home_url('/msfsvoicewalker');
+    $install_url = home_url('/voicewalker');
 
-    $title = $event ? esc_html($event->post_title) : 'MSFSVoiceWalker Event';
+    $title = $event ? esc_html($event->post_title) : 'VoiceWalker Event';
     $desc_html = $event ? apply_filters('the_content', $event->post_content) : '';
     $start = $event && function_exists('tribe_get_start_date') ? tribe_get_start_date($event->ID, true, 'd.m.Y H:i') : '';
     $img   = $event && has_post_thumbnail($event->ID) ? get_the_post_thumbnail_url($event->ID, 'large') : '';
@@ -1265,7 +1265,7 @@ add_action('template_redirect', function () {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title><?php echo $title; ?> — Join via MSFSVoiceWalker</title>
+<title><?php echo $title; ?> — Join via VoiceWalker</title>
 <link rel="stylesheet" href="<?php echo esc_url(get_stylesheet_uri()); ?>">
 <style>
   body { margin:0; background:#0b1220; color:#eaf0ff; font-family:"Segoe UI",system-ui,sans-serif; }
@@ -1304,12 +1304,12 @@ add_action('template_redirect', function () {
       <div class="desc"><?php echo wp_kses_post($desc_html); ?></div>
 
       <a href="<?php echo esc_url($join_url); ?>" class="btn">▶ Jetzt beitreten</a>
-      <a href="<?php echo esc_url($install_url); ?>" class="btn secondary">MSFSVoiceWalker installieren</a>
+      <a href="<?php echo esc_url($install_url); ?>" class="btn secondary">VoiceWalker installieren</a>
 
       <div class="steps">
         <strong>So machst du mit:</strong>
         <ol>
-          <li>MSFSVoiceWalker installieren (falls noch nicht geschehen)</li>
+          <li>VoiceWalker installieren (falls noch nicht geschehen)</li>
           <li>MSFS starten, App laeuft automatisch mit</li>
           <li>Oben auf "▶ Jetzt beitreten" klicken</li>
           <li>Du landest im privaten Event-Raum mit allen Teilnehmern</li>
@@ -1319,7 +1319,7 @@ add_action('template_redirect', function () {
     </div>
   </div>
   <footer>
-    Hosted on <a href="https://www.gsimulations.de/msfsvoicewalker" style="color:#8696b8">gsimulations.de</a> ·
+    Hosted on <a href="https://www.gsimulations.de/voicewalker" style="color:#8696b8">gsimulations.de</a> ·
     <a href="<?php echo esc_url($event_url); ?>" style="color:#8696b8">Event-Details</a>
   </footer>
 <?php endif; ?>
@@ -1619,7 +1619,7 @@ add_filter('the_content', function ($content) {
     $cta .= '<a href="' . esc_url($join) . '" class="btn-join">▶ Event beitreten</a>';
     $cta .= '<a href="' . esc_url($invite_url) . '" class="btn-secondary">Teilen-Link</a>';
     $cta .= '<p style="margin:16px 0 0 0;color:#8696b8;font-size:13px">Passphrase: <span class="passphrase">' . esc_html($pass) . '</span></p>';
-    $cta .= '<p style="margin:10px 0 0 0;color:#8696b8;font-size:12px">MSFSVoiceWalker muss installiert und gestartet sein — <a href="' . esc_url(home_url('/msfsvoicewalker')) . '" style="color:#6aa5ff">hier herunterladen</a></p>';
+    $cta .= '<p style="margin:10px 0 0 0;color:#8696b8;font-size:12px">VoiceWalker muss installiert und gestartet sein — <a href="' . esc_url(home_url('/voicewalker')) . '" style="color:#6aa5ff">hier herunterladen</a></p>';
     $cta .= '</div>';
     return $content . $cta;
 });
