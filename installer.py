@@ -251,7 +251,9 @@ def clear_wasm_compile_cache(sim: dict, addon_name: str) -> list[str]:
     Ergebnis in LocalState/WASM/MSFS2024/<package-hash>/. Wenn wir die .wasm
     aktualisieren aber der Cache alt ist, laedt MSFS die alte kompilierte
     Version — Bytecode-Hash wird offenbar nicht immer neu berechnet.
-    Loescht alle Cache-Subordner die addon_name im Pfad enthalten.
+    Loescht alle Cache-Subordner die VOICEWALKER irgendwie im Namen haben —
+    aktueller Marketplace-Name, alter Marketplace-Name (vor Rename) und
+    der WASM-Modul-Name selbst.
     Gibt Liste der geloeschten Pfade zurueck (fuer Logging).
     """
     removed: list[str] = []
@@ -266,7 +268,19 @@ def clear_wasm_compile_cache(sim: dict, addon_name: str) -> list[str]:
         base / "LocalState" / "WASM" / "MSFS2024",
         base / "LocalState" / "WASM",
     ]
-    needle = addon_name.lower()
+    # Alle bekannten Schluessel-Worte aus der Rename-Geschichte:
+    # - gsimulation-voicewalker     (aktuell)
+    # - gsimulation-msfsvoicewalker (alt, vor Rename)
+    # - voicewalker / msfsvoicewalker (legacy hand-folder + WASM-Module-Name)
+    needles = {
+        addon_name.lower(),
+        "gsimulation-voicewalker",
+        "gsimulation-msfsvoicewalker",
+        "voicewalker",
+        "msfsvoicewalker",
+        "voicewalkerbridge",
+        "msfsvoicewalkerbridge",
+    }
     for cache_dir in candidates:
         try:
             if not cache_dir.is_dir():
@@ -274,10 +288,13 @@ def clear_wasm_compile_cache(sim: dict, addon_name: str) -> list[str]:
         except OSError:
             continue
         # Nicht rekursiv — der Cache ist meistens flach organisiert (pro Package
-        # ein Ordner). Wir matchen Namen die unseren addon_name enthalten.
+        # ein Ordner). Wir matchen Namen die eines unserer Schluessel enthalten.
         try:
             for sub in cache_dir.iterdir():
-                if sub.is_dir() and needle in sub.name.lower():
+                if not sub.is_dir():
+                    continue
+                lname = sub.name.lower()
+                if any(n in lname for n in needles):
                     try:
                         shutil.rmtree(sub)
                         removed.append(str(sub))

@@ -1214,7 +1214,9 @@ async def broadcast(obj: dict) -> None:
         record_error("broadcast.serialize", e)
         return
     dead = []
-    for ws in SUBSCRIBERS:
+    # Snapshot — UI-Connect/Disconnect kann SUBSCRIBERS waehrend wir
+    # iterieren mutieren (RuntimeError: Set changed size during iteration).
+    for ws in list(SUBSCRIBERS):
         try:
             await ws.send(data)
         except Exception:
