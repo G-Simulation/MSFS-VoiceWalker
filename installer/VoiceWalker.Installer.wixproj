@@ -114,7 +114,7 @@
        VoiceWalkerApp/ ins Package kopiert.
        Voraussetzung: Node.js + npm im PATH. Beim ersten Lauf wird npm install
        ausgefuehrt; danach nur npm run build (inkrementell via Inputs/Outputs).
-       --legacy-peer-deps wegen Asobo-Sample-Pin (esbuild 0.21 vs. neuere
+       Flag legacy-peer-deps wegen Asobo-Sample-Pin (esbuild 0.21 vs. neuere
        esbuild-sass-plugin Peer-Range). -->
   <Target Name="BuildEfbApp"
           BeforeTargets="BuildMsfsPackage"
