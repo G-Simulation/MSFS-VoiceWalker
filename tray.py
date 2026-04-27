@@ -1,180 +1,61 @@
 """System-Tray-Icon fuer VoiceWalker.
 
-Das Tray-Icon ersetzt das Konsolen-Fenster der App, wenn die distributed
-EXE als windowed Build (`console=False`) gebaut wird. Im Tray sieht der
-User dass die App laeuft, kann sie gezielt beenden, das Web-UI oeffnen
-oder die Logs anschauen.
+Das Tray-Icon ersetzt das Konsolen-Fenster der App. User sieht im Tray dass
+die App laeuft, kann sie beenden, das Web-UI oeffnen oder Logs anschauen.
+
+Auto-Browser-Tab fuer Audio-Discovery:
+- Beim App-Start startet ein PyWebView-Window (WebView2-Backend) auf
+  http://127.0.0.1:{port}/, **initial hidden** — kein Window, kein Taskbar-
+  Eintrag, kein Alt+Tab-Eintrag. Der DOM laeuft trotzdem, navigator.media
+  Devices.enumerateDevices() listet die Audio-Geraete und broadcastet sie
+  ans Sim-Panel/EFB.
+- Tray-Klick "VoiceWalker oeffnen" zeigt das Window mit Fokus.
+- X im Window-Header: closing-Event wird abgefangen, Window wird stattdessen
+  versteckt (bleibt fuer naechsten Tray-Klick verfuegbar).
+
+Fallback wenn WebView2 Runtime fehlt (sehr selten — <1% der Win-Systeme):
+- start_ui_hidden() loggt eine Warnung und startet keinen Browser auto.
+- Tray-Klick oeffnet die UI im Default-Browser (webbrowser.open).
+- Audio-Listen sind dann nur gefuellt wenn der User den Default-Browser-Tab
+  offen laesst.
 
 Architektur:
-- pystray.Icon laeuft in einem eigenen Daemon-Thread (run_detached blockt
-  sonst die main-thread). Das Asyncio-Loop laeuft unbehelligt weiter.
-- Beenden-Knopf signalisiert dem Asyncio-Loop ueber einen threadsafe
-  Callback, der den websockets.serve-Server schliesst — damit faellt
-  asyncio.gather() durch und main() macht ihren finally-Block.
-- Beim Aufruf von pystray.Icon.stop() darf das **erst** passieren wenn
-  pystray's eigene Mainloop laeuft, sonst hangt run_detached(). Deshalb
-  setzen wir nur ein Stop-Flag und stoppen das Icon im Asyncio-finally.
+- pystray.Icon im Daemon-Thread (run_detached)
+- webview.start() ebenfalls in eigenem Daemon-Thread
+- _main_window globaler Cache der Window-Referenz fuer show_ui()/hide_ui()
 """
 from __future__ import annotations
 
 import logging
 import os
 import pathlib
-import subprocess
-import sys
 import threading
-import time
 import webbrowser
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional
 
 log = logging.getLogger("tray")
 
-# Konstanten
 ICON_TITLE = "VoiceWalker"
 ICON_NAME  = "voicewalker"
 
-# Edge im --app=URL Modus oeffnet die UI als chrome-loses App-Fenster
-# (kein URL-Bar, keine Tabs) — sieht aus wie eine native Desktop-App.
-# Edge ist auf jedem Windows-System vorhanden; falls nicht (sehr selten),
-# fallen wir auf den Default-Browser zurueck.
-EDGE_PATHS = [
-    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-    r"C:\Program Files\Microsoft Edge\Application\msedge.exe",
-]
-
-
-def _edge_path() -> Optional[str]:
-    for p in EDGE_PATHS:
-        if os.path.exists(p):
-            return p
-    return None
-
-
-# Tracking der bereits gestarteten Edge-App-Fenster, damit Doppelklick
-# aufs Tray nicht jedes Mal ein neues Fenster aufmacht.
-# Schluessel: profile-Suffix (leer fuer Haupt-UI, "-overlay" fuer Mini).
-_running_procs: dict = {}
-
-# Port unter dem das Backend lauscht. Wird in setup_tray() gesetzt, damit
-# show_ui() (vom Backend gerufen, z.B. wenn das Panel "im Browser einrichten"
-# klickt) das Haupt-UI-Fenster ohne Argument vorholen kann.
+# Wird in setup_tray() gesetzt damit show_ui() (vom Backend gerufen) das
+# UI-Fenster ohne Argument vorholen kann.
 _active_port: Optional[int] = None
 
-
-def _force_foreground(hwnd) -> None:
-    """SetForegroundWindow funktioniert in Win32 nur wenn der Caller den
-    Foreground-Lock hat. Workaround: kurzzeitig ThreadInput an den Foreground-
-    Thread anhaengen, dann darf SetForegroundWindow zuverlaessig setzen."""
-    try:
-        import ctypes
-        import ctypes.wintypes as wt
-        user32 = ctypes.windll.user32
-        kernel32 = ctypes.windll.kernel32
-        fg_hwnd = user32.GetForegroundWindow()
-        target_thr = user32.GetWindowThreadProcessId(hwnd, None)
-        fg_thr = user32.GetWindowThreadProcessId(fg_hwnd, None) if fg_hwnd else 0
-        cur_thr = kernel32.GetCurrentThreadId()
-        attached = False
-        if fg_thr and fg_thr != cur_thr:
-            attached = bool(user32.AttachThreadInput(cur_thr, fg_thr, True))
-        try:
-            user32.BringWindowToTop(hwnd)
-            user32.SetForegroundWindow(hwnd)
-        finally:
-            if attached:
-                user32.AttachThreadInput(cur_thr, fg_thr, False)
-    except Exception as e:
-        log.debug("force_foreground failed: %s", e)
+# pywebview-Window-Referenz. None solange webview nicht (oder noch nicht)
+# gestartet ist. show_ui() prueft das und faellt sonst auf webbrowser.open
+# zurueck.
+_main_window = None
+_webview_started = False
+_webview_available = False  # wird in start_ui_hidden() bei Erfolg gesetzt
 
 
-def _set_taskbar_visible(hwnd, visible: bool) -> None:
-    """Toggelt das WS_EX_TOOLWINDOW vs WS_EX_APPWINDOW Extended-Style.
-    TOOLWINDOW = kein Taskbar-Icon, APPWINDOW = sichtbares Taskbar-Icon.
-    Wird vor SW_SHOW aufgerufen damit das Fenster mit korrektem Style
-    sichtbar wird (sonst flackert der Eintrag kurz auf)."""
-    try:
-        import ctypes
-        user32 = ctypes.windll.user32
-        GWL_EXSTYLE       = -20
-        WS_EX_TOOLWINDOW  = 0x00000080
-        WS_EX_APPWINDOW   = 0x00040000
-        # GetWindowLongW liefert int32 — auf 64-bit nutzt Python ein int, OK.
-        style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-        if visible:
-            style = (style & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW
-        else:
-            style = (style | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
-        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
-    except Exception as e:
-        log.debug("_set_taskbar_visible(%s) failed: %s", visible, e)
-
-
-def _show_and_position(hwnd) -> None:
-    """Zeigt ein Fenster und positioniert es zurueck in den sichtbaren
-    Bereich (off-screen-Start setzt -32000,-32000). Reihenfolge:
-      1. WS_EX_APPWINDOW setzen (Taskbar-Icon erlaubt) BEVOR Show
-      2. SW_SHOWNORMAL — kombiniert SHOW+RESTORE, robust fuer hidden+minimiert
-      3. Position zuruecksetzen damit's nicht off-screen bleibt
-      4. Foreground+Fokus erzwingen
-    """
-    try:
-        import ctypes
-        user32 = ctypes.windll.user32
-        SW_SHOWNORMAL = 1
-        SWP_NOSIZE    = 0x0001
-        SWP_NOZORDER  = 0x0004
-        _set_taskbar_visible(hwnd, True)
-        user32.ShowWindow(hwnd, SW_SHOWNORMAL)
-        user32.SetWindowPos(hwnd, 0, 80, 80, 0, 0, SWP_NOSIZE | SWP_NOZORDER)
-        _force_foreground(hwnd)
-    except Exception as e:
-        log.debug("show_and_position failed: %s", e)
-
-
-def _bring_window_to_front(root_pid: int) -> bool:
-    """Findet das Top-Level-Fenster eines Prozesses oder seiner Children
-    (Edge --app spawnt das App-Window oft im Renderer-Child) und holt es
-    nach vorne. Stilles Failure auf non-Windows / wenn kein passendes
-    Fenster da ist."""
-    valid_pids = _collect_descendant_pids(root_pid)
-    try:
-        import ctypes
-        import ctypes.wintypes as wt
-        user32 = ctypes.windll.user32
-        target = ctypes.c_void_p(0)
-
-        EnumProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wt.HWND, wt.LPARAM)
-
-        def _cb(hwnd, _lparam):
-            wpid = wt.DWORD()
-            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(wpid))
-            if wpid.value in valid_pids:
-                # IsWindowVisible bewusst NICHT pruefen — beim Auto-Start
-                # haben wir das Fenster mit SW_HIDE versteckt, dann liefert
-                # IsWindowVisible False. Wir wollen es trotzdem finden um
-                # SW_SHOWNORMAL darauf anzuwenden. Nur Fenster mit Title
-                # nehmen (filtert Edges interne GPU/Service-Helper raus).
-                length = user32.GetWindowTextLengthW(hwnd)
-                if length > 0:
-                    target.value = hwnd
-                    return False
-            return True
-
-        user32.EnumWindows(EnumProc(_cb), 0)
-        if target.value:
-            _show_and_position(target.value)
-            return True
-    except Exception as e:
-        log.debug("bring-to-front failed: %s", e)
-    return False
-
-
-def _edge_user_data_dir(suffix: str = "") -> str:
-    """Eigenes Edge-Profil-Verzeichnis, damit das App-Fenster nicht im
-    Surf-Profil des Users reinhaengt (Cookies/History gemischt) und das
-    Mini-Overlay seine eigene Storage-Welt hat."""
+def _webview_user_data_dir() -> str:
+    """WebView2-Storage-Verzeichnis. Cookies/LocalStorage und insbesondere
+    die Mikrofon-Permission persistieren hier — damit der User die Permission
+    nur EINMAL beim allerersten App-Start gewaehren muss."""
     base = pathlib.Path(os.environ.get("LOCALAPPDATA", str(pathlib.Path.home())))
-    target = base / "VoiceWalker" / f"edge-profile{suffix}"
+    target = base / "VoiceWalker" / "webview2"
     try:
         target.mkdir(parents=True, exist_ok=True)
     except Exception:
@@ -182,247 +63,145 @@ def _edge_user_data_dir(suffix: str = "") -> str:
     return str(target)
 
 
-def _open_app_window(url: str, size: Tuple[int, int],
-                     profile_suffix: str = "",
-                     start_off_screen: bool = False) -> bool:
-    """Edge --app=URL Modus. Gibt True zurueck wenn Edge gefunden + gestartet.
-
-    Doppelklick-Schutz: pro profile_suffix wird der Subprocess gemerkt.
-    Beim naechsten Aufruf, falls der Process noch lebt, wird sein Fenster
-    nach vorne geholt statt ein zweites Fenster zu oeffnen.
-
-    creationflags=CREATE_NO_WINDOW verhindert dass Windows kurzzeitig ein
-    Konsolen-Fenster fuer den Subprocess oeffnet, wenn die Parent-App
-    selbst windowed (console=False) ist.
-
-    start_off_screen: wenn True, wird --window-position=-32000,-32000
-    gesetzt, sodass das Fenster sofort ausserhalb des Bildschirms erscheint
-    und nie kurz aufflackert bevor _hide_window_when_ready ShowWindow(SW_HIDE)
-    drauf macht. show_ui() positioniert es spaeter zurueck auf 80,80.
-    """
-    edge = _edge_path()
-    if not edge:
-        return False
-
-    # Existierender Process? Dann nicht doppelt starten — Window nach vorne.
-    proc = _running_procs.get(profile_suffix)
-    if proc is not None and proc.poll() is None:
-        # Edge --app spawnt einen child-Prozess; das Top-Level-Fenster
-        # gehoert oft dem child, nicht dem Launcher. Wir versuchen erst
-        # unsere bekannte PID, dann breit alle msedge.exe.
-        if not _bring_window_to_front(proc.pid):
-            _bring_msedge_to_front(profile_suffix)
+def _is_first_run() -> bool:
+    """First-run = WebView2-Storage existiert nicht oder ist leer.
+    Beim First-run muss das Window sichtbar sein, damit der User die
+    Mic-Permission per Klick auf den Browser-Permission-Dialog gewaehren
+    kann; danach ist sie persistent."""
+    base = pathlib.Path(os.environ.get("LOCALAPPDATA", str(pathlib.Path.home())))
+    profile = base / "VoiceWalker" / "webview2"
+    if not profile.exists():
+        return True
+    try:
+        return not any(profile.iterdir())
+    except Exception:
         return True
 
-    try:
-        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        args = [
-            edge,
-            f"--app={url}",
-            f"--window-size={size[0]},{size[1]}",
-            f"--user-data-dir={_edge_user_data_dir(profile_suffix)}",
-        ]
-        if start_off_screen:
-            # Off-screen, damit das Fenster zwischen Edge-Start und unserem
-            # SW_HIDE nicht sichtbar aufflackert. show_ui() positioniert
-            # es zurueck wenn der User auf das Tray-Icon klickt.
-            args.append("--window-position=-32000,-32000")
-        new_proc = subprocess.Popen(
-            args,
-            creationflags=flags,
-            close_fds=True,
-        )
-        _running_procs[profile_suffix] = new_proc
-        return True
-    except Exception as e:
-        log.warning("tray: Edge konnte nicht gestartet werden: %s", e)
-        return False
 
+def _on_window_closing():
+    """X-Button-Handler: Window verstecken statt schliessen.
 
-def _collect_descendant_pids(root_pid: int) -> set:
-    """Sammelt alle Descendant-PIDs (rekursiv) fuer eine Root-PID via
-    Win32 Toolhelp32Snapshot — keine extra Dependency wie psutil noetig.
-    Edge --app spawnt eine Reihe von Child-Prozessen (GPU, Renderer,
-    Network-Service); das eigentliche App-Window gehoert oft einem Child,
-    nicht der Root. Wir muessen die ganze Familie kennen damit unser
-    HWND-Match nicht auf fremde Edge-Fenster matched."""
-    pids = {root_pid}
-    try:
-        import ctypes
-        import ctypes.wintypes as wt
-
-        TH32CS_SNAPPROCESS = 0x00000002
-        INVALID_HANDLE_VALUE = -1
-
-        class PROCESSENTRY32(ctypes.Structure):
-            _fields_ = [
-                ("dwSize",              wt.DWORD),
-                ("cntUsage",            wt.DWORD),
-                ("th32ProcessID",       wt.DWORD),
-                ("th32DefaultHeapID",   ctypes.c_void_p),
-                ("th32ModuleID",        wt.DWORD),
-                ("cntThreads",          wt.DWORD),
-                ("th32ParentProcessID", wt.DWORD),
-                ("pcPriClassBase",      wt.LONG),
-                ("dwFlags",             wt.DWORD),
-                ("szExeFile",           ctypes.c_char * 260),
-            ]
-
-        kernel32 = ctypes.windll.kernel32
-        kernel32.CreateToolhelp32Snapshot.restype = wt.HANDLE
-        snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-        if snap == INVALID_HANDLE_VALUE or not snap:
-            return pids
-
+    Returns False um den Close-Vorgang abzubrechen — pywebview behaelt
+    Window + JS-Runtime + WebRTC-Streams am Leben. Naechster Tray-Klick
+    zeigt es wieder. Wenn wir True zurueckgeben wuerde das Window komplett
+    geschlossen, der Browser-Tab waere weg, Audio-Discovery futsch bis
+    zum App-Restart."""
+    log.info("tray: window closing event abgefangen, hide statt close")
+    if _main_window is not None:
         try:
-            # Erst alle (pid, parent_pid) sammeln, dann iterativ Descendants
-            entry = PROCESSENTRY32()
-            entry.dwSize = ctypes.sizeof(PROCESSENTRY32)
-            parents = {}  # pid -> parent_pid
-            if kernel32.Process32First(snap, ctypes.byref(entry)):
-                while True:
-                    parents[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
-                    if not kernel32.Process32Next(snap, ctypes.byref(entry)):
-                        break
-            # Iterativ alle Kinder/Enkel ergaenzen
-            changed = True
-            while changed:
-                changed = False
-                for pid, parent in parents.items():
-                    if parent in pids and pid not in pids:
-                        pids.add(pid)
-                        changed = True
-        finally:
-            kernel32.CloseHandle(snap)
-    except Exception as e:
-        log.debug("_collect_descendant_pids failed: %s", e)
-    return pids
-
-
-def _find_voicewalker_hwnd(profile_suffix: str = ""):
-    """Sucht das Edge --app Top-Level-Fenster zu UNSEREM gestarteten
-    Edge-Process. Gibt HWND oder None zurueck.
-
-    KRITISCH: nur PID-Match, KEIN Title-Match auf "VoiceWalker" — sonst
-    treffen wir z.B. Visual Studio Code mit Title "foo.py - VoiceWalker -
-    Visual Studio Code" oder andere Editor-/Explorer-Fenster die zufaellig
-    den Projekt-Namen im Titel haben. SW_HIDE auf so ein Fenster sieht
-    fuer den User wie ein Crash der fremden App aus."""
-    proc = _running_procs.get(profile_suffix)
-    if proc is None or proc.poll() is not None:
-        return None
-    valid_pids = _collect_descendant_pids(proc.pid)
-
-    try:
-        import ctypes
-        import ctypes.wintypes as wt
-        user32 = ctypes.windll.user32
-        EnumProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wt.HWND, wt.LPARAM)
-        found = []
-
-        def _cb(hwnd, _lparam):
-            wpid = wt.DWORD()
-            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(wpid))
-            if wpid.value not in valid_pids:
-                return True
-            # PID matched. Top-Level mit Titel = unser App-Window.
-            length = user32.GetWindowTextLengthW(hwnd)
-            if length > 0:
-                found.append(hwnd)
-                return False
-            return True
-
-        user32.EnumWindows(EnumProc(_cb), 0)
-        return found[0] if found else None
-    except Exception as e:
-        log.debug("_find_voicewalker_hwnd failed: %s", e)
-        return None
-
-
-def _hide_window_when_ready(profile_suffix: str = "",
-                             timeout_sec: float = 8.0) -> None:
-    """Background-Thread: wartet bis das Edge --app Fenster unseres
-    Process erscheint (PID-Match, KEIN Title-Match — sonst koennten wir
-    fremde Fenster wie VS Code treffen) und versteckt es dann via
-    ShowWindow(SW_HIDE) — komplett unsichtbar, auch aus der Taskbar weg.
-    Tray-Klick → show_ui() macht SW_SHOW + SetForeground.
-
-    Edge braucht ~0.5-2s zum Window-Erscheinen (kalt-Start). Wir pollen alle
-    150ms bis Window da ist oder Timeout. Daemon-Thread, blockiert nicht."""
-
-    def _wait_and_hide():
-        import ctypes
-        deadline = time.time() + timeout_sec
-        while time.time() < deadline:
-            hwnd = _find_voicewalker_hwnd(profile_suffix)
-            if hwnd:
-                try:
-                    SW_HIDE = 0
-                    # Reihenfolge: ZUERST WS_EX_TOOLWINDOW setzen (Taskbar-/
-                    # Alt+Tab-Eintrag weg), DANN SW_HIDE. So kann das Fenster
-                    # nie mit App-Window-ExStyle in der Taskbar erscheinen.
-                    # Off-screen-Position aus _open_app_window verhindert
-                    # zusaetzlich dass es waehrend dieser ms sichtbar ist.
-                    _set_taskbar_visible(hwnd, False)
-                    ctypes.windll.user32.ShowWindow(hwnd, SW_HIDE)
-                    log.info("tray: ui-window versteckt + Taskbar-Icon entfernt (hwnd=%s)", hwnd)
-                except Exception as e:
-                    log.debug("Hide failed: %s", e)
-                return
-            time.sleep(0.15)
-        log.debug("tray: ui-window in %.1fs nicht gefunden, kein Hide", timeout_sec)
-
-    t = threading.Thread(target=_wait_and_hide, daemon=True, name="vw-hide-ui")
-    t.start()
+            _main_window.hide()
+        except Exception as e:
+            log.debug("hide on close failed: %s", e)
+    return False
 
 
 def start_ui_hidden() -> bool:
-    """App-Start: Edge --app im Hintergrund hochfahren + sofort verbergen.
-    Browser laeuft headless-aehnlich (DOM aktiv, mediaDevices/WebRTC aktiv,
-    aber Fenster nicht sichtbar). Erst Tray-Klick (show_ui) macht das
-    Fenster wieder sichtbar.
+    """App-Start: PyWebView-Window erzeugen + webview.start() im Daemon-
+    Thread. Window initial hidden (ausser First-run, dann sichtbar fuer
+    Mic-Permission-Dialog).
 
-    Edge wird mit --window-position=-32000,-32000 gestartet (off-screen),
-    sodass das Fenster zwischen Edge-Start und unserem ShowWindow(SW_HIDE)
-    nicht kurz aufflackert.
+    Gibt True zurueck wenn webview erfolgreich gestartet ist (=> Show/Hide
+    via _main_window funktioniert). False wenn pywebview oder WebView2-
+    Runtime nicht verfuegbar — show_ui() faellt dann auf webbrowser.open()
+    zurueck.
+    """
+    global _main_window, _webview_started, _webview_available
 
-    Beim allerersten Start (User-Profile leer) bleibt das Fenster sichtbar
-    auf normaler Position damit der User die Mikrofon-Permission gewaehren
-    kann — sonst hat er keinen Klick-Punkt fuer den Allow-Dialog."""
+    if _webview_started:
+        log.debug("tray.start_ui_hidden: bereits gestartet, ignoriere")
+        return _webview_available
     if _active_port is None:
         log.debug("tray.start_ui_hidden: kein active_port gesetzt")
         return False
+
+    try:
+        import webview
+    except ImportError as e:
+        log.warning("tray: pywebview nicht verfuegbar (%s) — Fallback default-browser bei Tray-Klick", e)
+        _webview_started = True
+        return False
+
     url = f"http://127.0.0.1:{_active_port}/"
-    user_dir = pathlib.Path(_edge_user_data_dir())
-    is_first_run = not user_dir.exists() or not any(user_dir.iterdir())
+    is_first_run = _is_first_run()
+
+    try:
+        _main_window = webview.create_window(
+            title="VoiceWalker",
+            url=url,
+            width=1100,
+            height=800,
+            hidden=not is_first_run,
+            on_top=False,
+        )
+        # X-Button → verstecken statt schliessen.
+        _main_window.events.closing += _on_window_closing
+    except Exception as e:
+        log.warning("tray: webview.create_window fehlgeschlagen (%s) — Fallback", e)
+        _webview_started = True
+        return False
+
+    def _run_webview():
+        global _webview_available
+        try:
+            # gui="edgechromium" → Microsoft Edge WebView2 Backend.
+            # Win11 hat das vorinstalliert, Win10 fast immer (via Edge-Update).
+            # private_mode=False + storage_path persistiert Cookies/Permissions
+            # damit die Mic-Permission beim naechsten Start nicht erneut
+            # gewaehrt werden muss.
+            webview.start(
+                gui="edgechromium",
+                debug=False,
+                private_mode=False,
+                storage_path=_webview_user_data_dir(),
+            )
+            log.info("tray: webview event-loop beendet")
+        except Exception as e:
+            log.warning("tray: webview.start fehlgeschlagen (%s) — Fallback default-browser", e)
+            _webview_available = False
+
+    threading.Thread(
+        target=_run_webview,
+        daemon=True,
+        name="vw-webview",
+    ).start()
+    _webview_started = True
+    _webview_available = True
 
     if is_first_run:
-        # Erster Start: sichtbar auf normaler Position
-        if not _open_app_window(url, (1100, 800)):
-            log.warning("tray.start_ui_hidden: Edge nicht gefunden, kein Auto-Start")
-            return False
-        log.info("tray: first-run, ui-window sichtbar fuer Mic-Permission-Dialog")
+        log.info("tray: first-run, ui-window sichtbar fuer Mic-Permission")
     else:
-        # Folge-Starts: off-screen + danach SW_HIDE
-        if not _open_app_window(url, (1100, 800), start_off_screen=True):
-            log.warning("tray.start_ui_hidden: Edge nicht gefunden, kein Auto-Start")
-            return False
-        _hide_window_when_ready()
-        log.info("tray: ui pre-loaded off-screen und verborgen via start_ui_hidden")
+        log.info("tray: ui pre-loaded hidden via PyWebView")
     return True
 
 
-def _bring_msedge_to_front(profile_suffix: str = "") -> bool:
-    """Fallback wenn _bring_window_to_front via Root-PID nichts findet.
-    Aktuell ist das Verhalten identisch (beide nutzen _collect_descendant_pids
-    + _show_and_position) — die Funktion bleibt fuer historische Aufrufer
-    drin. Gibt True zurueck wenn ein Fenster gefunden + sichtbar gemacht
-    wurde, sonst False."""
-    hwnd = _find_voicewalker_hwnd(profile_suffix)
-    if hwnd is None:
+def show_ui() -> bool:
+    """Tray-Klick / Backend-Call: Window vorholen.
+
+    Wenn PyWebView verfuegbar ist: window.show() + window.restore() — sichtbar
+    mit Taskbar-Eintrag und Fokus.
+    Sonst (keine WebView2-Runtime): Fallback webbrowser.open() im Default-
+    Browser. Funktioniert immer, ist nur weniger elegant."""
+    if _main_window is not None and _webview_available:
+        try:
+            _main_window.show()
+            _main_window.restore()
+            log.info("tray: ui sichtbar gemacht via show_ui (pywebview)")
+            return True
+        except Exception as e:
+            log.warning("tray.show_ui pywebview failed (%s), fallback browser", e)
+
+    # Fallback: Default-Browser
+    if _active_port is None:
+        log.debug("tray.show_ui: kein active_port")
         return False
-    _show_and_position(hwnd)
-    return True
+    url = f"http://127.0.0.1:{_active_port}/"
+    try:
+        webbrowser.open(url)
+        log.info("tray: ui geoeffnet via webbrowser.open (fallback)")
+        return True
+    except Exception as e:
+        log.warning("tray.show_ui: webbrowser.open failed: %s", e)
+        return False
 
 
 def _make_icon_image(state: str = "offline", size: int = 64):
@@ -479,42 +258,15 @@ def _open_web_ui(port: int) -> Callable:
     return _action
 
 
-def show_ui() -> bool:
-    """Haupt-UI-Fenster vorholen — oder neu starten, wenn nicht offen.
-
-    Wird vom Backend aufgerufen, wenn das InGame-Panel "im Browser einrichten"
-    klickt. Re-uses das Process-Caching von _open_app_window (kein zweites
-    Edge-Fenster). Threadsafe: ctypes/user32 Calls sind aus jedem Thread ok.
-    """
-    if _active_port is None:
-        log.debug("tray.show_ui: kein active_port gesetzt")
-        return False
-    url = f"http://127.0.0.1:{_active_port}/"
-    if _open_app_window(url, (1100, 800)):
-        log.info("tray: ui vorgeholt/geoeffnet via show_ui")
-        return True
-    try:
-        webbrowser.open(url)
-        log.info("tray: fallback default-browser via show_ui")
-        return True
-    except Exception as e:
-        log.warning("tray.show_ui: konnte ui nicht oeffnen: %s", e)
-        return False
-
-
 def _open_mini_overlay(port: int) -> Callable:
-    """Kompaktes Overlay-Fenster — kleines Always-Visible-Radar fuer den
-    zweiten Monitor (oder zum auf den MSFS-Frame ziehen). Gleiche View
-    wie OBS-Source, aber ohne ?stream=1 — also mit Radar + Status, nicht
-    nur Speaking-Pills."""
+    """Kompaktes Overlay-Fenster via Default-Browser. Mini-Overlay ist nur
+    fuer den zweiten Monitor / OBS gedacht — kein PyWebView-Window noetig
+    (User soll selbst entscheiden in welchem Browser das laeuft)."""
     def _action(icon, item):
         url = f"http://127.0.0.1:{port}/overlay.html"
-        if _open_app_window(url, (480, 480), profile_suffix="-overlay"):
-            log.info("tray: mini-overlay (Edge --app) geoeffnet")
-            return
         try:
             webbrowser.open(url)
-            log.info("tray: fallback default-browser fuer overlay")
+            log.info("tray: mini-overlay via default-browser")
         except Exception as e:
             log.warning("tray: konnte overlay nicht oeffnen: %s", e)
     return _action
