@@ -177,25 +177,61 @@ def _open_app_window(url: str, size: Tuple[int, int],
 
 def _collect_descendant_pids(root_pid: int) -> set:
     """Sammelt alle Descendant-PIDs (rekursiv) fuer eine Root-PID via
-    psutil falls verfuegbar, sonst nur die Root-PID. Edge --app spawnt
-    eine Reihe von Child-Prozessen (GPU, Renderer, Network-Service);
-    das eigentliche App-Window gehoert oft einem Child, nicht der Root.
-    Wir muessen die ganze Familie kennen damit unser HWND-Match nicht
-    auf fremde Edge-Fenster matched."""
+    Win32 Toolhelp32Snapshot — keine extra Dependency wie psutil noetig.
+    Edge --app spawnt eine Reihe von Child-Prozessen (GPU, Renderer,
+    Network-Service); das eigentliche App-Window gehoert oft einem Child,
+    nicht der Root. Wir muessen die ganze Familie kennen damit unser
+    HWND-Match nicht auf fremde Edge-Fenster matched."""
     pids = {root_pid}
     try:
-        import psutil  # type: ignore
+        import ctypes
+        import ctypes.wintypes as wt
+
+        TH32CS_SNAPPROCESS = 0x00000002
+        INVALID_HANDLE_VALUE = -1
+
+        class PROCESSENTRY32(ctypes.Structure):
+            _fields_ = [
+                ("dwSize",              wt.DWORD),
+                ("cntUsage",            wt.DWORD),
+                ("th32ProcessID",       wt.DWORD),
+                ("th32DefaultHeapID",   ctypes.c_void_p),
+                ("th32ModuleID",        wt.DWORD),
+                ("cntThreads",          wt.DWORD),
+                ("th32ParentProcessID", wt.DWORD),
+                ("pcPriClassBase",      wt.LONG),
+                ("dwFlags",             wt.DWORD),
+                ("szExeFile",           ctypes.c_char * 260),
+            ]
+
+        kernel32 = ctypes.windll.kernel32
+        kernel32.CreateToolhelp32Snapshot.restype = wt.HANDLE
+        snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+        if snap == INVALID_HANDLE_VALUE or not snap:
+            return pids
+
         try:
-            parent = psutil.Process(root_pid)
-            for child in parent.children(recursive=True):
-                pids.add(child.pid)
-        except Exception:
-            pass
-    except ImportError:
-        # psutil nicht verfuegbar — fallback nur Root-PID, kann sein dass
-        # wir das App-Window nicht finden. Im pyinstaller-Bundle sollte
-        # psutil dabei sein (siehe requirements.txt).
-        pass
+            # Erst alle (pid, parent_pid) sammeln, dann iterativ Descendants
+            entry = PROCESSENTRY32()
+            entry.dwSize = ctypes.sizeof(PROCESSENTRY32)
+            parents = {}  # pid -> parent_pid
+            if kernel32.Process32First(snap, ctypes.byref(entry)):
+                while True:
+                    parents[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
+                    if not kernel32.Process32Next(snap, ctypes.byref(entry)):
+                        break
+            # Iterativ alle Kinder/Enkel ergaenzen
+            changed = True
+            while changed:
+                changed = False
+                for pid, parent in parents.items():
+                    if parent in pids and pid not in pids:
+                        pids.add(pid)
+                        changed = True
+        finally:
+            kernel32.CloseHandle(snap)
+    except Exception as e:
+        log.debug("_collect_descendant_pids failed: %s", e)
     return pids
 
 
