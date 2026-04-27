@@ -8,11 +8,9 @@ import { FSComponent, VNode } from "@microsoft/msfs-sdk";
 
 declare const BASE_URL: string;
 
-// Same-origin coui:// statt http://localhost — Coherent GT im EFB blockt
-// http-iframes silent. Die Web-UI wird via build.js ins EFB-Bundle
-// mitkopiert (./dist/web/) und liegt dann unter BASE_URL/web/index.html.
-// Sie verbindet sich von dort aus via WebSocket zu localhost:7801.
-const BACKEND_URL = `${BASE_URL}/web/index.html`;
+// EFB iframet das bestehende Toolbar-Panel direkt — same-origin coui://,
+// identische UI in Toolbar und EFB ohne Code-Duplikat.
+const BACKEND_URL = `coui://html_ui/InGamePanels/VoiceWalker/panel-efb.html`;
 const RECONNECT_MS = 4000;
 
 interface MainViewProps extends RequiredProps<UiViewProps, "appViewService"> {}
@@ -23,13 +21,19 @@ interface MainViewProps extends RequiredProps<UiViewProps, "appViewService"> {}
 // nicht connected. Kein auto-hide bei onLoad ohne valide src — sonst
 // versteckt sich der Fallback bei about:blank-Loads und der User sieht
 // nur Schwarz.
-const STYLE_ROOT = `position: absolute; inset: 0; background-color: #0d1a2b;
+// Layout-Pattern aus dem offiziellen MSFS-SDK-EFB-Sample
+// (DevmodeProjects/EFB/PackageSources/TemplateApp/src/Components/SamplePage.scss):
+// width:100% + height:100% + display:flex am Root, KEIN position:absolute. Der
+// AppViewWrapper des EFB-OS gibt keinen positionierten Vorfahren mit fixer Groesse,
+// daher kollabiert absolute/inset:0 auf 0x0 und der View wird unsichtbar.
+const STYLE_ROOT = `position: relative; width: 100%; height: 100%;
+  display: flex; flex-direction: column; background-color: #0d1a2b;
   overflow: hidden;`;
 
-const STYLE_IFRAME = `position: absolute; inset: 0; width: 100%;
-  height: 100%; border: none; background: transparent; display: none;`;
+const STYLE_IFRAME = `flex: 1 1 auto; width: 100%; height: 100%;
+  border: none; background: transparent; display: none;`;
 
-const STYLE_FALLBACK = `position: absolute; inset: 0; display: flex;
+const STYLE_FALLBACK = `flex: 1 1 auto; display: flex;
   flex-direction: column; align-items: center; justify-content: center;
   background-color: #0d1a2b; color: #e8eef5; padding: 2rem; gap: 1.4rem;
   text-align: center;`;
@@ -80,9 +84,9 @@ export class MainView extends GamepadUiView<HTMLDivElement, MainViewProps> {
 
   private onIframeLoad(): void {
     const iframe = this.iframeRef.instance;
-    // Nur als connected werten wenn src eine echte http-URL ist.
+    // Nur als connected werten wenn src eine echte coui-URL ist.
     // about:blank / leerer src soll den Fallback NICHT verstecken.
-    if (iframe.src && iframe.src.startsWith("http")) {
+    if (iframe.src && iframe.src.startsWith("coui:")) {
       this.setConnected(true);
       this.clearReconnect();
     }

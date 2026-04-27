@@ -690,6 +690,20 @@
         if (!state.ui) state.ui = {};
         state.ui.bindingInProgress = !!m.binding_mode;
         state.ui.pttBinding         = m.binding || null;
+      } else if (m.type === 'remote_action') {
+        // Backend broadcastet panel_actions als remote_action zurueck damit
+        // alle UIs (Browser, Panel, EFB) synchron bleiben. Der eigentliche
+        // Mic-Mode-Wechsel passiert ggf. im Browser-Tab — aber das Panel-UI
+        // muss den Toggle visuell abbilden, sonst klickt der User vw-mode-vox
+        // und sieht keine Reaktion (bisheriger Bug).
+        if (m.action === 'toggle-vox') {
+          if (!state.ui) state.ui = {};
+          state.ui.voxMode = !state.ui.voxMode;
+        }
+        // toggle-far / select-mic / select-speaker / set-master-volume /
+        // set-callsign etc. werden hier bewusst NICHT gespiegelt — die
+        // dafuer noetigen Geraete-/Audio-Operationen leben im Browser-Tab,
+        // und das Panel zeigt diese Werte nicht im Setup.
       }
       scheduleRender();
     };
@@ -760,6 +774,42 @@
   }
   let lastMicHash = '', lastSpkHash = '';
 
+  // Custom-Dropdown-Renderer — fuellt die .vw-select-menu mit Items, setzt
+  // das aktive Label/Selected-Item, ohne ein gerade offenes Menu zu schliessen
+  // (sonst kann der User waehrend des Updates nichts auswaehlen).
+  // items: [{value: string, label: string}]
+  function renderVwSelect(elId, items, currentValue) {
+    const root = document.getElementById(elId);
+    if (!root) return;
+    if (root.classList.contains('open')) return;  // user interagiert gerade
+    const cur = currentValue || '';
+    const hash = items.map(function (i) { return i.value + '' + i.label; }).join('');
+    if (root.dataset.itemsHash === hash && root.dataset.value === cur) return;
+    root.dataset.itemsHash = hash;
+    root.dataset.value = cur;
+
+    const menu  = root.querySelector('.vw-select-menu');
+    const label = root.querySelector('.vw-select-label');
+    if (!menu || !label) return;
+
+    menu.innerHTML = '';
+    let activeLabel = '';
+    items.forEach(function (it) {
+      const div = document.createElement('div');
+      div.className = 'vw-select-item';
+      div.setAttribute('data-value', it.value);
+      div.textContent = it.label;
+      if (it.value === cur) {
+        div.classList.add('selected');
+        activeLabel = it.label;
+      }
+      menu.appendChild(div);
+    });
+    // Fallback: wenn currentValue nicht in items, nimm erstes Item als Label
+    if (!activeLabel && items.length) activeLabel = items[0].label;
+    label.textContent = activeLabel;
+  }
+
   function applyTabSwitch(tabBtn) {
     const tabs  = document.querySelectorAll('.vw-tab');
     const panes = document.querySelectorAll('.vw-pane');
@@ -799,9 +849,51 @@
       if (e.target && e.target.id === 'vw-ptt') releasePtt();
     }, { capture: true });
 
-    // Click-Router fuer alle Buttons + Tabs
+    // Click-Router fuer alle Buttons + Tabs + Custom-Dropdowns
     window.addEventListener('click', function (e) {
       if (!e.target || !e.target.closest) return;
+
+      // === Custom-Dropdown: Item-Klick (vor Trigger pruefen, da Item innerhalb
+      // des Menus liegt und das Menu im Trigger-Closest stehen koennte). ===
+      const item = e.target.closest('.vw-select-item');
+      if (item) {
+        const sel = item.closest('.vw-select');
+        if (sel) {
+          const val   = item.getAttribute('data-value') || '';
+          const label = item.textContent;
+          sel.dataset.value = val;
+          const labEl = sel.querySelector('.vw-select-label');
+          if (labEl) labEl.textContent = label;
+          sel.querySelectorAll('.vw-select-item.selected').forEach(function (i) {
+            i.classList.remove('selected');
+          });
+          item.classList.add('selected');
+          sel.classList.remove('open');
+          // Action je nach Dropdown-ID
+          if (sel.id === 'vw-mic') {
+            sendActionPayload({ action: 'select-mic', deviceId: val });
+          } else if (sel.id === 'vw-spk') {
+            sendActionPayload({ action: 'select-speaker', deviceId: val });
+          } else if (sel.id === 'vw-lang') {
+            if (window.i18n) window.i18n.setLang(val);
+          }
+        }
+        return;
+      }
+      // === Custom-Dropdown: Trigger-Klick = auf-/zuklappen, andere schliessen ===
+      const trig = e.target.closest('.vw-select-trigger');
+      if (trig) {
+        const sel = trig.parentElement;
+        document.querySelectorAll('.vw-select.open').forEach(function (s) {
+          if (s !== sel) s.classList.remove('open');
+        });
+        if (sel) sel.classList.toggle('open');
+        return;
+      }
+      // === Outside-Click schliesst alle offenen Dropdowns ===
+      document.querySelectorAll('.vw-select.open').forEach(function (s) {
+        s.classList.remove('open');
+      });
 
       // Tab-Wechsel
       const tabBtn = e.target.closest('.vw-tab');
@@ -841,21 +933,11 @@
       }
     }, { capture: true });
 
-    // Change-Router fuer Selects + Callsign
+    // Change-Router NUR noch fuer das Callsign-Input — Mic/Spk/Lang sind
+    // jetzt Custom-Dropdowns und werden im Click-Router behandelt.
     window.addEventListener('change', function (e) {
-      const id = e.target && e.target.id;
-      if (id === 'vw-mic') {
-        sendActionPayload({ action: 'select-mic', deviceId: e.target.value });
-      } else if (id === 'vw-spk') {
-        sendActionPayload({ action: 'select-speaker', deviceId: e.target.value });
-      } else if (id === 'vw-cs') {
+      if (e.target && e.target.id === 'vw-cs') {
         sendActionPayload({ action: 'set-callsign', value: e.target.value });
-      } else if (id === 'vw-lang') {
-        // Sprach-Override im Panel — i18n.js setLang() macht reload, sodass
-        // alle dynamisch gerenderten Strings (Peer-Liste, Bind-Status, ...)
-        // sofort in der neuen Sprache erscheinen. Wert persistiert in
-        // Coherent-GT-localStorage (vw.lang).
-        if (window.i18n) window.i18n.setLang(e.target.value);
       }
     }, { capture: true });
 
@@ -886,44 +968,30 @@
     const ui = state.ui || {};
     const focused = document.activeElement;
 
-    // Mic-Liste
-    const mic = $('vw-mic');
-    if (mic && Array.isArray(ui.audioInputs)) {
-      const h = deviceListHash(ui.audioInputs);
-      if (h !== lastMicHash) {
-        lastMicHash = h;
-        const cur = ui.audioInputId || '';
-        mic.innerHTML = '<option value="">Standard</option>';
-        ui.audioInputs.forEach(function (d) {
-          const o = document.createElement('option');
-          o.value = d.deviceId;
-          o.textContent = d.label || ('Mic ' + d.deviceId.slice(0, 6));
-          mic.appendChild(o);
-        });
-        mic.value = cur;
-      } else if (mic !== focused && mic.value !== (ui.audioInputId || '')) {
-        mic.value = ui.audioInputId || '';
-      }
+    // Mic-Liste — Custom-Dropdown (Coherent GT kennt kein <select>-Popup)
+    if (Array.isArray(ui.audioInputs)) {
+      const items = [{ value: '', label: 'Standard' }].concat(
+        ui.audioInputs.map(function (d) {
+          return {
+            value: d.deviceId,
+            label: d.label || ('Mic ' + (d.deviceId || '').slice(0, 6)),
+          };
+        })
+      );
+      renderVwSelect('vw-mic', items, ui.audioInputId || '');
     }
 
     // Speaker-Liste
-    const spk = $('vw-spk');
-    if (spk && Array.isArray(ui.audioOutputs)) {
-      const h = deviceListHash(ui.audioOutputs);
-      if (h !== lastSpkHash) {
-        lastSpkHash = h;
-        const cur = ui.audioOutputId || '';
-        spk.innerHTML = '<option value="">Standard</option>';
-        ui.audioOutputs.forEach(function (d) {
-          const o = document.createElement('option');
-          o.value = d.deviceId;
-          o.textContent = d.label || ('Spk ' + d.deviceId.slice(0, 6));
-          spk.appendChild(o);
-        });
-        spk.value = cur;
-      } else if (spk !== focused && spk.value !== (ui.audioOutputId || '')) {
-        spk.value = ui.audioOutputId || '';
-      }
+    if (Array.isArray(ui.audioOutputs)) {
+      const items = [{ value: '', label: 'Standard' }].concat(
+        ui.audioOutputs.map(function (d) {
+          return {
+            value: d.deviceId,
+            label: d.label || ('Spk ' + (d.deviceId || '').slice(0, 6)),
+          };
+        })
+      );
+      renderVwSelect('vw-spk', items, ui.audioOutputId || '');
     }
 
     // Volume-Slider — nicht updaten wenn der User gerade dranzieht
@@ -1012,10 +1080,13 @@
     setupButtons();
     setupTabs();
     setupSetupTab();
-    // Sprach-Dropdown auf aktuell aktive Sprache setzen (auto-detected aus
-    // navigator.language oder vorher gespeicherter Override).
-    const lng = $('vw-lang');
-    if (lng && window.i18n) lng.value = window.i18n.getLang();
+    // Sprach-Dropdown (Custom) initial befuellen + auf aktive Sprache setzen.
+    if (window.i18n) {
+      renderVwSelect('vw-lang', [
+        { value: 'de', label: 'Deutsch' },
+        { value: 'en', label: 'English' },
+      ], window.i18n.getLang());
+    }
     scheduleRender();
     setTimeout(tryConnect, 300);
   }

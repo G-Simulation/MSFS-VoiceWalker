@@ -16,10 +16,6 @@
     <script type="text/javascript" src="/Pages/VCockpit/Instruments/Shared/Utils/DataReadManager.js"></script>
     <script type="text/javascript" src="/Pages/VCockpit/Instruments/Shared/BaseInstrument.js"></script>
 
-    <link rel="import" href="/templates/NewPushButton/NewPushButton.html" />
-    <link rel="import" href="/templates/ingameUi/ingameUi.html" />
-    <link rel="import" href="/templates/ingameUiHeader/ingameUiHeader.html" />
-
     <style>
       /* NotoEmoji-Regular.ttf — SIL Open Font License 1.1
          Lizenz-Datei liegt unter ./fonts/LICENSE_OFL.txt
@@ -450,19 +446,29 @@
         background: rgba(106, 165, 255, 0.20);
         color: var(--accent); font-weight: 600;
       }
+
+      /* ====================================================================
+         EFB-OVERRIDE — minimal:
+         Toolbar-Panel-CSS oben hat hartes max-height:95px auf #vw-peers (fuer
+         die schmale Toolbar-Box gedacht). Im EFB-Tablet ist mehr Platz, und
+         peers soll mitwachsen statt darunter Leerflaeche zu lassen — ABER
+         Radar muss stabile Groesse behalten, sonst kaempft Radar-Wrap (flex:1)
+         und peers (flex:1) um den Restplatz und panel.js:189 resizeCanvas()
+         pollt das alle 500ms → sichtbares Oszillieren des Radar-Canvas.
+         Loesung: peers darf bis maximal 50% des pane-radar wachsen, scrollt
+         intern bei mehr Eintraegen. Radar bekommt deterministisch min. 50%.
+         Layout sonst 1:1 wie Toolbar (Radar→Speaking→Mic→Actions→Peers→Status).
+         ==================================================================== */
+      #pane-radar #vw-peers {
+        max-height: 50%;
+        overflow-y: auto;
+      }
     </style>
 
     <script type="text/javascript" src="i18n.js"></script>
     <script type="text/javascript" src="panel.js"></script>
   </head>
   <body class="border-box">
-    <ingame-ui
-      id="PANEL_VOICEWALKER"
-      panel-id="PANEL_VOICEWALKER"
-      title="VoiceWalker"
-      class="ingameUiFrame panelInvisible"
-      content-fit="true"
-    >
       <div id="vw-root">
         <!-- Header-Zeile: conn-dot, callsign, pro-badge, zoom-label.
              Kein Logo-Img hier — der Panel-Titel oben in der MSFS-Toolbar
@@ -618,6 +624,5 @@
           </div>
         </div>
       </div>
-    </ingame-ui>
   </body>
 </html>

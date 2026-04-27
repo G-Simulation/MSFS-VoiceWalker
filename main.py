@@ -254,6 +254,12 @@ WALKER_CAMERA_STATES = {13, 14, 15, 16, 17, 18, 19, 26}
 FLIGHT_CAMERA_STATES = {2, 3, 4, 5, 6} | WALKER_CAMERA_STATES
 # (Legacy-Blacklist behalten fuer Logging/Debug, aber nicht mehr autoritativ)
 MENU_CAMERA_STATES = {9, 10, 11, 12}
+# "Online"-Whitelist: App geht NUR im Cockpit (cam=2) oder Walker-Modus
+# wirklich online. External/Drone/Fixed/Environment (3,4,5,6) zaehlen als
+# "im Sim aber nicht aktiv" → bleiben "connected", senden noch nichts.
+# Verhindert insbesondere dass im Hauptmenue/Loading der Status auf "online"
+# springt sobald die UI verbunden ist.
+ACTIVE_CAMERA_STATES = {2} | WALKER_CAMERA_STATES
 
 
 def _is_menu_position(lat: float, lon: float) -> bool:
@@ -1528,10 +1534,13 @@ async def broadcast_sim(reader: SimReader):
 
 def _has_valid_position(snap) -> bool:
     """Sim-Daten gelten nur dann als 'aktiv', wenn echte Welt-Position
-    da ist und der Pilot nicht im Menue/Demo haengt."""
+    da ist, der Pilot nicht im Menue/Demo haengt UND die Camera in einem
+    aktiven Modus ist (Cockpit oder Walker — siehe ACTIVE_CAMERA_STATES)."""
     if not isinstance(snap, dict):
         return False
     if snap.get("in_menu") or snap.get("demo"):
+        return False
+    if snap.get("camera_state") not in ACTIVE_CAMERA_STATES:
         return False
     lat, lon = snap.get("lat"), snap.get("lon")
     if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):

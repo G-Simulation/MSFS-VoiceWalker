@@ -86,8 +86,10 @@ Kein Account, kein Login, keine Registrierung.
   mit Distanz-Anzeige und Live-Sprech-Indikator.
 - **Sprech-Indikator am Bildschirmrand**: eine Leiste oben zeigt live, wer
   gerade redet, per Voice-Activity-Detection (VAD).
-- **MSFS-Toolbar-Addon**: blendet eine kompakte Übersicht im Sim selbst ein
-  (Radar + Peer-Liste im MSFS-Panel).
+- **MSFS-Toolbar-Panel + EFB-App**: blendet eine kompakte Übersicht im Sim
+  selbst ein (Radar, Peer-Liste, Setup, Pro-Tab) — wahlweise als Toolbar-Panel
+  oder als App im Cabin-Crew-Tablet (EFB). Beide zeigen identischen Inhalt
+  und syncen live mit dem Backend.
 - **Auto-Launch mit dem Sim**: einmal installiert, startet die App automatisch mit MSFS.
 - **Tracking-Toggle**: Sichtbarkeit im Mesh mit einem Klick aus-/anschalten —
   bleibt persistent über Neustart hinweg.
@@ -239,17 +241,23 @@ Das Projekt besteht aus **drei Prozessen** auf dem Rechner des Spielers:
 5. VAD auf dem Raw-Stream (RMS > -34 dBFS) setzt den Speaker-Indicator
    am oberen Bildschirmrand des Empfängers.
 
-### MSFS-Toolbar-Integration
+### MSFS-Toolbar- und EFB-Integration
 
 - Das MSFS-SDK-Projekt (`msfs-project/`) wird mit dem offiziellen
   Package-Compiler zu einem Community-Folder-Paket kompiliert und enthält:
   - **WASM-Bridge** (`PackageSources/wasm/VoiceWalkerBridge.cpp`) die
-    Avatar-Position via SimConnect ClientData an die Python-App publisht.
-  - **HTML-Panel** das in der Sim-Toolbar erscheint und per `<iframe>` die
-    Overlay-Seite der lokal laufenden App lädt.
-- Das Panel lädt per `<iframe>` die Seite `http://127.0.0.1:7801/overlay.html`
-  der lokal laufenden App — also eine kompakte Version der Peer-Liste und
-  Sprech-Indikatoren direkt im Sim.
+    Avatar-Position **und CAMERA_STATE** via SimConnect ClientData an die
+    Python-App publisht. Online-Status wird gegated auf Cockpit oder
+    Walker-Modus — im Hauptmenü/Loading bleibt die App "connected" statt
+    "online", damit nichts ungewollt gesendet wird.
+  - **HTML-Panel** für die Sim-Toolbar (`panel.html`) — kompaktes Layout.
+  - **EFB-App** für das Cabin-Crew-Tablet (`EfbApp/VoiceWalkerApp/`) — selbe
+    UI wie die Toolbar, geladen per `<iframe>` von `panel-efb.html`. Beide
+    teilen sich `panel.js` und syncen live mit dem Backend.
+- Beide UIs nutzen eigene Custom-Dropdowns (Coherent GT InGame-UI rendert
+  kein natives `<select>`-Popup), eine WebSocket-Verbindung zum lokalen
+  Backend (`ws://127.0.0.1:7801/ui`) und teilen `state.ui` so dass z.B.
+  ein VOX-Toggle in einer UI sofort in der anderen sichtbar wird.
 - Die `exe.xml`-Einbindung sorgt dafür, dass `VoiceWalker.exe` beim
   Start von MSFS automatisch mithochgefahren wird.
 
@@ -462,6 +470,10 @@ d.h. selbst wenn etwas schiefgeht, kannst du manuell zurückrollen.
 - [x] **WASM-Bridge** `VoiceWalkerBridge.wasm` publisht Avatar-Position via
   SimConnect ClientData direkt an die Python-App (ersetzt die alte HTTP-Probe).
 - [x] **MSFS-Toolbar-Panel** rendert Radar + Peer-Liste direkt im Sim.
+- [x] **EFB-App im Cabin-Crew-Tablet** zeigt die volle UI (Radar, Setup,
+  Pro & Events) — gleiche Inhalte wie die Toolbar, frei skalierbar.
+- [x] **Online-Gate auf Camera-State** — App geht erst im Cockpit oder
+  Walker-Modus auf "online" (Status-Icon grün), nicht schon im Hauptmenü.
 - [x] **3D-HRTF-Positional-Audio** mit Kardioid-Richtcharakteristik.
 - [x] **Zwei-Welten-Audio** (Walker 75 m / Cockpit 5 km + Crossover).
 - [x] **TURN-Relay-Unterstützung** für Symmetric-NAT-Fälle, konfigurierbar
