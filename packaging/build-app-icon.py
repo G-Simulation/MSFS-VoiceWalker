@@ -25,14 +25,18 @@ ICON_OUT = Path(__file__).parent / "app-icon.ico"
 # Background: accent-blauer rounded square (passt zum Web-Header und
 # dem Windows-Akzentfarben-Schema)
 BG = (106, 165, 255, 255)   # #6aa5ff
-BORDER = (10, 15, 26, 255)  # dunkler Rahmen
+BORDER = (255, 255, 255, 255)  # weisser Rahmen
 
 img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
 d = ImageDraw.Draw(img)
-pad = 8
+# Rahmen-Stroke-Width passend zur Linienstaerke des Logo-Kreises: am
+# voicewalker-logo-mark.png misst der Kreis-Outline 14 px (von 512 px),
+# das Mark wird im Icon auf 72 % der Seite skaliert (184 px) → 14 * 184/512 ≈ 5 px.
+border_w = 5
+pad = 6  # gibt dem Rahmen etwas Luft zum Bildrand fuer sauberes Antialiasing
 radius = 56
 d.rounded_rectangle((pad, pad, S - pad, S - pad), radius=radius,
-                    fill=BG, outline=BORDER, width=8)
+                    fill=BG, outline=BORDER, width=border_w)
 
 # Mark einfuegen — schwarzes Logo direkt auf dem blauen Hintergrund waere
 # zu kontrastarm. Wir invertieren auf weiss (wie die light-Variante) und

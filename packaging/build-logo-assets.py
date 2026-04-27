@@ -230,18 +230,41 @@ if i18n_src.is_file():
     print(f"[i18n] copied to {i18n_dst}")
 
 # 5) MSFS-Toolbar-Icon (ICON_TOOLBAR_MSFSVOICEWALKER.svg) — Coherent GT
-# erzwingt Monochrom-Weiss-mit-Alpha-Rendering. Das neue PNG ist bereits
-# weiss auf transparent (mark-light) — wir betten es als base64-image in
-# einem 24x24-SVG ein. Coherent rendert das als weisse Silhouette.
+# erzwingt Monochrom-Weiss-mit-Alpha-Rendering. Wir bauen eine separate
+# padding-lose Variante des Marks: strikt auf den Logo-Inhalt gecroppt
+# (kein 8 %-Rand wie beim normalen mark-light), invertiert auf Weiss-mit-
+# Alpha. So fuellt das Logo das 24x24-Icon-Quadrat voll aus, der Hinter-
+# grund bleibt transparent (kein Plate, nur Logo + Outline).
 import base64
-mark_light_bytes = light_out.read_bytes()
-b64 = base64.b64encode(mark_light_bytes).decode("ascii")
+toolbar_crop = src.crop(circle_bbox)  # circle_bbox: nur Logo, kein Padding
+tb_w, tb_h = toolbar_crop.size
+# Square-pad mit transparent (kein weisser Hintergrund), Logo zentriert
+side = max(tb_w, tb_h)
+toolbar_sq = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+toolbar_sq.paste(toolbar_crop, ((side - tb_w) // 2, (side - tb_h) // 2), toolbar_crop)
+# In Weiss-auf-Alpha umfaerben (analog mark-light)
+tpx = toolbar_sq.load()
+for y in range(side):
+    for x in range(side):
+        r, g, b, a = tpx[x, y]
+        # Originally weisser Hintergrund (a=255, lum=255) → soll transparent;
+        # dunkles Logo → opak weiss.
+        if a == 0:
+            continue
+        lum = (r + g + b) // 3
+        tpx[x, y] = (255, 255, 255, 255 - lum)
+# Auf 256 normieren (kompakter base64) und als PNG bytes serialisieren
+toolbar_sq = toolbar_sq.resize((256, 256), Image.LANCZOS)
+import io
+buf = io.BytesIO()
+toolbar_sq.save(buf, format="PNG", optimize=True)
+b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 toolbar_svg = (
     '<?xml version="1.0" encoding="UTF-8"?>\n'
     '<!-- MSFS Toolbar-Icon: erzeugt von packaging/build-logo-assets.py.\n'
-    '     Coherent GT rendert Toolbar-Icons monochrom-weiss + Alpha. Wir\n'
-    '     betten das mark-light-PNG (weiss auf transparent) als base64\n'
-    '     ein, sodass die Logo-Silhouette korrekt erscheint. -->\n'
+    '     Coherent GT rendert Toolbar-Icons monochrom-weiss + Alpha.\n'
+    '     Padding-lose Mark-Variante (Logo fuellt das Quadrat voll),\n'
+    '     transparenter Hintergrund - kein Plate, nur Logo+Outline. -->\n'
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" '
     'preserveAspectRatio="xMidYMid meet">\n'
     f'  <image href="data:image/png;base64,{b64}" '
