@@ -153,6 +153,21 @@
   <Target Name="BuildMsfsPackage"
           BeforeTargets="BeforeBuild"
           DependsOnTargets="EnsurePythonToolchain;BuildWasmBridge;BuildEfbApp">
+
+    <!-- Pre-Cleanup: alte Package-Reste vom Vorgaenger-Namen
+         (gsimulation-msfsvoicewalker) und versehentliche Duplikate im
+         Default-Roaming-Pfad raeumen. Sonst laedt MSFS zwei kollidierende
+         Pakete (alte WASM-ClientData-Area MSFSVoiceWalkerPos vs. neue
+         VoiceWalkerPos) → Sim-Crash beim fspackagetool-Start. -->
+    <PropertyGroup>
+      <RoamingMsfs>$(APPDATA)\Microsoft Flight Simulator 2024\Packages\Community</RoamingMsfs>
+      <RealCommunityFolder>D:\MSFS\Packages\Community</RealCommunityFolder>
+    </PropertyGroup>
+    <Message Text="==&gt; Cleanup: alte gsimulation-msfsvoicewalker- und Duplikat-Reste entfernen..." Importance="high" />
+    <RemoveDir Directories="$(RoamingMsfs)\gsimulation-msfsvoicewalker" ContinueOnError="true" />
+    <RemoveDir Directories="$(RoamingMsfs)\gsimulation-voicewalker" ContinueOnError="true" />
+    <RemoveDir Directories="$(RealCommunityFolder)\gsimulation-msfsvoicewalker" ContinueOnError="true" />
+
     <Message Condition="!Exists('$(FsPackageTool)')"
              Text="==&gt; fspackagetool.exe nicht gefunden unter $(FsPackageTool) — MSFS-Package-Build wird uebersprungen, Legacy-Fallback wird verwendet."
              Importance="high" />
