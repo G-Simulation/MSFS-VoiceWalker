@@ -181,9 +181,24 @@
                   Impersonate="yes"
                   Return="ignore" />
 
+    <!-- VoiceWalker.exe nach erfolgreichem Install starten — die App zeigt
+         beim ersten Lauf den Setup-Wizard (Mikrofon-Auswahl, Sprache,
+         optionale Pro-Lizenz). asyncNoWait, damit MSI sofort weitergeht
+         und die App im Hintergrund (Tray) laeuft. Impersonate=yes, sonst
+         laeuft die App im SYSTEM-Kontext und nicht als User. -->
+    <CustomAction Id="LaunchVoiceWalker"
+                  FileRef="VoiceWalkerExe"
+                  ExeCommand=""
+                  Execute="deferred"
+                  Impersonate="yes"
+                  Return="asyncNoWait" />
+
     <InstallExecuteSequence>
       <Custom Action="RunIntegrator"
               After="InstallFiles"
+              Condition="NOT Installed" />
+      <Custom Action="LaunchVoiceWalker"
+              After="RunIntegrator"
               Condition="NOT Installed" />
       <Custom Action="RunIntegratorUninstall"
               Before="RemoveFiles"
