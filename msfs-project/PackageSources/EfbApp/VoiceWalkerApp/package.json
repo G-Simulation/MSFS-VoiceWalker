@@ -2,7 +2,7 @@
   "name": "@efb/voicewalker",
   "version": "0.1.0",
   "license": "Apache-2.0",
-  "author": "G-Simulation",
+  "author": "G-Simulations",
   "scripts": {
     "build": "node ./build.js",
     "clean": "npm run clean:dist && npm run clean:node_modules",
