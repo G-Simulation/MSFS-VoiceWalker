@@ -709,6 +709,16 @@
         if (!state.ui) state.ui = {};
         state.ui.bindingInProgress = !!m.binding_mode;
         state.ui.pttBinding         = m.binding || null;
+      } else if (m.type === 'audio_devices') {
+        // Audio-Geraete-Liste vom Backend (sounddevice) — unabhaengig vom
+        // Browser-Tab. Wird im Setup-Tab des Sim-Panels/EFBs angezeigt.
+        // Browser-Tab kann dieselben Listen ueber overlay_state.ui auch
+        // schicken (mit MediaDeviceInfo.deviceId), aber die Backend-Liste
+        // ist sofort beim Start da, ohne dass ein User-Interaktions-Flow
+        // im Browser passieren muss.
+        if (!state.ui) state.ui = {};
+        if (Array.isArray(m.audioInputs))  state.ui.audioInputs  = m.audioInputs;
+        if (Array.isArray(m.audioOutputs)) state.ui.audioOutputs = m.audioOutputs;
       } else if (m.type === 'remote_action') {
         // Backend broadcastet panel_actions als remote_action zurueck damit
         // alle UIs (Browser, Panel, EFB) synchron bleiben. Der eigentliche

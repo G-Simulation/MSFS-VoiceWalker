@@ -190,6 +190,47 @@ def settings_apply(new: dict) -> dict:
     return settings_view(cfg)
 
 
+def audio_devices_snapshot() -> dict:
+    """Snapshot der System-Audio-Geraete via sounddevice.query_devices().
+
+    LESEND ONLY — wir setzen keine Windows-Default-Devices, beeinflussen
+    keine anderen Apps. Listen werden nur ans Sim-Panel/EFB broadcastet
+    damit der User dort eine Geraete-Auswahl hat. Die Auswahl wirkt nur
+    im VoiceWalker-Browser-Tab (via getUserMedia/setSinkId), system-weite
+    Defaults bleiben unberuehrt.
+
+    Format: {audioInputs: [{deviceId, label}], audioOutputs: [{deviceId, label}]}
+    deviceId == label (Geraete-Name) — das Browser-Side-Mapping erfolgt
+    ueber Friendly-Name-Match auf MediaDeviceInfo.label.
+    """
+    try:
+        import sounddevice as sd
+        devs = sd.query_devices()
+    except Exception as e:
+        log.warning("audio_devices_snapshot: sounddevice failed: %s", e)
+        return {"audioInputs": [], "audioOutputs": []}
+
+    # Dedupliziere ueber Friendly-Name — sounddevice listet manche Geraete
+    # mehrfach (WASAPI/MME/DirectSound-Kopien des gleichen Hardware-Devices).
+    seen_in: set = set()
+    seen_out: set = set()
+    ins, outs = [], []
+    try:
+        for d in devs:
+            name = (d.get("name") or "").strip()
+            if not name:
+                continue
+            if d.get("max_input_channels", 0) > 0 and name not in seen_in:
+                seen_in.add(name)
+                ins.append({"deviceId": name, "label": name})
+            if d.get("max_output_channels", 0) > 0 and name not in seen_out:
+                seen_out.add(name)
+                outs.append({"deviceId": name, "label": name})
+    except Exception as e:
+        log.warning("audio_devices_snapshot enum: %s", e)
+    return {"audioInputs": ins, "audioOutputs": outs}
+
+
 WEB_DIR = asset_dir() / "web"
 
 # Port-Konfiguration:
@@ -1281,6 +1322,17 @@ async def ws_handler(ws):
             }))
         except Exception as e:
             log.debug("ws settings_state initial: %s", e)
+        # Audio-Geraete-Liste vom Backend (sounddevice). Sim-Panel + EFB
+        # zeigen die im Setup-Tab — unabhaengig vom Browser-Tab. Browser-
+        # Tabs koennen off-screen suspended werden, der Backend-Snapshot
+        # ist immer da.
+        try:
+            await ws.send(json.dumps({
+                "type": "audio_devices",
+                **audio_devices_snapshot(),
+            }))
+        except Exception as e:
+            log.debug("ws audio_devices initial: %s", e)
         # Post-Update-Toast: einmal pro Session, jeder neue Client
         # bekommt's bis zum App-Restart erneut (dann ist upgraded_from None).
         if STATE.upgraded_from:
