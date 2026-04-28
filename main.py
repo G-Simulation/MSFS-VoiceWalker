@@ -1928,3 +1928,13 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         log.info("bye.")
+    # Hard-exit erzwingen: garantiert dass der Process endet, auch wenn
+    # ein non-daemon Helper-Thread (PTT-Polling, websockets-Internals,
+    # Edge-Subprocess-Watcher etc.) sich nicht sauber beendet. Sonst
+    # bleibt der Single-Instance-Mutex gehalten und der naechste Start
+    # sieht "VoiceWalker laeuft bereits" obwohl der User schon Quit
+    # geklickt hat. asyncio.run hat den finally-Block bereits ausgefuehrt
+    # (tray.stop_processes, icon.stop, PTT.stop), also ist alles
+    # aufraeumtechnisch sauber. _exit ueberspringt nur Python-Cleanup
+    # (Atexit-Handler), was hier irrelevant ist.
+    os._exit(0)

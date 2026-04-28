@@ -244,20 +244,31 @@ def _watch_app_close(proc: subprocess.Popen) -> None:
 
 
 def stop_processes() -> None:
-    """Beim App-Shutdown: beide Edge-Prozesse killen damit sie nicht
-    verwaist weiterlaufen. Wird von main.py im finally aufgerufen."""
-    for name, proc in (("headless", _headless_proc), ("app", _app_proc)):
+    """Beim App-Shutdown: beide Edge-Prozess-Trees killen damit sie nicht
+    verwaist weiterlaufen. Edge --app spawnt mehrere Child-Prozesse
+    (Renderer, GPU, Network-Service); proc.terminate() killt nur den
+    Parent. Wir nutzen taskkill /F /T fuer Process-Tree-Kill."""
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    for name, proc in (("audio", _headless_proc), ("app", _app_proc)):
         if proc is None or proc.poll() is not None:
             continue
         try:
-            proc.terminate()
-            try:
-                proc.wait(timeout=2.0)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-            log.info("tray: %s-Edge beendet (pid=%d)", name, proc.pid)
+            # /F = force, /T = kill ganze Process-Tree (alle children).
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                creationflags=flags,
+                timeout=3.0,
+                check=False,
+                capture_output=True,
+            )
+            log.info("tray: %s-Edge process-tree beendet (pid=%d)", name, proc.pid)
         except Exception as e:
             log.debug("tray: %s-Edge-Stop failed: %s", name, e)
+            # Fallback: nur den Parent killen
+            try:
+                proc.kill()
+            except Exception:
+                pass
 
 
 def _make_icon_image(state: str = "offline", size: int = 64):
