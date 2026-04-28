@@ -1354,10 +1354,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const inEl  = document.getElementById('audioInput');
   const outEl = document.getElementById('audioOutput');
 
-  populateAudioDevices();
-  navigator.mediaDevices?.addEventListener?.(
-    'devicechange', populateAudioDevices,
-  );
+  // Audio-Discovery (inkl. Mic-Permission-Probe) erst NACH Consent.
+  // _appStartPromise resolved erst wenn der User dem Datenschutz-Dialog
+  // zugestimmt hat — vorher kein getUserMedia, kein enumerateDevices.
+  // Wichtig fuer DSGVO (Stimme = biometrisches Datum) und damit der
+  // Browser-Permission-Dialog NACH dem Consent-Dialog kommt, nicht davor.
+  _appStartPromise.then(ok => {
+    if (!ok) return;
+    populateAudioDevices();
+    navigator.mediaDevices?.addEventListener?.(
+      'devicechange', populateAudioDevices,
+    );
+  });
 
   inEl?.addEventListener('change', () => {
     state.audioInputId = inEl.value;
