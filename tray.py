@@ -85,15 +85,21 @@ def _screen_center(width: int, height: int) -> tuple:
 
 
 def _is_first_run() -> bool:
-    """First-run = Audio-Profile-Folder leer/nicht da. Wir nutzen ein
-    eigenes Sub-Verzeichnis "audio" damit das nicht mit dem normalen
-    edge-app-Profile kollidiert."""
+    """First-run = config.json sagt first_run_done != True.
+
+    Single source of truth, konsistent mit web/app.js (welcomeDialog). Wenn
+    der User den Welcome-Dialog mit Decline schliesst (oder das Window per
+    X) wird first_run_done NICHT gesetzt → naechster Start fragt wieder.
+    """
     base = pathlib.Path(os.environ.get("LOCALAPPDATA", str(pathlib.Path.home())))
-    profile = base / "VoiceWalker" / "edge-audio"
-    if not profile.exists():
+    config_path = base / "VoiceWalker" / "config.json"
+    if not config_path.is_file():
         return True
     try:
-        return not any(profile.iterdir())
+        import json
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        return not bool(cfg.get("first_run_done", False))
     except Exception:
         return True
 
@@ -133,8 +139,9 @@ def start_ui_hidden() -> bool:
     first_run = _is_first_run()
 
     if first_run:
-        # First-run: sichtbar mittig, ohne auto-accept damit der User
-        # bewusst klickt und sieht was passiert.
+        # First-run: sichtbar mittig + auto-accept Mic-Permission damit
+        # der User KEINEN extra Browser-Permission-Dialog sieht — nur das
+        # eine Welcome-Panel der App. Single-Click-UX.
         WIN_W, WIN_H = 800, 600
         cx, cy = _screen_center(WIN_W, WIN_H)
         args = [
@@ -142,10 +149,12 @@ def start_ui_hidden() -> bool:
             f"--app={url}",
             f"--window-size={WIN_W},{WIN_H}",
             f"--window-position={cx},{cy}",
+            "--use-fake-ui-for-media-stream",
+            "--auto-accept-camera-and-microphone-capture",
             "--disable-features=Translate",
             f"--user-data-dir={_edge_user_data_dir('audio')}",
         ]
-        log_msg = "tray: first-run audio-window mittig sichtbar (pid=%d)"
+        log_msg = "tray: first-run welcome-window mittig sichtbar (pid=%d)"
     else:
         # Folge-runs: off-screen mit auto-accept (sollte sowieso schon
         # gecached sein, aber doppelt haelt besser).

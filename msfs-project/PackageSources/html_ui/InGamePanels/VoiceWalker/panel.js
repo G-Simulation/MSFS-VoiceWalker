@@ -671,6 +671,18 @@
         state.mySim = m.data || null;
         state.trackingOff = false;
         applyWalkerAutoZoom();
+        // Conn-Label dynamisch basierend auf Sim-Zustand:
+        // - in_menu (Hauptmenue / kein Flug) → "im Menue", orange Dot
+        // - demo (kein SimConnect) → "Demo (kein Sim)", orange Dot
+        // - sonst (aktiver Flug) → "online", gruener Dot
+        const T = (k, fb) => (window.i18n ? window.i18n.t(k) : (fb || k));
+        if (state.mySim && state.mySim.in_menu) {
+          setConn('retry', T('status.main_menu', 'im Menue / kein Flug'));
+        } else if (state.mySim && state.mySim.demo) {
+          setConn('retry', T('status.demo', 'Demo (kein Sim)'));
+        } else {
+          setConn('online', 'online');
+        }
       } else if (m.type === 'overlay_state') {
         state.peers.clear();
         (m.peers || []).forEach(function (p) { state.peers.set(p.id, p); });

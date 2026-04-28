@@ -1055,24 +1055,92 @@ function ensureConsent() {
   });
 }
 
-// Bootstrap-Sequenz: erst Single-Tab-Lock, dann Consent, dann App starten.
-// Wenn einer der Gates failed → App bleibt still (Blocker bzw. Consent-Dialog
-// sichtbar). Alles was nach hinten Netzwerk/Mic initialisiert MUSS hinter
-// diesem Gate haengen, damit kein Mic-Prompt/Mesh-Join ohne Einwilligung
-// erfolgt.
+// Promise das resolved wenn settings_state vom Backend kommt — wir brauchen
+// es im Bootstrap um zu entscheiden ob das Welcome-Panel gezeigt wird
+// (first_run_done-Flag liegt im Backend, nicht in localStorage).
+let _settingsStateResolve = null;
+const _settingsStatePromise = new Promise(r => { _settingsStateResolve = r; });
+
+// Welcome-Panel: ein einziger First-Run-Dialog der Datenschutz-Consent +
+// Einstellungen (Autostart/Auto-Update/Send-Logs) kombiniert. Ein Klick
+// auf "Akzeptieren & Starten" speichert beides + first_run_done=true.
+// Bei Decline / Window-Close ohne Bestaetigung wird NICHTS persistiert,
+// naechster App-Start zeigt das Welcome wieder.
+function showWelcome() {
+  return new Promise(resolve => {
+    const dlg = document.getElementById('welcomeDialog');
+    if (!dlg) { resolve(false); return; }
+    dlg.classList.remove('hidden'); dlg.classList.add('flex');
+    dlg.setAttribute('aria-hidden', 'false');
+
+    const aBox = document.getElementById('welAutostart');
+    const uBox = document.getElementById('welAutoUpdate');
+    const lBox = document.getElementById('welSendLogs');
+    if (aBox) aBox.checked = !!_settingsState.windows_autostart;
+    if (uBox) uBox.checked = (_settingsState.auto_update !== false);
+    if (lBox) lBox.checked = !!_settingsState.send_logs_on_error;
+
+    const acceptBtn = document.getElementById('welcomeAcceptBtn');
+    const declineBtn = document.getElementById('welcomeDeclineBtn');
+    const closeDialog = () => {
+      dlg.classList.add('hidden'); dlg.classList.remove('flex');
+      dlg.setAttribute('aria-hidden', 'true');
+    };
+
+    if (acceptBtn) acceptBtn.onclick = () => {
+      // Atomic Save: Consent + Settings + first_run_done in einem Rutsch.
+      storeConsent();
+      sendBackend({
+        type: 'settings_set',
+        patch: {
+          windows_autostart:  !!(aBox && aBox.checked),
+          auto_update:        !!(uBox && uBox.checked),
+          send_logs_on_error: !!(lBox && lBox.checked),
+          first_run_done:     true,
+        },
+      });
+      closeDialog();
+      // Kurzes Delay damit settings_set ans Backend persistiert wird,
+      // dann das First-Run-Window automatisch schliessen. Ab naechstem
+      // Start laeuft das Audio-Window off-screen via tray.py.
+      setTimeout(() => { try { window.close(); } catch (e) {} }, 800);
+      resolve(true);
+    };
+    if (declineBtn) declineBtn.onclick = () => {
+      // Nichts speichern → naechster Start zeigt Welcome wieder.
+      closeDialog();
+      setTimeout(() => { try { window.close(); } catch (e) {} }, 200);
+      resolve(false);
+    };
+  });
+}
+
+// Bootstrap-Sequenz:
+// 1. Single-Tab-Lock (verhindert dass mehrere Tabs gleichzeitig die App joinen)
+// 2. Backend-WS connecten — fuer settings_state und Welcome-Save-Pfad
+// 3. settings_state abwarten (kommt vom Backend bei /ui-Connect)
+// 4. Wenn !hasConsent || !first_run_done: Welcome-Panel zeigen
+// 5. Nur wenn alles bestaetigt: appStartPromise resolves auf true
+// → Mesh-Connect / getUserMedia / Audio-Discovery sind alle gegated.
 const _appStartPromise = (async () => {
   const primary = await _instanceLockPromise;
   if (!primary) return false;
-  const consented = await ensureConsent();
-  if (!consented) {
-    console.warn('[privacy] User hat Einwilligung abgelehnt — App bleibt inaktiv');
-    return false;
+
+  // Backend-WS sofort verbinden — ist localhost-only, harmlos auch ohne
+  // Consent. Wir brauchen settings_state um zu entscheiden ob Welcome.
+  connectBackendWs();
+  await _settingsStatePromise;
+
+  const needWelcome = !hasConsent() || !_settingsState.first_run_done;
+  if (needWelcome) {
+    const ok = await showWelcome();
+    if (!ok) {
+      console.warn('[privacy] Welcome abgelehnt — App bleibt inaktiv');
+      return false;
+    }
   }
   return true;
 })();
-
-// Network (WS zum lokalen Python-Backend) — nach Consent
-_appStartPromise.then(ok => { if (ok) connectBackendWs(); });
 
 // --- Event-Direktlink via ?join=<passphrase> --------------------------------
 // PDF-Briefings und Stream-Overlays linken auf  http://127.0.0.1:7801/?join=...
@@ -1267,32 +1335,20 @@ async function populateAudioDevices() {
     // damit Chromium intern die Permission auf "granted" setzt. Stream
     // sofort schliessen — wir brauchten ihn nur fuer den Permission-Trigger.
     //
-    // First-Run-Detection: wenn die Permission VORHER auf 'prompt' war
-    // (User wurde noch nie gefragt), dann ist das der vom Tray gestartete
-    // sichtbare First-Run-Fenster. Nach erteilter Permission soll das
-    // Fenster sich automatisch schliessen — der naechste App-Start nutzt
-    // dann das gecachte 'granted' und laeuft off-screen weiter.
+    // state._micPermissionGranted wird gesetzt damit der Mesh-Connect-
+    // Pfad gated werden kann (App ist erst "aktiv" wenn Mic-Permission da).
+    // Window-Close beim First-Run uebernimmt der Welcome-Accept-Handler,
+    // hier wird nicht mehr selbst geschlossen.
     if (!state._micPermissionProbed) {
       state._micPermissionProbed = true;
-      let wasFirstRun = false;
-      try {
-        const perm = await navigator.permissions.query({ name: 'microphone' });
-        wasFirstRun = (perm.state === 'prompt');
-      } catch (e) { /* permissions-API evtl. nicht verfuegbar */ }
       try {
         const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
         probe.getTracks().forEach(t => t.stop());
-        if (wasFirstRun) {
-          // Permission gerade erst granted → First-Run-Fenster schliessen.
-          // window.close() darf nur scripted-Windows schliessen — Edge --app
-          // wird via Chrome als solches behandelt, das funktioniert.
-          // Kurze Verzoegerung damit das overlay_state-Broadcast die
-          // Audio-Listen noch ans Backend schickt bevor wir zumachen.
-          setTimeout(() => { try { window.close(); } catch (e) {} }, 800);
-        }
+        state._micPermissionGranted = true;
       } catch (e) {
-        // Mic verweigert / nicht vorhanden — enumerate liefert dann eben
-        // nur Default-Labels. Nicht fatal.
+        // Mic verweigert / nicht vorhanden — enumerate liefert dann nur
+        // Default-Labels. App-Aktivitaeten (Mesh) bleiben gated.
+        state._micPermissionGranted = false;
       }
     }
 
@@ -3132,11 +3188,12 @@ function applySettingsState(s) {
   if (uBox) uBox.checked = _settingsState.auto_update;
   if (lBox) lBox.checked = _settingsState.send_logs_on_error;
 
-  // First-Run-Wizard: wenn first_run_done == false UND Consent schon gegeben,
-  // den Wizard zeigen. Consent muss zuerst durch — Privacy/Consent kommt aus
-  // hasConsent() (siehe oben). Der Wizard zeigt sich nur EINMAL pro Install.
-  if (!_settingsState.first_run_done && hasConsent()) {
-    _maybeShowFirstRun();
+  // Bootstrap-Promise resolven sobald wir settings_state haben — Welcome-
+  // Logic (in _appStartPromise) wartet darauf um zu entscheiden ob das
+  // First-Run-Panel gezeigt wird.
+  if (_settingsStateResolve) {
+    _settingsStateResolve(s);
+    _settingsStateResolve = null;
   }
 }
 
