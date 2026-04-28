@@ -70,6 +70,7 @@ import license_client
 import tray
 import autostart
 import feedback
+import msfs_lifecycle
 
 
 def _load_env_file(path: pathlib.Path) -> None:
@@ -1881,6 +1882,16 @@ async def main():
     # Globale Reference, damit der HTTP-Endpoint /_/highlight pystray.notify
     # beim Doppelstart-Ping aufrufen kann (siehe http_handler oben).
     globals()["_TRAY_ICON_REF"] = tray_icon
+
+    # MSFS-Lifecycle-Watcher: wenn der User MSFS schliesst, soll VoiceWalker
+    # sich auch beenden statt verwaist im Hintergrund weiterzulaufen.
+    # SIMCONNECT_RECV_QUIT ist in MSFS 2024 unzuverlaessig (Asobo-Regression),
+    # exe.xml hat kein AutoShutdown-Flag — wir nutzen Win32 OpenProcess +
+    # WaitForSingleObject auf den FlightSimulator2024.exe-Process-Handle.
+    # Funktioniert auch bei CTD/Task-Manager-Kill.
+    msfs_lifecycle.watch_and_quit(
+        on_msfs_gone=lambda: _loop.call_soon_threadsafe(server.close),
+    )
 
     # Browser-Tab im Hintergrund vorbooten (versteckt). Damit das Sim-Panel
     # und EFB sofort die echten Audio-Geraete-Listen sehen — die Discovery
