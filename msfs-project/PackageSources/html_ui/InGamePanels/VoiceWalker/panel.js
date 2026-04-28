@@ -540,42 +540,66 @@
     const host = $('vw-peers');
     if (!host) return;
     const T = (k) => (window.i18n ? window.i18n.t(k) : k);
-    if (state.trackingOff) {
-      host.innerHTML = '<div id="vw-peers-empty" style="color:var(--warn)">' + T('panel.peers.activate_browser') + '</div>';
-      return;
-    }
+
     const peers = [];
-    state.peers.forEach(function (p) {
-      if (!p.sim) return;
-      const d = dist(state.mySim, p.sim);
-      if (!Number.isFinite(d)) return;
-      peers.push({ p: p, d: d });
-    });
-    if (peers.length === 0) {
-      host.innerHTML = '<div id="vw-peers-empty">' + T('panel.peers.empty') + '</div>';
-      return;
+    if (!state.trackingOff) {
+      state.peers.forEach(function (p) {
+        if (!p.sim) return;
+        const d = dist(state.mySim, p.sim);
+        if (!Number.isFinite(d)) return;
+        peers.push({ p: p, d: d });
+      });
     }
-    peers.sort(function (a, b) { return a.d - b.d; });
-    const MAX = 5;
-    const inRange = peers.filter(function (x) { return x.d <= state.myRange; });
-    const farCount = peers.length - inRange.length;
-    const show = (inRange.length > 0 ? inRange : peers).slice(0, MAX);
-    let html = '';
-    show.forEach(function (row) {
-      const p = row.p;
-      const name = esc(p.callsign || p.id.slice(0, 6));
-      const badge = p.on_foot ? ' <svg class="vw-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1"/><path d="m9 20 3-6 3 6"/><path d="m6 8 6 2 6-2"/><path d="M12 10v4"/></svg>' : '';
-      const far = row.d > state.myRange;
-      const cls = 'vw-peer' + (p.speaking ? ' speaking' : '') + (far ? ' far' : '');
-      html += '<div class="' + cls + '">'
-           +   '<span class="pn">' + name + badge + '</span>'
-           +   '<span class="pd">' + fmtRange(row.d) + '</span>'
-           + '</div>';
-    });
-    if (farCount > 0 && inRange.length > 0) {
-      html += '<div id="vw-peers-more">+' + farCount + ' weiter entfernt</div>';
+    const total = peers.length;
+
+    // Header: Titel "Piloten in der Naehe" + Counter-Badge mit Anzahl.
+    // Bleibt IMMER sichtbar — auch im leeren Zustand. So weiss der User
+    // dass das die richtige Sektion ist.
+    const header =
+      '<div class="vw-peers-header">'
+      +   '<span class="vw-peers-title">' + T('panel.peers.title') + '</span>'
+      +   '<span class="vw-peers-count">' + total + '</span>'
+      + '</div>';
+
+    // Body: trackingOff > empty > Liste
+    let body;
+    if (state.trackingOff) {
+      body =
+        '<div class="vw-peers-empty-state warn">'
+        +   '<svg class="vw-peers-empty-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>'
+        +   '<div class="vw-peers-empty-msg">' + T('panel.peers.activate_browser') + '</div>'
+        + '</div>';
+    } else if (total === 0) {
+      body =
+        '<div class="vw-peers-empty-state">'
+        +   '<svg class="vw-peers-empty-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>'
+        +   '<div class="vw-peers-empty-msg">' + T('panel.peers.empty') + '</div>'
+        +   '<div class="vw-peers-empty-hint">' + T('panel.peers.empty.hint') + '</div>'
+        + '</div>';
+    } else {
+      peers.sort(function (a, b) { return a.d - b.d; });
+      const MAX = 5;
+      const inRange = peers.filter(function (x) { return x.d <= state.myRange; });
+      const farCount = peers.length - inRange.length;
+      const show = (inRange.length > 0 ? inRange : peers).slice(0, MAX);
+      body = '';
+      show.forEach(function (row) {
+        const p = row.p;
+        const name = esc(p.callsign || p.id.slice(0, 6));
+        const badge = p.on_foot ? ' <svg class="vw-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1"/><path d="m9 20 3-6 3 6"/><path d="m6 8 6 2 6-2"/><path d="M12 10v4"/></svg>' : '';
+        const far = row.d > state.myRange;
+        const cls = 'vw-peer' + (p.speaking ? ' speaking' : '') + (far ? ' far' : '');
+        body += '<div class="' + cls + '">'
+             +   '<span class="pn">' + name + badge + '</span>'
+             +   '<span class="pd">' + fmtRange(row.d) + '</span>'
+             + '</div>';
+      });
+      if (farCount > 0 && inRange.length > 0) {
+        body += '<div id="vw-peers-more">+' + farCount + ' weiter entfernt</div>';
+      }
     }
-    host.innerHTML = html;
+
+    host.innerHTML = header + body;
   }
 
   function render() {

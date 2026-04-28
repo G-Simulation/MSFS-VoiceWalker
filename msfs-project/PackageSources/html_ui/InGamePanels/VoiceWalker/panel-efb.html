@@ -217,6 +217,43 @@
         font-size: 11px; color: var(--muted);
         text-align: center; padding: 4px 0;
       }
+
+      /* Peers-Header (Titel + Counter-Badge) — IMMER sichtbar */
+      .vw-peers-header {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 6px; padding: 4px 4px 6px;
+        font-size: 9px; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.12em;
+        color: var(--accent);
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 4px;
+      }
+      .vw-peers-count {
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 10px; font-weight: 600; letter-spacing: 0;
+        color: var(--fg);
+        background: rgba(106,165,255,0.15);
+        padding: 1px 7px; border-radius: 999px;
+        min-width: 20px; text-align: center;
+      }
+      /* Empty-State-Block: Icon + Haupttext + Hint */
+      .vw-peers-empty-state {
+        display: flex; flex-direction: column; align-items: center;
+        gap: 4px; padding: 12px 8px 8px;
+        text-align: center;
+      }
+      .vw-peers-empty-icon {
+        color: var(--muted); opacity: 0.55;
+      }
+      .vw-peers-empty-state.warn .vw-peers-empty-icon { color: var(--warn); opacity: 0.8; }
+      .vw-peers-empty-msg {
+        font-size: 11px; color: var(--muted);
+      }
+      .vw-peers-empty-state.warn .vw-peers-empty-msg { color: var(--warn); }
+      .vw-peers-empty-hint {
+        font-size: 9px; color: var(--muted); opacity: 0.65;
+        max-width: 280px; line-height: 1.4;
+      }
       #vw-peers-more {
         font-size: 10px; color: var(--muted);
         text-align: center; padding: 2px 0;
