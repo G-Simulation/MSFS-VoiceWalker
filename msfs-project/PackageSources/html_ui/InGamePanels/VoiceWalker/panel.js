@@ -178,6 +178,12 @@
   // --- UI-Refs ---------------------------------------------------------
   function $(id) { return document.getElementById(id); }
   function setConn(kind, label) {
+    // Idempotent: wenn Status unveraendert, keine DOM-Writes — sonst
+    // koennten 2-Hz sim-Messages eine flackernde Klassen-Animation
+    // ausloesen. Nur bei echtem Wechsel updaten.
+    if (VW._lastConnKind === kind && VW._lastConnLabel === label) return;
+    VW._lastConnKind = kind;
+    VW._lastConnLabel = label;
     const dot = $('vw-conn');
     const lbl = $('vw-label');
     if (dot) {
@@ -680,13 +686,32 @@
       }
     }, 4000);
 
+    // Backend-Heartbeat-Watchdog: sim-Messages kommen alle ~500ms vom
+    // Backend. Wenn 5s lang nichts mehr ankommt, ist das Backend tot
+    // (Tray-Quit, Crash, ...) — Coherent GT meldet ws.onclose oft
+    // verzoegert (Minuten), bis dahin wuerde "online" stehen bleiben.
+    function bumpBackendHeartbeat() {
+      clearTimeout(VW.heartbeatTimer);
+      VW.heartbeatTimer = setTimeout(function () {
+        log.info && log.info('backend-heartbeat timeout — markiere offline');
+        setConn('offline', 'offline');
+        try { if (VW.ws) VW.ws.close(); } catch (e) {}
+      }, 5000);
+    }
+
     ws.onopen = function () {
       L('WS open ' + url);
       clearTimeout(VW.wsTimeout);
       setConn('online', 'online');
+      bumpBackendHeartbeat();
     };
 
     ws.onmessage = function (evt) {
+      // Jede Backend-Message resettet den Heartbeat-Watchdog. So bleibt
+      // "online" stabil solange Backend lebt — und kippt nach 5s Stille
+      // sauber auf "offline", ohne Flackern (Heartbeat wird nur einmal
+      // beim Timeout gesetzt, nicht periodisch).
+      bumpBackendHeartbeat();
       let m;
       try { m = JSON.parse(evt.data); } catch (e) { return; }
       if (!m || typeof m !== 'object') return;
