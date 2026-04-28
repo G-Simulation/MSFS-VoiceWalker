@@ -87,6 +87,41 @@
        gsimulation-voicewalker\. -->
 
 
+  <!-- TARGET 1b: Logo-Assets generieren (MUSS vor BuildMsfsPackage und
+       BuildEfbApp laufen, sonst landen alte Versionen im Community-Package).
+
+       build-logo-assets.py erzeugt:
+       - msfs-project\PackageSources\html_ui\icons\toolbar\ICON_TOOLBAR_VOICEWALKER.svg
+       - msfs-project\PackageSources\EfbApp\VoiceWalkerApp\src\Assets\app-icon.svg
+       - msfs-project\PackageDefinitions\gsimulation-voicewalker\ContentInfo\Thumbnail.jpg
+       - msfs-project\PackageSources\html_ui\InGamePanels\VoiceWalker\i18n.js (Kopie von web\i18n.js)
+       - brand\voicewalker-logo*.png (Web-Frontend)
+
+       Frueher lief das Skript erst in BuildPythonExes (NACH dem html_ui-
+       Mirror), wodurch generierte Files NICHT im Community-Folder landeten.
+       Inputs/Outputs sorgen fuer inkrementelles Bauen — bei unveraenderten
+       Quell-SVG/i18n-Files wird das Skript nicht erneut ausgefuehrt.
+
+       WICHTIG: Outputs= zeigt auf packaging\.assets.stamp, NICHT auf das
+       Toolbar-SVG. Grund: das Skript schreibt mehrere Output-Dateien
+       (Toolbar-SVG, EFB-Icon, Thumbnail, i18n-Mirror, PNGs). Wenn MSBuild
+       das Toolbar-SVG als einzigen Output sieht, skippt es das Target
+       sobald irgendwer dieses File anfasst (sogar das Skript selbst beim
+       letzten Run) — Konsequenz: i18n-Mirror, EFB-Icon, Thumbnail bleiben
+       stale. Die Stamp-Datei wird AUSSCHLIESSLICH von build-logo-assets.py
+       am Ende geschrieben — damit haengt der Inkremental-Skip nur an
+       echten Quell-Aenderungen. -->
+  <Target Name="GenerateLogoAssets"
+          BeforeTargets="BuildMsfsPackage;BuildEfbApp"
+          DependsOnTargets="EnsurePythonToolchain"
+          Inputs="$(RepoRoot)\brand\voicewalker-logo-mark.svg;$(RepoRoot)\packaging\build-logo-assets.py;$(RepoRoot)\web\i18n.js"
+          Outputs="$(RepoRoot)\packaging\.assets.stamp">
+    <Message Text="==&gt; Generiere Logo-Assets (Toolbar-Icon, EFB-Icon, Thumbnail, i18n-Mirror)..." Importance="high" />
+    <Exec Command="python packaging\build-logo-assets.py"
+          WorkingDirectory="$(RepoRoot)" />
+  </Target>
+
+
   <!-- TARGET 2: WASM-Bridge-Modul bauen.
        Erzeugt VoiceWalkerBridge.wasm via VoiceWalkerBridge.vcxproj
        (Platform=MSFS, PlatformToolset=MSFS2024). Voraussetzung: MSFS 2024
@@ -257,14 +292,22 @@
   </Target>
 
 
-  <!-- TARGET 4: PyInstaller-Build (inkrementell).
-       Setup-EXE embeddet entweder das gebaute MSFS-Package (bevorzugt) oder
-       den Legacy-Hand-Ordner als Fallback. -->
+  <!-- TARGET 4: PyInstaller-Build.
+       Setup-EXE embeddet das gebaute MSFS-Package (msfs-project\Packages\
+       gsimulation-voicewalker) via PyInstaller add-data zur Build-Zeit.
+
+       KEINE Inputs/Outputs Attribute — das Target laeuft bei jedem Build.
+       Grund: PyInstaller bundelt den GESAMTEN Package-Tree zur Build-Zeit
+       ins Setup.exe. Wenn Inputs nur main.py/installer.py/etc. listet,
+       skippt MSBuild das Target bei reinen Asset-Aenderungen (Toolbar-SVG,
+       panel-debug.js, panel.html, i18n.js, ...): Setup.exe behaelt den
+       alten Package-Tree, Installer deployed den alten Stand, User sieht
+       seine Edits nie. PyInstaller hat einen internen Cache und ist mit
+       Clean-Flag trotzdem schnell genug (~30 bis 60 s); robuster als
+       Skip-Logik die beim kleinsten Asset-Edit kaputtgeht. -->
   <Target Name="BuildPythonExes"
           BeforeTargets="BeforeBuild"
-          DependsOnTargets="EnsurePythonToolchain;BuildMsfsPackage"
-          Inputs="$(RepoRoot)\main.py;$(RepoRoot)\debug.py;$(RepoRoot)\ptt_backend.py;$(RepoRoot)\installer.py;$(RepoRoot)\requirements.txt"
-          Outputs="$(AppExe);$(SetupHelperExe)">
+          DependsOnTargets="EnsurePythonToolchain;BuildMsfsPackage">
 
     <Message Text="==&gt; Baue Python-EXEs mit PyInstaller (DebugBuild=$(VWDebugBuild))..." Importance="high" />
 
@@ -283,12 +326,12 @@
                       Overwrite="true" />
     <Message Text="==&gt; build_config.py: DEBUG_BUILD = $(_DebugBuildPy)" Importance="high" />
 
-    <!-- Logo-Assets (PNG-Varianten + Web/Panel-Kopien) generieren — sonst
-         fehlt das Logo in der gepackten EXE wenn web/voicewalker-logo-mark-
-         light.png aus Versehen geloescht oder das Source-PNG geaendert wurde. -->
-    <Exec Command="python packaging\build-logo-assets.py"
-          WorkingDirectory="$(RepoRoot)"
-          IgnoreExitCode="true" />
+    <!-- Logo-Assets werden jetzt im separaten Target GenerateLogoAssets
+         erzeugt — der laeuft VOR BuildMsfsPackage, damit das generierte
+         Toolbar-SVG, EFB-Icon, Thumbnail und der i18n-Mirror bereits im
+         PackageSources-Tree liegen wenn fspackagetool + html_ui-Mirror
+         das Community-Package aufbauen. -->
+
 
     <!-- Web-Source fuer PyInstaller vorbereiten. Public-Build: debug.js
          wird AUSGESCHLOSSEN, sodass das Frontend-Debug-Panel im Bundle

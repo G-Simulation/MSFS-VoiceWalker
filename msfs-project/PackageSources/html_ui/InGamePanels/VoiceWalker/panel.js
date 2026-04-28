@@ -267,15 +267,25 @@
     const selfHeading = (state.mySim && Number.isFinite(+state.mySim.heading_deg))
       ? +state.mySim.heading_deg : 0;
 
-    // Compass-Marker N/E/S/W — North-Up: Labels stehen fest an Rand-Positionen.
-    // Norden ist immer oben; das Flugzeug-Symbol im Zentrum rotiert mit Heading.
-    ctx.fillStyle = 'rgba(150,170,200,0.55)';
-    ctx.font = '600 9px "Segoe UI", system-ui, sans-serif';
+    // Compass-Marker N/O/S/W — Heading-Up: Labels rotieren mit Spieler-Heading.
+    // Wenn Pilot nach Osten fliegt, ist "N" links, "O" oben, "S" rechts, "W" unten.
+    ctx.fillStyle = 'rgba(150,170,200,0.75)';
+    ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('N', cx,         cy - R + 8);
-    ctx.fillText('S', cx,         cy + R - 8);
-    ctx.fillText('E', cx + R - 8, cy);
-    ctx.fillText('W', cx - R + 8, cy);
+    {
+      const labelR  = R - 12;
+      const headRad = toRad(selfHeading);
+      const dirs = [
+        { lbl: 'N', ang: 0 },
+        { lbl: 'O', ang: 90 },
+        { lbl: 'S', ang: 180 },
+        { lbl: 'W', ang: 270 },
+      ];
+      dirs.forEach(d => {
+        const rel = (d.ang * Math.PI / 180) - headRad - Math.PI / 2;
+        ctx.fillText(d.lbl, cx + Math.cos(rel) * labelR, cy + Math.sin(rel) * labelR);
+      });
+    }
 
     // Audio-Bubble (Hoerbarkeits-Kreis) + Front-Cone. Cone zeigt in
     // Heading-Richtung — Panel ist North-Up, Cone rotiert mit Pilot.
@@ -383,12 +393,13 @@
         if (Math.abs(lat) < 0.0001 && Math.abs(lon) < 0.0001) return;
         const d = dist(state.mySim, p.sim);
         if (!Number.isFinite(d)) return;
-        // North-Up: bearing direkt als Welt-Winkel, oben = Norden.
-        const brg   = bearing(state.mySim, p.sim);
-        const theta = toRad(brg) - Math.PI / 2;
-        const scale = Math.min(1, d / radarRangeM);
-        const px    = cx + Math.cos(theta) * (R * scale);
-        const py    = cy + Math.sin(theta) * (R * scale);
+        // Heading-Up: bearing relativ zur Spieler-Heading (analog Web-UI).
+        const brg     = bearing(state.mySim, p.sim);
+        const relBrg  = ((brg - selfHeading) + 360) % 360;
+        const theta   = toRad(relBrg) - Math.PI / 2;
+        const scale   = Math.min(1, d / radarRangeM);
+        const px      = cx + Math.cos(theta) * (R * scale);
+        const py      = cy + Math.sin(theta) * (R * scale);
 
         // Speaking-Pulse
         if (p.speaking) {
@@ -403,16 +414,17 @@
                     : d <= state.myRange ? '#6aa5ff' : '#556582';
 
         // Walker = Punkt + Cone in Peer-Heading. Cockpit = Aircraft-Icon.
-        // Panel ist North-Up: Peer-Heading direkt als Welt-Winkel.
+        // Heading-Up: Peer-Heading relativ zu Spieler-Heading (analog Web-UI).
         const peerOnFoot = !!p.sim.on_foot;
         const peerHeading = +p.sim.heading_deg || 0;
+        const peerRelHead = peerHeading - selfHeading;
 
         if (peerOnFoot) {
           const peerHearM   = +p.sim.hearRangeM || 1000;
           const peerConeRaw = R * Math.min(1, peerHearM / radarRangeM);
           const peerConeR   = Math.max(peerConeRaw, 10);
           const peerConeHalf = 60 * Math.PI / 180;
-          const peerConeCtr  = (peerHeading * Math.PI / 180) - Math.PI / 2;
+          const peerConeCtr  = (peerRelHead * Math.PI / 180) - Math.PI / 2;
           const fillCol = p.speaking
             ? 'rgba(255,224,102,0.40)'
             : color === '#6aa5ff' ? 'rgba(106,165,255,0.30)'
@@ -429,11 +441,21 @@
         } else {
           ctx.save();
           ctx.translate(px, py);
-          ctx.rotate(toRad(peerHeading));
+          ctx.rotate(toRad(peerRelHead));
           drawAircraftIcon(ctx, {
             fill: color, stroke: '#0b1220', lineWidth: 1, scale: 0.4,
           });
           ctx.restore();
+        }
+
+        // Callsign-Label neben dem Peer-Punkt (analog Web-UI).
+        const callsign = p.callsign || (p.sim && p.sim.callsign) || p.id || '';
+        if (callsign) {
+          ctx.font = '600 10px "Segoe UI", system-ui, sans-serif';
+          ctx.fillStyle = 'rgba(220,230,245,0.85)';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(callsign, px + 8, py - 8);
         }
       });
     }
@@ -649,23 +671,26 @@
   }
 
   // --- Walker-Auto-Zoom -------------------------------------------------
-  // Walker-Reichweite ist nur 10 m — auf 1 km Default ist die Audio-Bubble
-  // unsichtbar. Wenn der User aussteigt (on_foot wechselt false→true),
-  // springt der Radar auf 50 m. Beim Wieder-Einsteigen zurueck auf den
-  // letzten Cockpit-Wert. Manuell zoomen geht trotzdem jederzeit per
-  // Mausrad — die Auto-Logik triggert nur beim Modus-Wechsel.
-  let prevOnFoot = false;
+  // Walker-Reichweite ist nur 10 m. Beim Aussteigen (Cockpit→Walker) springt
+  // der Radar auf 10 m, beim Wiedereinsteigen zurueck auf den letzten Cockpit-
+  // Wert. WICHTIG: Beim ersten Sim-Tick nach UI-Reload NICHT triggern — sonst
+  // ueberschreiben wir den vom User aktuell gesetzten Range mit dem Auto-Wert.
+  let prevOnFoot = null;            // null = noch kein Sim-Tick gesehen
   let lastCockpitRangeM = RADAR_RANGE_DEFAULT;
-  const WALKER_AUTO_RANGE_M = 50;
+  const WALKER_AUTO_RANGE_M = 10;
   function applyWalkerAutoZoom() {
     const onFoot = !!(state.mySim && state.mySim.on_foot);
+    if (prevOnFoot === null) {
+      // Erstes Sim-Update nach UI-Boot: nur Modus merken, NICHT zoomen.
+      prevOnFoot = onFoot;
+      if (!onFoot) lastCockpitRangeM = radarRangeM;
+      return;
+    }
     if (onFoot === prevOnFoot) return;
     if (onFoot) {
-      // Cockpit → Walker: aktuelle Range merken, dann auf 50 m
       lastCockpitRangeM = radarRangeM;
       radarRangeM = WALKER_AUTO_RANGE_M;
     } else {
-      // Walker → Cockpit: zurueck auf gemerkten Wert
       radarRangeM = lastCockpitRangeM;
     }
     prevOnFoot = onFoot;

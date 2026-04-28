@@ -235,13 +235,10 @@ const audioConfig = {
   // bei 10 m nur noch ein Hauch, darueber stumm. Entspricht normaler
   // Unterhaltungsdistanz am Vorfeld.
   walker:  { maxRangeM: 10,   fullVolumeM: 1,  rolloff: 1.0 },
-  cockpit: { maxRangeM: 5000, fullVolumeM: 50, rolloff: 0.8 },
-  // Crossover: wenn > 0 koennen sich Walker und Cockpit-Piloten innerhalb
-  // dieses Radius hoeren (z.B. Walker steht neben eigener Cessna → Co-Pilot
-  // im Cockpit ist noch hoerbar). Default 10 m = Walker direkt am Flugzeug
-  // hoert den Cockpit-Piloten und umgekehrt; ausserhalb dieses Radius
-  // bleiben Walker- und Cockpit-Welt getrennt.
-  crossoverM: 10,
+  cockpit: { maxRangeM: 5556, fullVolumeM: 55.56, rolloff: 0.8 }, // 3 NM / 0.03 NM
+  // Crossover: Walker hoert Cockpit-Piloten nur wenn er quasi AM Flugzeug steht.
+  // 2 m = Tuer-Bereich; ausserhalb → getrennte Welten.
+  crossoverM: 5,
 
   // Ducking (Stream-Feature): wenn der lokale User spricht, werden alle
   // Peer-Stimmen leiser geregelt, damit die eigene Stimme im Stream-Mic
@@ -629,6 +626,7 @@ function applyEventRanges(ranges) {
     walker:   { ...audioConfig.walker },
     cockpit:  { ...audioConfig.cockpit },
     crossoverM: audioConfig.crossoverM,
+    ambient:  { ..._ambientLevels },
   };
   if (ranges.walker_m && ranges.walker_m > 0) {
     audioConfig.walker.maxRangeM   = ranges.walker_m;
@@ -641,6 +639,15 @@ function applyEventRanges(ranges) {
   if (ranges.crossover_m != null && ranges.crossover_m >= 0) {
     audioConfig.crossoverM = ranges.crossover_m;
   }
+  // Ambient-Level-Override (Veranstalter-only): Werte 0..100 vom WP-Backend
+  // → 0..1 intern. Lokale Slider werden waehrend des Events gelockt.
+  ['footstep','propeller','jet','helicopter'].forEach(t => {
+    const key = 'ambient_' + t;
+    if (typeof ranges[key] === 'number' && ranges[key] >= 0 && ranges[key] <= 100) {
+      _ambientLevels[t] = ranges[key] / 100;
+    }
+  });
+  _eventRangesActive = true;
   // WICHTIG: Nicht saveAudioConfig() aufrufen — Override ist nur fuer die
   // Raum-Mitgliedschaft, soll nicht in localStorage landen.
   console.info('[event-ranges] applied:', ranges);
@@ -651,9 +658,14 @@ function restoreRangeDefaults() {
   Object.assign(audioConfig.walker,  _rangeSnapshot.walker);
   Object.assign(audioConfig.cockpit, _rangeSnapshot.cockpit);
   audioConfig.crossoverM = _rangeSnapshot.crossoverM;
+  if (_rangeSnapshot.ambient) Object.assign(_ambientLevels, _rangeSnapshot.ambient);
   _rangeSnapshot = null;
+  _eventRangesActive = false;
   console.info('[event-ranges] restored defaults');
 }
+
+function isEventRangesActive() { return _eventRangesActive; }
+let _eventRangesActive = false;
 
 async function joinPrivateRoom(passphrase, { forceAllow = false } = {}) {
   const pass = (passphrase || '').trim();
@@ -909,6 +921,8 @@ function ensureCtx() {
     masterGain = audioCtx.createGain();
     masterGain.gain.value = loadMasterVolume();
     masterGain.connect(audioCtx.destination);
+    // Ambient-Samples einmalig im Hintergrund laden (footstep, propeller, jet).
+    _preloadAmbient(audioCtx);
   }
   if (audioCtx.state === 'suspended') audioCtx.resume();
   return audioCtx;
@@ -934,6 +948,15 @@ function connectBackendWs() {
       // sonst ueberschreibt der naechste 2-Hz-Sim-Pulse den gespooften State
       // direkt wieder. Spoof haelt bis setSpoofedSim(null) aufgerufen wird.
       if (!_spoofedSim) state.mySim = m.data;
+      // Radar-Range pro Modus: bei Modus-Wechsel (Walker↔Cockpit) den
+      // gespeicherten Range fuer den neuen Modus laden.
+      if (state.mySim) {
+        const newMode = state.mySim.on_foot ? 'walker' : 'cockpit';
+        if (newMode !== _radarModeTracked) {
+          _radarModeTracked = newMode;
+          setRadarRange(_loadRadarRange(newMode));
+        }
+      }
       renderSelf();
     } else if (m.type === 'ptt_state') {
       state.ptt = m;
@@ -1546,7 +1569,12 @@ document.addEventListener('DOMContentLoaded', () => {
       setRadarRange(snapRange(RADAR_RANGE_M, e.deltaY > 0));
     }, { passive: false });
     // Doppelklick: Reset auf Default
-    radar.addEventListener('dblclick', () => setRadarRange(RADAR_RANGE_DEFAULT));
+    radar.addEventListener('dblclick', () => {
+      const def = (state.mySim?.on_foot)
+        ? RADAR_RANGE_DEFAULT_WALKER
+        : RADAR_RANGE_DEFAULT_COCKPIT;
+      setRadarRange(def);
+    });
     // Cursor-Hint damit User weiss dass interaktiv
     radar.style.cursor = 'ns-resize';
     radar.title = 'Mausrad zum Zoomen · Doppelklick zum Zurücksetzen';
@@ -1752,6 +1780,8 @@ function joinCellRoom(cell) {
 
     src.connect(p.analyserRaw);
     src.connect(p.gainNode).connect(p.pannerNode).connect(masterGain);
+    // Ambient-Layer: Schritte/Triebwerk je nach Modus, dezent gemischt.
+    _attachAmbient(p, ctx, 'walker');
   });
 
   getPos((pos, peerId) => {
@@ -1881,12 +1911,17 @@ function updateAudioFor(p) {
   // Crossover-Profil; anders + d > crossover → stumm.
   const mineOnFoot = !!state.mySim.on_foot;
   const peerOnFoot = !!p.sim.on_foot;
-  const profile    = profileBetween(mineOnFoot, peerOnFoot, d);
+  let   profile    = profileBetween(mineOnFoot, peerOnFoot, d);
+  // Test-Peers: eigenes Profil basierend auf eingestelltem Radius.
+  // Gilt auch bei Modus-Mismatch (Walker-Peer, Cockpit-Player) — Test-Peers
+  // sollen hoerbar sein solange man innerhalb des eingestellten Radius ist,
+  // unabhaengig von Walker/Cockpit-Trennung.
+  if (p.isTestPeer && typeof p.testRadius === 'number' && p.testRadius > 0) {
+    profile = { maxRangeM: p.testRadius * 1.25, fullVolumeM: Math.max(1, p.testRadius * 0.3), rolloff: 0.9 };
+  }
   if (!profile) {
     // Unterschiedliche Welten, kein Crossover → stumm (andere Modi hoert
-    // man nicht). UI zeigt den Peer in "anderer Modus"-Sektion.
-    // Panner-Position trotzdem weiter aktualisieren — falls der Peer seinen
-    // Modus wechselt (z.B. aussteigt), soll die Richtung sofort stimmen.
+    // man nicht). Modus-Wechsel = abrupt stumm (0.05s — Funk-Abbruch-Gefuehl).
     p.gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.05);
     p.currentVolume = 0;
     // Panner-Update: fall-through NICHT — Position des Gain=0-Panners zu
@@ -1903,17 +1938,22 @@ function updateAudioFor(p) {
   const bearingPeerToMe = bearingDeg(p.sim, state.mySim);
   const peerHeading = p.sim.heading_deg || 0;
   const deltaDeg = ((bearingPeerToMe - peerHeading) + 540) % 360 - 180; // -180..180
-  // Standard-Kardioid fuer ALLE Peers — auch Test-Peers. Sie sollen durch
-  // exakt dieselbe Audio-Pipeline laufen wie echte Peers (Sinn der Sache:
-  // Tuning ohne echte Tester). Heading-Rotation mit Lautstaerke-Schwankung
-  // ist beabsichtigt und realistisch fuer kreisende Bewegung.
-  const mouthFactor = 0.5 + 0.5 * Math.cos(deltaDeg * Math.PI / 180);
+  // Kardioid-Richtcharakteristik: "Trichter" vorne am lautesten.
+  // Formel 0.5 + 0.5 * cos() ergibt Faktor 0.5..1.0 (2x Unterschied vorne/hinten).
+  // Das ist realistisch fuer menschliche Stimme, aber fuer Test-Peers zu extrem
+  // wenn der Peer gerade wegschaut (kaum hoerbar). Mildere Kurve:
+  // 0.75 + 0.25 * cos() → Faktor 0.5..1.0 bleibt, aber linearisiert auf 0.75..1.0.
+  // Interpretiert: "Trichter" vorne (1.0), aber auch von hinten noch klar hoerbar (0.5).
+  const mouthFactor = 0.75 + 0.25 * Math.cos(deltaDeg * Math.PI / 180);
 
   // Ducking: wenn ich gerade spreche und Ducking aktiv ist, alle Peer-Stimmen
   // runter (Discord-artig). Faktor = audioConfig.ducking.attenuation (typ. 0.3).
   const duck = currentDuckFactor();
   const v = volumeForDistance(d, profile) * mouthFactor * duck;
-  p.gainNode.gain.setTargetAtTime(v, audioCtx.currentTime, 0.05);
+  // Ausblenden wenn Peer außerhalb der Hörweite läuft: sanfter Fade (0.4s
+  // Zeitkonstante ≈ 1.2s bis nahezu 0). Sonst normaler schneller Wert (0.05s).
+  const fadeTC = (v < 0.005 && (p.currentVolume || 0) > 0.01) ? 0.4 : 0.05;
+  p.gainNode.gain.setTargetAtTime(v, audioCtx.currentTime, fadeTC);
   p.currentVolume = v;
 
   // Panning-Modus dynamisch nach Welt:
@@ -2047,7 +2087,8 @@ setInterval(() => {
   for (const { peers } of state.rooms.values()) {
     for (const p of peers.values()) {
       updateAudioFor(p);
-      p.speaking = detectSpeaking(p);
+      _updateAmbientForPeer(p, audioCtx);
+      if (!p.isTestPeer) p.speaking = detectSpeaking(p);
     }
   }
   renderPeers();
@@ -2056,23 +2097,40 @@ setInterval(() => {
 }, 200);
 
 // --- Radar -------------------------------------------------------------------
-const RADAR_RANGE_DEFAULT = 1250;   // 1.25 km
+const RADAR_RANGE_DEFAULT_WALKER  = 10;     // 10 m — Walker-Default
+const RADAR_RANGE_DEFAULT_COCKPIT = 46300; // 25 NM (1 NM = 1852 m) — Cockpit-Standard
+const RADAR_RANGE_DEFAULT = RADAR_RANGE_DEFAULT_COCKPIT;
 // Zoomable: via Mausrad aendern. Min 100 m (sehr nah) bis 20 km (Uebersicht).
 // Persistiert in localStorage. Doppelklick aufs Radar = Reset auf Default.
-let RADAR_RANGE_M = (() => {
+function _loadRadarRange(mode /* 'walker' | 'cockpit' */) {
   try {
-    const saved = +localStorage.getItem('vw.radarRangeM');
-    if (Number.isFinite(saved) && saved >= 50 && saved <= 50000) return saved;
+    const saved = +localStorage.getItem('vw.radarRangeM.' + mode);
+    const maxM = (mode === 'walker') ? RADAR_RANGE_MAX_WALKER : RADAR_RANGE_MAX_COCKPIT;
+    // Migrations-Guard: alte Walker-Werte > 20 m kommen aus der Zeit als
+    // RADAR_RANGE_DEFAULT_WALKER noch 50 m war → cachebust auf neuen Default.
+    const valid = Number.isFinite(saved) && saved >= RADAR_RANGE_MIN && saved <= maxM
+                  && !(mode === 'walker' && saved > 20);
+    if (valid) return saved;
+    if (Number.isFinite(saved)) {
+      try { localStorage.removeItem('vw.radarRangeM.' + mode); } catch {}
+    }
   } catch {}
-  return RADAR_RANGE_DEFAULT;
-})();
-const RADAR_RANGE_MIN = 2.5;
-const RADAR_RANGE_MAX = 25000;
+  return mode === 'walker' ? RADAR_RANGE_DEFAULT_WALKER : RADAR_RANGE_DEFAULT_COCKPIT;
+}
+// Beim Start noch kein Sim-Modus bekannt → Cockpit-Default.
+let RADAR_RANGE_M = _loadRadarRange('cockpit');
+let _radarModeTracked = null;  // 'walker' | 'cockpit' | null
+const RADAR_RANGE_MIN         = 2.5;
+const RADAR_RANGE_MAX_WALKER  = 50;      // Walker: max 50 m — Vorfeld-Nahbereich
+const RADAR_RANGE_MAX_COCKPIT = 92600;   // Cockpit: max 50 NM
+const RADAR_RANGE_MAX = RADAR_RANGE_MAX_COCKPIT; // globaler Fallback
 // Diskrete Zoom-Stufen — Mausrad rastet ein. 1-1.5-2-2.5-5-7.5er Pattern,
 // passt zu klassischer ATC-Range-Ring-Skala (siehe EuroScope/VATSIM).
 const RADAR_SNAP_VALUES = [
   2.5, 5, 10, 15, 25, 50, 75, 100, 150, 250,
   500, 750, 1000, 1500, 2500, 5000, 7500, 10000, 15000, 25000,
+  // NM-Stufen (1 NM = 1852 m): 5/10/15/20/25/30/40/50/75/100 NM
+  9260, 18520, 27780, 37040, 46300, 55560, 74080, 92600, 138900, 185200,
 ];
 function snapRange(currentM, zoomOut) {
   let bestIdx = 0, bestDist = Infinity;
@@ -2086,14 +2144,20 @@ function snapRange(currentM, zoomOut) {
   return RADAR_SNAP_VALUES[targetIdx];
 }
 function setRadarRange(m) {
-  RADAR_RANGE_M = Math.max(RADAR_RANGE_MIN, Math.min(RADAR_RANGE_MAX, m));
-  try { localStorage.setItem('vw.radarRangeM', String(RADAR_RANGE_M)); } catch {}
+  const maxM = (_radarModeTracked === 'walker') ? RADAR_RANGE_MAX_WALKER : RADAR_RANGE_MAX_COCKPIT;
+  RADAR_RANGE_M = Math.max(RADAR_RANGE_MIN, Math.min(maxM, m));
+  // Pro Modus speichern
+  const mode = (_radarModeTracked === 'walker') ? 'walker' : 'cockpit';
+  try { localStorage.setItem('vw.radarRangeM.' + mode, String(RADAR_RANGE_M)); } catch {}
   // Header-Label updaten + sofort neu zeichnen
   const lab = document.getElementById('radarRangeLabel');
   if (lab) {
+    const nm = RADAR_RANGE_M / 1852;
     lab.textContent = RADAR_RANGE_M < 1000
       ? `${RADAR_RANGE_M.toFixed(0)} m`
-      : `${(RADAR_RANGE_M / 1000).toFixed(2)} km`;
+      : nm >= 4.9
+        ? `${nm.toFixed(0)} NM`
+        : `${(RADAR_RANGE_M / 1000).toFixed(2)} km`;
   }
   renderRadar();
 }
@@ -2225,14 +2289,14 @@ function renderRadar() {
   ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R);
   ctx.stroke();
 
-  // Kompass-Buchstaben (Heading-Up: "N" ist deine Flugrichtung)
-  ctx.fillStyle = '#8696b8';
-  ctx.font = '600 11px -apple-system, "Segoe UI", system-ui, sans-serif';
+  // Kompass-Buchstaben \u2014 gleicher Stil wie panel.js (bold 14px)
+  ctx.fillStyle = 'rgba(150,170,200,0.75)';
+  ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('\u25B2', cx, cy - R - 10);  // Pfeil oben statt N
-  ctx.fillText('R', cx + R + 10, cy);
-  ctx.fillText('L', cx - R - 10, cy);
-  ctx.fillText('\u25BC', cx, cy + R + 10);
+  ctx.fillText('N', cx,          cy - R - 12);
+  ctx.fillText('S', cx,          cy + R + 12);
+  ctx.fillText('O', cx + R + 12, cy);
+  ctx.fillText('W', cx - R - 12, cy);
 
   // --- Distanz-Labels: auf 45°-Diagonale, aussen am Ring, mit Pill-Background.
   // Pill garantiert Lesbarkeit wenn Ringe dicht liegen. 45° unten-rechts ist
@@ -2413,14 +2477,17 @@ function renderRadar() {
 
     // Hörbarkeit: du hörst ihn / er hört dich
     const theyHearMe = d < (p.sim.hearRangeM || 1000);
-    const iHearThem  = d < myRange;
+    // Test-Peers: iHearThem basiert auf testRadius statt globalem myRange.
+    const iHearThem  = p.isTestPeer
+      ? d < (p.testRadius || p.sim.hearRangeM || myRange) * 1.25
+      : d < myRange;
     let color;
     if (theyHearMe && iHearThem) color = '#3fdc8a';   // beidseitig hörbar
     else if (iHearThem)          color = '#6aa5ff';   // nur ich höre ihn
     else if (theyHearMe)         color = '#ffc857';   // nur er hört mich
     else                         color = '#6b7896';   // keiner hört
 
-    const isSpeaking = p.speaking && p.currentVolume > 0.05;
+    const isSpeaking = p.speaking && (p.currentVolume > 0.05 || p.isTestPeer);
 
     // Glow beim Sprechen (vor Symbol, dahinter)
     if (isSpeaking) {
@@ -2830,7 +2897,7 @@ function renderPeers() {
     const d  = p.currentDistance != null ? fmtDist(p.currentDistance) : '—';
     const v  = Math.max(0, Math.min(1, p.currentVolume ?? 0));
     const modeTag = p.sim?.on_foot ? `<span class="badge walker">${T('peer.badge.foot')}</span>` : '';
-    const speakingCls = p.speaking && p.currentVolume > 0.05 ? ' speaking' : '';
+    const speakingCls = p.speaking && (p.currentVolume > 0.05 || p.isTestPeer) ? ' speaking' : '';
     return `
       <div class="peer-row ${cls}${speakingCls}">
         <div class="peer-dot"></div>
@@ -2871,7 +2938,7 @@ function renderSpeakingBar() {
   const speakers = [];
   for (const { peers } of state.rooms.values()) {
     for (const [id, p] of peers) {
-      if (p.speaking && p.currentVolume > 0.05) {
+      if (p.speaking && (p.currentVolume > 0.05 || p.isTestPeer)) {
         speakers.push(p.sim?.callsign || id.slice(0, 8));
       }
     }
@@ -2928,11 +2995,12 @@ function publishOverlay() {
       sim: p.sim ? {
         lat: p.sim.lat,
         lon: p.sim.lon,
+        heading_deg: p.sim.heading_deg || 0,
         hearRangeM: p.sim.hearRangeM || 1000,
         on_foot: !!p.sim.on_foot,
       } : null,
       on_foot: !!p.sim?.on_foot,
-      speaking: !!(p.speaking && p.currentVolume > 0.05),
+      speaking: !!(p.speaking && (p.currentVolume > 0.05 || p.isTestPeer)),
       distance: p.currentDistance ?? null,
     });
   }
@@ -2979,7 +3047,7 @@ function publishOverlay() {
 }
 // 250 ms — gleich wie vorher bei BroadcastChannel, gibt fluessiges Radar.
 // Nur primary-Tab sendet (siehe Guard oben); secondary-Tabs sind eh blockiert.
-setInterval(publishOverlay, 250);
+setInterval(publishOverlay, 100);
 
 // --- Test-Peer-System (Debug-Build) ----------------------------------------
 // Multi-Peer-Setup zum Tunen von Audio/Mesh/Radar OHNE echte Mit-Pilot:innen.
@@ -3000,15 +3068,27 @@ setInterval(publishOverlay, 250);
 const _testPeerState = {
   config: {
     walkerCount: 0, cockpitCount: 0,
-    walkerRadius: 40, cockpitRadius: 2000,
+    walkerRadius: 5, cockpitRadius: 2000,
   },
-  // Array von decoded AudioBuffers. Leer → Default-Sweep-Tone fuer alle Peers.
-  // Mit 1+ Buffern: jeder Peer bekommt deterministisch einen aus dem Pool
-  // zugewiesen (peerIndex % audioBuffers.length). So klingen mehrere Test-
-  // Peers unterschiedlich, wenn der User mehrere MP3s hochlaedt.
+  // Audio-Quelle pro Peer wird in dieser Reihenfolge gewaehlt:
+  //   1) overrides[peerKey].audioBuffer — explizite Zuweisung vom User
+  //   2) audioBuffers[index]            — Pool-Modus, deterministisch
+  //   3) Sweep-Tone Default
   audioBuffers: [],
+  // Per-Peer-Overrides (UI-gesetzt). Bleiben ueber re-spawns hinweg erhalten,
+  // damit ein User der einem Peer eine MP3 zugewiesen hat, sie nach Apply
+  // nicht erneut waehlen muss.
+  // Schema: peerKey → {
+  //   enabled?: boolean,            // false = stumm (gain 0)
+  //   volume?: number,              // 0..1, multipliziert mit normalem Gain
+  //   radius?: number,              // ueberschreibt baseRadius
+  //   audioBuffer?: AudioBuffer,    // ueberschreibt Pool/Sweep
+  //   audioName?: string,           // Anzeige-Name in der UI
+  //   pathType?: 'circle'|'line'|'static',
+  // }
+  overrides: new Map(),
   walkTimer: null,
-  peers: new Map(),       // peerKey → { peer, src, kind, callsign, radius, speed, phase, altOffset }
+  peers: new Map(),                   // peerKey → { peer, src, kind, callsign, radius, speed, phase, altOffset }
 };
 
 function _testPeerEnsureRoom() {
@@ -3018,6 +3098,315 @@ function _testPeerEnsureRoom() {
     state.rooms.set('__test__', entry);
   }
   return entry;
+}
+
+// Propeller-Source: kontinuierlicher Tieffrequenz-Brummer (~80 Hz Grundton
+// mit Harmonien) + leichte AM-Modulation = "rotierender Propeller".
+function _createPropellerSource(ctx) {
+  const sr = ctx.sampleRate;
+  const buf = ctx.createBuffer(1, sr * 4, sr); // 4s Loop
+  const d   = buf.getChannelData(0);
+  const f0 = 78;     // Grundfrequenz (Cessna-aehnlich, niedrig)
+  const fmRate = 18; // Propeller-Rotationsrate (Modulationsfrequenz)
+  for (let i = 0; i < d.length; i++) {
+    const t = i / sr;
+    // Propeller: Grundton + Oktave + leichte 3. Harmonik
+    const fund = Math.sin(2 * Math.PI * f0 * t) * 0.45;
+    const oct  = Math.sin(2 * Math.PI * f0 * 2 * t) * 0.20;
+    const harm = Math.sin(2 * Math.PI * f0 * 3 * t) * 0.10;
+    // AM-Modulation = pulsierender Propeller-Sound
+    const am   = 0.6 + 0.4 * Math.sin(2 * Math.PI * fmRate * t);
+    // Etwas Rauschen fuer "Air-Flow"-Charakter
+    const noise = (Math.random() * 2 - 1) * 0.08;
+    d[i] = (fund + oct + harm) * am + noise;
+  }
+  // Tiefpass-Smoothing
+  let prev = 0;
+  for (let i = 0; i < d.length; i++) {
+    prev = prev + 0.5 * (d[i] - prev);
+    d[i] = prev * 0.5; // Headroom
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buf; src.loop = true; src.start();
+  const gain = ctx.createGain(); gain.gain.value = 1.0;
+  src.connect(gain);
+  return { out: gain, stop() { try { src.stop(); } catch (_) {} } };
+}
+
+// Jet-Source: hochfrequentes "Whoosh"-Rauschen + tiefer Sub-Grummel.
+// Klingt wie ein Düsentriebwerk in der Ferne (kein Pulsieren wie Propeller).
+function _createJetSource(ctx) {
+  const sr = ctx.sampleRate;
+  const buf = ctx.createBuffer(1, sr * 4, sr);
+  const d   = buf.getChannelData(0);
+  // Pink-noise-aehnliches Spektrum + Sub-Bass
+  let b0=0,b1=0,b2=0;
+  for (let i = 0; i < d.length; i++) {
+    const t = i / sr;
+    const white = Math.random() * 2 - 1;
+    // Pink-Filter (Voss-McCartney-aehnlich)
+    b0 = 0.99765 * b0 + white * 0.0990460;
+    b1 = 0.96300 * b1 + white * 0.2965164;
+    b2 = 0.57000 * b2 + white * 1.0526913;
+    const pink = (b0 + b1 + b2 + white * 0.1848) * 0.18;
+    // Sub-Bass: 50 Hz fuer "Triebwerks-Rumble"
+    const sub  = Math.sin(2 * Math.PI * 50 * t) * 0.25;
+    // Mid-Air-Whoosh: bandpass-aehnlich um 800 Hz
+    const mid  = Math.sin(2 * Math.PI * 800 * t) * (Math.random() * 0.05);
+    d[i] = pink + sub + mid;
+  }
+  // Tiefpass leicht runter, damit kein Klirren
+  let prev = 0;
+  for (let i = 0; i < d.length; i++) {
+    prev = prev + 0.7 * (d[i] - prev);
+    d[i] = prev * 0.55;
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buf; src.loop = true; src.start();
+  const gain = ctx.createGain(); gain.gain.value = 1.0;
+  src.connect(gain);
+  return { out: gain, stop() { try { src.stop(); } catch (_) {} } };
+}
+
+// Footstep-Source: realistische Schritte. Tieffrequente "Thud"-Geraeusche
+// mit variabler Cadence (Mensch ist nicht metronom-praezise) und alternierender
+// Lautstaerke (links/rechts unterschiedlich stark).
+function _createFootstepSource(ctx) {
+  const sr = ctx.sampleRate;
+  // 8s Buffer = ~14-16 Schritte mit Variation, dann Loop. Lang genug, dass
+  // der Loop-Repeat nicht als Muster auffaellt.
+  const totalLen = sr * 8;
+  const buf = ctx.createBuffer(1, totalLen, sr);
+  const d   = buf.getChannelData(0);
+
+  // Schritte erzeugen: ~120 BPM Basis, ±10% Jitter, alternierendes Volume.
+  let pos = 0;
+  let stepNum = 0;
+  while (pos < totalLen) {
+    // Cadence: 480ms ± 50ms = ~120 BPM mit menschlicher Variation
+    const interval = 0.48 + (Math.random() - 0.5) * 0.10;
+    // Linker Fuss = etwas lauter, rechter = etwas leiser (oder umgekehrt)
+    const isLeft = (stepNum % 2) === 0;
+    const amp    = isLeft ? 0.65 : 0.50;
+    // Schritt-Kern: kurzer Tiefton-"Thud" mit gefiltertem Rauschen
+    const thudLen = Math.round(sr * 0.08); // 80ms gesamter Schritt
+    for (let i = 0; i < thudLen && pos + i < totalLen; i++) {
+      const tNorm = i / thudLen;
+      // Envelope: schneller Anschlag, exponentielles Abklingen
+      const env = Math.exp(-tNorm * 8) * (1 - Math.exp(-tNorm * 40));
+      // Tieffrequente Komponente (~80 Hz) + bisschen Rauschen → "Thud"
+      const lowFreq = Math.sin(2 * Math.PI * 80 * (i / sr)) * 0.6;
+      const noise   = (Math.random() * 2 - 1) * 0.4;
+      // Tieffilter: simple 1-pole approximation durch Mittelung mit prev sample
+      const sample = (lowFreq + noise) * env * amp;
+      d[pos + i] += sample;
+    }
+    pos += Math.round(sr * interval);
+    stepNum++;
+  }
+
+  // Tieffilter ueber den ganzen Buffer (1-pole IIR, smoothing)
+  const alpha = 0.35;
+  let prev = 0;
+  for (let i = 0; i < totalLen; i++) {
+    prev = prev + alpha * (d[i] - prev);
+    d[i] = prev;
+  }
+
+  const src = ctx.createBufferSource();
+  src.buffer = buf; src.loop = true; src.start();
+  const gain = ctx.createGain(); gain.gain.value = 1.0;
+  src.connect(gain);
+  return { out: gain, stop() { try { src.stop(); } catch (_) {} } };
+}
+
+// Globale Ambient-Sample-Buffers — werden beim App-Start aus web/assets/
+// gefetched. Wenn vorhanden, bevorzugt vor synthetischer Erzeugung.
+const _ambientBuffers = { footstep: null, propeller: null, jet: null, helicopter: null };
+
+// Globale Master-Levels pro Ambient-Typ. WERDEN VOM ENTWICKLER IM CODE
+// FESTGELEGT — User koennen sie nicht aendern (kein localStorage, keine
+// User-UI). Im Event-Raum werden sie vom Veranstalter via WP-Backend
+// uebersteuert (siehe applyEventRanges).
+const AMBIENT_DEFAULTS = Object.freeze({
+  footstep:   0.30,
+  propeller:  0.20,
+  jet:        0.20,
+  helicopter: 0.20,
+});
+const _ambientLevels = { ...AMBIENT_DEFAULTS };
+
+// Nur fuer Live-Tuning im Debug-Build (Slider): aendert Runtime-Wert,
+// PERSISTIERT NICHT. Beim naechsten Reload zurueck auf AMBIENT_DEFAULTS.
+// Wenn ein Event-Raum aktiv ist, wird der Aufruf ignoriert.
+function setAmbientLevel(name, val) {
+  if (!(name in _ambientLevels)) return;
+  if (_eventRangesActive) {
+    console.info('[ambient] gelockt — Veranstalter-Settings aktiv');
+    return;
+  }
+  const v = Math.max(0, Math.min(2, +val || 0));
+  _ambientLevels[name] = v;
+  // Bewusst KEIN localStorage — Werte sind nur durch Code-Edit (Defaults)
+  // oder Event-Override (Veranstalter) anpassbar.
+}
+function getAmbientLevels() { return { ..._ambientLevels }; }
+
+// Stille am Anfang/Ende wegschneiden, dann Seamless-Loop:
+// die letzten N Samples werden mit den ersten N Samples per
+// equal-power-Crossfade verschmolzen, damit das Loop-Ende → Anfang
+// keine hoerbare Naht hat.
+function _trimAndLoopify(ctx, buffer) {
+  const ch0 = buffer.getChannelData(0);
+  const N   = buffer.length;
+  const SILENCE = 0.005;
+  // Trim leading silence
+  let s = 0;
+  while (s < N && Math.abs(ch0[s]) < SILENCE) s++;
+  // Trim trailing silence
+  let e = N - 1;
+  while (e > s && Math.abs(ch0[e]) < SILENCE) e--;
+  // Mindestens 1s, sonst Original behalten
+  const trimmedLen = e - s + 1;
+  if (trimmedLen < buffer.sampleRate) return buffer;
+
+  // Crossfade-Laenge: 25% des trimmten Buffers, max 800ms.
+  const fadeLen = Math.min(
+    Math.round(buffer.sampleRate * 0.8),
+    Math.floor(trimmedLen / 4)
+  );
+  const out = ctx.createBuffer(
+    buffer.numberOfChannels,
+    trimmedLen,
+    buffer.sampleRate
+  );
+  for (let c = 0; c < buffer.numberOfChannels; c++) {
+    const src = buffer.getChannelData(c);
+    const dst = out.getChannelData(c);
+    // Hauptteil unveraendert kopieren (außer die letzten fadeLen Samples).
+    for (let i = 0; i < trimmedLen - fadeLen; i++) dst[i] = src[s + i];
+    // Crossfade: dst-Tail = original-Tail * fadeOut + original-Head * fadeIn.
+    // Equal-power-Kurve (sin/cos) → keine Lautstaerke-Senke in der Mitte.
+    for (let i = 0; i < fadeLen; i++) {
+      const t = (fadeLen === 1) ? 1 : (i / (fadeLen - 1));
+      const fOut = Math.cos(t * Math.PI / 2);
+      const fIn  = Math.sin(t * Math.PI / 2);
+      const tail = src[s + trimmedLen - fadeLen + i];
+      const head = src[s + i];
+      dst[trimmedLen - fadeLen + i] = tail * fOut + head * fIn;
+    }
+  }
+  return out;
+}
+
+async function _preloadAmbient(ctx) {
+  const names = ['footstep', 'propeller', 'jet', 'helicopter'];
+  for (const n of names) {
+    try {
+      const r = await fetch('/assets/' + n + '.mp3');
+      if (!r.ok) continue;
+      const ab  = await r.arrayBuffer();
+      const raw = await ctx.decodeAudioData(ab);
+      const buf = _trimAndLoopify(ctx, raw);
+      _ambientBuffers[n] = buf;
+      console.info('[ambient] loaded', n,
+        raw.duration.toFixed(1) + 's →', buf.duration.toFixed(1) + 's (trimmed+looped)');
+    } catch (e) { /* nicht vorhanden -> Synthese-Fallback */ }
+  }
+}
+
+// Ambient-Layer fuer ALLE Peers (echte User + Test-Peers).
+// Haengt Schritte + Triebwerk parallel an p.gainNode. Jede Quelle hat eigenen
+// Gain-Node, der je nach p.sim.on_foot gefadet wird (siehe updateAmbient()).
+// Gain-Levels bewusst niedrig (0.2 / 0.15) — Stimme/MP3 dominiert, Ambient
+// ist nur "Atmosphaere". Distanz/Richtung macht die Pipeline automatisch.
+function _attachAmbient(p, ctx, kind) {
+  if (!p.gainNode) return;
+  // Pro-Peer-Variation: jeder User klingt etwas anders, sonst klingen
+  // 5 gleichzeitige Peers wie 1 Person 5x. Stabil pro Peer — wird einmal
+  // beim Attach gewuerfelt, bleibt fuer die ganze Session.
+  const stepRate = 0.92 + Math.random() * 0.16;  // ±8% Cadence (langsam/schnell laufen)
+  const propRate = 0.88 + Math.random() * 0.24;  // ±12% RPM-Variation
+  const jetRate  = 0.92 + Math.random() * 0.16;  // ±8% Triebwerks-Tonhoehe
+  const heliRate = 0.92 + Math.random() * 0.16;  // ±8% Rotorblatt-Frequenz
+
+  // Pro Peer: Schritte + alle 3 Triebwerks-Varianten parallel.
+  // Welcher Engine-Sound aktiv ist, entscheidet _updateAmbientForPeer
+  // anhand p.sim.engine_type — gefadet via Gain-Nodes.
+  const mkBuf = (b, rate) => _createBufferSource(ctx, b, Math.random() * 5, rate);
+  const stepSrc = _ambientBuffers.footstep   ? mkBuf(_ambientBuffers.footstep,   stepRate) : _createFootstepSource(ctx);
+  const propSrc = _ambientBuffers.propeller  ? mkBuf(_ambientBuffers.propeller,  propRate) : _createPropellerSource(ctx);
+  const jetSrc  = _ambientBuffers.jet        ? mkBuf(_ambientBuffers.jet,        jetRate)
+    : _ambientBuffers.propeller ? mkBuf(_ambientBuffers.propeller, jetRate) : _createJetSource(ctx);
+  const heliSrc = _ambientBuffers.helicopter ? mkBuf(_ambientBuffers.helicopter, heliRate)
+    : _ambientBuffers.propeller ? mkBuf(_ambientBuffers.propeller, heliRate) : _createPropellerSource(ctx);
+
+  const stepGain = ctx.createGain(); stepGain.gain.value = 0;
+  const propGain = ctx.createGain(); propGain.gain.value = 0;
+  const jetGain  = ctx.createGain(); jetGain.gain.value  = 0;
+  const heliGain = ctx.createGain(); heliGain.gain.value = 0;
+  stepSrc.out.connect(stepGain).connect(p.gainNode);
+  propSrc.out.connect(propGain).connect(p.gainNode);
+  jetSrc.out.connect(jetGain).connect(p.gainNode);
+  heliSrc.out.connect(heliGain).connect(p.gainNode);
+
+  // Default-Engine-Auswahl falls Sim-Daten fehlen: zufaellig aus prop/jet
+  // (heli nur wenn explizit signalisiert).
+  p._ambient = {
+    stepSrc, propSrc, jetSrc, heliSrc,
+    stepGain, propGain, jetGain, heliGain,
+    fallbackKind: (kind === 'cockpit' && Math.random() < 0.5) ? 'jet' : 'prop',
+  };
+}
+
+// Faded Ambient-Gains je nach p.sim.on_foot, Bewegung UND Engine-Type.
+// Schritte: nur on_foot + bewegt + engines off (Walker laeuft).
+// Engine: type 1 → jet, 3 → heli, sonst → propeller. Aus wenn !engines_running.
+function _updateAmbientForPeer(p, ctx) {
+  if (!p._ambient || !p.sim) return;
+  const a = p._ambient;
+  const onFoot = !!p.sim.on_foot;
+
+  // Bewegungs-Geschwindigkeit aus Position-Delta.
+  const now = Date.now();
+  let isMoving = true;
+  if (p._prevAmbPos) {
+    const dt = (now - p._prevAmbPos.t) / 1000;
+    if (dt > 0.05) {
+      const R = 6371000;
+      const dLat = (p.sim.lat - p._prevAmbPos.lat) * Math.PI / 180 * R;
+      const cosLat = Math.cos(p.sim.lat * Math.PI / 180);
+      const dLon = (p.sim.lon - p._prevAmbPos.lon) * Math.PI / 180 * R * cosLat;
+      const speed = Math.sqrt(dLat * dLat + dLon * dLon) / dt;
+      isMoving = speed > 0.3;
+    }
+  }
+  p._prevAmbPos = { lat: p.sim.lat, lon: p.sim.lon, t: now };
+
+  // Engine-Typ: bevorzugt aus p.sim.engine_type (WASM), sonst Fallback aus _attachAmbient.
+  const et = p.sim.engine_type;
+  let engineKind = a.fallbackKind || 'prop';
+  if      (et === 1) engineKind = 'jet';
+  else if (et === 3) engineKind = 'heli';
+  else if (et === 0 || et === 5) engineKind = 'prop';
+  // Engines an? Wenn WASM-Daten fehlen (engines_running undef): Default an.
+  const enginesOn = (typeof p.sim.engines_running === 'boolean')
+    ? p.sim.engines_running
+    : true;
+
+  const stepActive = (onFoot && isMoving);
+  const engActive  = (!onFoot) && enginesOn;
+
+  const tStep = stepActive ? _ambientLevels.footstep : 0;
+  const tProp = (engActive && engineKind === 'prop') ? _ambientLevels.propeller  : 0;
+  const tJet  = (engActive && engineKind === 'jet')  ? _ambientLevels.jet        : 0;
+  const tHeli = (engActive && engineKind === 'heli') ? _ambientLevels.helicopter : 0;
+
+  const tc = ctx.currentTime;
+  a.stepGain.gain.setTargetAtTime(tStep, tc, 0.4);
+  a.propGain.gain.setTargetAtTime(tProp, tc, 0.4);
+  a.jetGain.gain.setTargetAtTime(tJet,   tc, 0.4);
+  a.heliGain.gain.setTargetAtTime(tHeli, tc, 0.4);
 }
 
 // Default-Source: kontinuierlicher musikalischer Sweep-Tone. Pro Peer
@@ -3078,10 +3467,13 @@ function _createSweepTone(ctx, voiceIndex) {
 // Vom User geladenes Audio als looping Source. Pro Peer eigene Source-Node
 // (AudioBufferSourceNode kann nicht geshared werden). Phase-Versatz damit
 // nicht alle Peers exakt synchron klingen.
-function _createBufferSource(ctx, buffer, phaseSec) {
+function _createBufferSource(ctx, buffer, phaseSec, playbackRate) {
   const src = ctx.createBufferSource();
   src.buffer = buffer;
   src.loop = true;
+  if (typeof playbackRate === 'number' && playbackRate > 0) {
+    src.playbackRate.value = playbackRate;
+  }
   const off = ((phaseSec % buffer.duration) + buffer.duration) % buffer.duration;
   src.start(0, off);
   return {
@@ -3107,7 +3499,12 @@ function _spawnSingleTestPeer(peerKey, kind, index, baseRadius, seed) {
   const ctx = ensureCtx();
   const entry = _testPeerEnsureRoom();
   const p = newPeerEntry('__test__');
+  p.isTestPeer = true;  // Marker fuer updateAudioFor (immer Profil-Match)
   entry.peers.set(peerKey, p);
+
+  // Per-Peer-Override falls gesetzt. Ueberschreibt Radius + Audio-Quelle.
+  const ov = _testPeerState.overrides.get(peerKey) || {};
+  if (typeof ov.radius === 'number' && ov.radius > 0) baseRadius = ov.radius;
 
   // Audio-Pipeline: identisch zu echten Peers (siehe joinCellRoom →
   // onPeerStream).
@@ -3123,31 +3520,32 @@ function _spawnSingleTestPeer(peerKey, kind, index, baseRadius, seed) {
   p.pannerNode.rolloffFactor = 0;
 
   const rng = _seededRand(seed);
-  const phaseOffset = rng() * 30;     // 0..30 sec Versatz im Audio-Loop
-  let src;
+  const phaseOffset = rng() * 30;
+  // Ambient-Layer: Schritte/Triebwerk fuer ALLE Peers (auch Test).
+  // Connect: gainNode → pannerNode → masterGain bauen wir erst, dann ambient.
+  p.gainNode.connect(p.pannerNode).connect(masterGain);
+  _attachAmbient(p, ctx, kind);
+  // Optionale "Voice"-Quelle (MP3 oder Pool-Audio) on top.
+  let src = null;
   const buffers = _testPeerState.audioBuffers;
-  if (buffers.length > 0) {
-    // Peer-Index in Buffer-Pool: kind+index → deterministisch. Walker-0 nimmt
-    // Buffer 0, Walker-1 nimmt Buffer 1, ... wraps mit modulo. Cockpits
-    // separat indexiert, damit Cockpit-0 nicht zwingend dasselbe wie
-    // Walker-0 spielt.
+  if (ov.audioBuffer) {
+    src = _createBufferSource(ctx, ov.audioBuffer, phaseOffset);
+  } else if (buffers.length > 0) {
     const bufIdx = ((kind === 'walker' ? index : index + 7) % buffers.length
                     + buffers.length) % buffers.length;
     src = _createBufferSource(ctx, buffers[bufIdx], phaseOffset);
-  } else {
-    // voiceIndex aus der globalen Test-Peer-Reihenfolge, damit Peer 1 + Peer 2
-    // klar unterschiedliche Tonhoehen haben (Pentatonik aufsteigend).
-    src = _createSweepTone(ctx, _testPeerState.peers.size);
   }
-  src.out.connect(p.analyserRaw);
-  src.out.connect(p.gainNode).connect(p.pannerNode).connect(masterGain);
+  if (src) {
+    src.out.connect(p.analyserRaw);
+    src.out.connect(p.gainNode);
+  }
 
   // Bewegungs-Variation deutlich aufgedreht damit man bei mehreren Peers
   // auch wirklich Unterschiede sieht: Radius +/-50%, Speed +/-50%, zufaelliger
   // Startwinkel auf vollen 2π. Plus halbe Peers laufen rueckwaerts (CCW)
   // damit nicht alle in dieselbe Richtung kreisen.
-  const radius = baseRadius * (0.5 + rng() * 1.0);
-  const baseSpeed = (kind === 'walker') ? 0.25 : 0.052; // rad/s
+  const radius = baseRadius;
+  const baseSpeed = (kind === 'walker') ? 0.025 : 0.005; // rad/s
   const speedMag = baseSpeed * (0.5 + rng() * 1.0);
   const direction = rng() < 0.5 ? -1 : 1;
   const speed = speedMag * direction;
@@ -3182,9 +3580,31 @@ function _spawnSingleTestPeer(peerKey, kind, index, baseRadius, seed) {
     p.lastSeen = Date.now();
   }
 
+  // Autonomes Heading — fuer circle/line/static. Organic leitet Heading
+  // aus Geschwindigkeitsvektor ab (dreht sich wie echter Peer, kein Propeller).
+  const headingSpeed = 0.03 + rng() * 0.09;
+  const headingDir   = rng() < 0.5 ? 1 : -1;
+  const headingStart = rng() * Math.PI * 2;
+
+  // Organische Start-Position: zufaellig im Kreis platziert.
+  const startAngle = phaseStart;
+  const startDist  = radius * (0.3 + rng() * 0.7);  // 30..100% des Radius
+  const posX0 = Math.cos(startAngle) * startDist;
+  const posY0 = Math.sin(startAngle) * startDist;
+  // Zufaellige Startgeschwindigkeit (klein).
+  const velMag = 0.5 + rng() * 1.0;   // m/s
+  const velAng = rng() * Math.PI * 2;
+  const velX0  = Math.cos(velAng) * velMag;
+  const velY0  = Math.sin(velAng) * velMag;
+
   return {
     peer: p, src, kind, callsign,
-    radius, speed, phase: phaseStart, altOffset,
+    radius, speed, phase: phaseStart, startPhase: phaseStart, altOffset,
+    headingAngle: headingStart,
+    headingSpeed: headingSpeed * headingDir,
+    // Organischer Walk
+    posX: posX0, posY: posY0,
+    velX: velX0, velY: velY0,
   };
 }
 
@@ -3205,19 +3625,31 @@ function applyTestPeers(config) {
   ensureCtx();
   const cfg = _testPeerState.config;
 
-  // Komplett neu aufbauen statt diffen — AudioBufferSourceNode lassen sich
-  // nach start() nicht reattach'en, neuer Spawn ist die robuste Variante.
-  _stopAllTestPeers();
-
-  for (let i = 0; i < cfg.walkerCount; i++) {
-    const key = 'test-walker-' + i;
-    _testPeerState.peers.set(key,
-      _spawnSingleTestPeer(key, 'walker', i, cfg.walkerRadius, i * 137 + 1));
-  }
-  for (let i = 0; i < cfg.cockpitCount; i++) {
-    const key = 'test-cockpit-' + i;
-    _testPeerState.peers.set(key,
-      _spawnSingleTestPeer(key, 'cockpit', i, cfg.cockpitRadius, i * 211 + 17));
+  // Additiv updaten statt komplett neu aufbauen — verhindert Flackern.
+  // Bestehende Peers bleiben unberuehrt. Nur neue Peers spawnen, ueberschuessige
+  // stoppen. AudioBufferSourceNode kann nicht reattach'en — Respawn nur wenn noetig.
+  const kinds = [
+    { kind: 'walker',  count: cfg.walkerCount,  radius: cfg.walkerRadius,  seedBase: 137,  seedOff: 1  },
+    { kind: 'cockpit', count: cfg.cockpitCount, radius: cfg.cockpitRadius, seedBase: 211,  seedOff: 17 },
+  ];
+  for (const { kind, count, radius, seedBase, seedOff } of kinds) {
+    // Ueberschuessige entfernen
+    for (let i = count; i < 10; i++) {
+      const key = 'test-' + kind + '-' + i;
+      const item = _testPeerState.peers.get(key);
+      if (!item) break;
+      try { item.src.stop(); } catch (_) {}
+      const room = state.rooms.get('__test__');
+      if (room) room.peers.delete(key);
+      _testPeerState.peers.delete(key);
+    }
+    // Neue hinzufuegen
+    for (let i = 0; i < count; i++) {
+      const key = 'test-' + kind + '-' + i;
+      if (_testPeerState.peers.has(key)) continue;  // schon da → nicht anfassen
+      const seed = i * seedBase + seedOff;
+      _testPeerState.peers.set(key, _spawnSingleTestPeer(key, kind, i, radius, seed));
+    }
   }
 
   // Bewegungs-Loop: ein einziger Timer fuer alle Peers (200 ms Tick).
@@ -3237,37 +3669,187 @@ function applyTestPeers(config) {
 
 let _testPeerRenderCounter = 0;
 function _testPeerTick() {
-  if (!state.mySim) return;
   if (_testPeerState.peers.size === 0) return;
+  // lastSeen immer aktualisieren — auch wenn kein mySim (Menü, Ladescreen).
+  // Sonst expiren Test-Peers und verschwinden aus der Peer-Liste/Radar.
+  const now = Date.now();
+  for (const [, item] of _testPeerState.peers) item.peer.lastSeen = now;
+  if (!state.mySim) return;
   const R = 6371000;
   const cosLat = Math.cos(state.mySim.lat * Math.PI / 180);
-  for (const [, item] of _testPeerState.peers) {
-    item.phase += item.speed * 0.2;
-    const east  = Math.cos(item.phase) * item.radius;
-    const north = Math.sin(item.phase) * item.radius;
-    // Tangentiale Laufrichtung — bei direction=-1 dreht der Peer rueckwaerts,
-    // dann zeigt das Heading auch nach hinten, sonst rotiert das Icon falsch.
-    const vx = -Math.sin(item.phase) * Math.sign(item.speed);
-    const vy =  Math.cos(item.phase) * Math.sign(item.speed);
-    const heading = (Math.atan2(vx, vy) * 180 / Math.PI + 360) % 360;
+  for (const [peerKey, item] of _testPeerState.peers) {
+    const ov = _testPeerState.overrides.get(peerKey) || {};
+    // Live-Override fuer Radius (slider in UI) — wirkt sofort, ohne re-spawn.
+    const radius = (typeof ov.radius === 'number' && ov.radius > 0) ? ov.radius : item.radius;
+    const pathType = ov.pathType || 'organic';
+
+    let east, north, heading;
+    if (pathType === 'static') {
+      // Steht still am Start-Phasenwinkel.
+      east  = Math.cos(item.phase) * radius;
+      north = Math.sin(item.phase) * radius;
+
+    } else if (pathType === 'line') {
+      // Linear hin und her auf einer fixen Achse (Strecke).
+      const sfL = (typeof ov.speedFactor === 'number') ? Math.max(0, ov.speedFactor) : 1.0;
+      item.phase += item.speed * sfL * 0.2;
+      const offset    = Math.sin(item.phase) * radius;
+      const axisAngle = item.startPhase || 0;
+      east  = Math.cos(axisAngle) * offset;
+      north = Math.sin(axisAngle) * offset;
+
+    } else if (pathType === 'circle') {
+      // Starrer Kreis.
+      const sfC = (typeof ov.speedFactor === 'number') ? Math.max(0, ov.speedFactor) : 1.0;
+      item.phase += item.speed * sfC * 0.2;
+      east  = Math.cos(item.phase) * radius;
+      north = Math.sin(item.phase) * radius;
+
+    } else if (pathType === 'recorded') {
+      const pathName = ov.recordedPathName || null;
+      const pathData = pathName ? _loadCachedPath(pathName) : null;
+      const points   = pathData && pathData.points;
+      if (points && points.length > 1) {
+        // Cumulative-Cache pro Pfad: dx/dy → absolute Offsets.
+        if (!pathData._cum || pathData._cum.length !== points.length) {
+          let cx = 0, cy = 0;
+          pathData._cum = points.map(p => {
+            // Backwards-Compat: alte x/y-Felder direkt nehmen, neue dx/dy summieren.
+            if (typeof p.dx === 'number' || typeof p.dy === 'number') {
+              cx += (p.dx || 0); cy += (p.dy || 0);
+              return { x: cx, y: cy, h: p.h };
+            }
+            return { x: p.x, y: p.y, h: p.h };
+          });
+        }
+        const cum = pathData._cum;
+        const sf = (typeof ov.speedFactor === 'number') ? Math.max(0.1, ov.speedFactor) : 1.0;
+        if (item.recIdx === undefined) item.recIdx = 0;
+        // Aufnahme: 1 Punkt/s. Tick: 200ms → 0.2 Punkte/Tick bei sf=1 = Echtzeit.
+        item.recIdx += 0.2 * sf;
+        const len  = cum.length;
+        const idxF = item.recIdx % len;
+        const idx0 = Math.floor(idxF);
+        const idx1 = (idx0 + 1) % len;
+        const t    = idxF - idx0;
+        const pt0  = cum[idx0];
+        const pt1  = cum[idx1];
+        // Position: relativ zur aktuellen Spielerposition (funktioniert ueberall).
+        east  = pt0.x + (pt1.x - pt0.x) * t;
+        north = pt0.y + (pt1.y - pt0.y) * t;
+        // Heading interpolieren (kürzester Weg).
+        let hDiff = pt1.h - pt0.h;
+        while (hDiff >  180) hDiff -= 360;
+        while (hDiff < -180) hDiff += 360;
+        heading = ((pt0.h + hDiff * t) + 360) % 360;
+        item.headingAngle = heading * Math.PI / 180;
+      } else {
+        east  = Math.cos(item.phase) * radius;
+        north = Math.sin(item.phase) * radius;
+        item.headingAngle = (item.headingAngle || 0) + item.headingSpeed * 0.2;
+        heading = ((item.headingAngle * 180 / Math.PI) % 360 + 360) % 360;
+      }
+
+    } else {
+      // 'organic': Laufender Peer. Konstante Geschwindigkeit, Richtung driftet
+      // ±5° pro Tick (smooth, kein Zittern). Bei >70% des Radius biegt der
+      // Peer automatisch Richtung Zentrum.
+      const sf = (typeof ov.speedFactor === 'number') ? Math.max(0, ov.speedFactor) : 1.0;
+      const dt = 0.2;
+      const walkSpd = 0.5 * sf; // 1x=0.5 m/s; sf=5x=2.5 m/s (echtes Gehen)
+
+      if (sf === 0) {
+        item.velX = 0; item.velY = 0;
+      } else {
+        // Laufrichtung initialisieren (tangential zur Startposition).
+        if (item.walkAngle === undefined)
+          item.walkAngle = (item.startPhase || 0) + Math.PI * 0.5;
+
+        // Richtung langsam drehen: ±5° pro Tick = natürliches Wandern.
+        item.walkAngle += (Math.random() - 0.5) * 0.175;
+
+        // Wenn ausserhalb 70% des Radius: Richtung sanft Richtung Zentrum biegen.
+        const dist = Math.sqrt(item.posX * item.posX + item.posY * item.posY) || 0.001;
+        if (dist > radius * 0.7) {
+          const toCenter = Math.atan2(-item.posX, -item.posY);
+          let delta = toCenter - item.walkAngle;
+          while (delta >  Math.PI) delta -= 2 * Math.PI;
+          while (delta < -Math.PI) delta += 2 * Math.PI;
+          const pull = Math.min(1, (dist - radius * 0.7) / (radius * 0.3));
+          item.walkAngle += delta * pull * 0.25;
+        }
+
+        item.velX = Math.sin(item.walkAngle) * walkSpd;
+        item.velY = Math.cos(item.walkAngle) * walkSpd;
+      }
+
+      item.posX = (item.posX || 0) + item.velX * dt;
+      item.posY = (item.posY || 0) + item.velY * dt;
+      east  = item.posX;
+      north = item.posY;
+    }
+    // Heading: 'recorded' setzt es bereits oben. Alle anderen PathTypes hier.
+    if (heading === undefined) {
+    if (pathType === 'organic' && (Math.abs(item.velX || 0) > 0.05 || Math.abs(item.velY || 0) > 0.05)) {
+      const target = Math.atan2(item.velX || 0, item.velY || 0);
+      let delta = target - (item.headingAngle || 0);
+      while (delta >  Math.PI) delta -= 2 * Math.PI;
+      while (delta < -Math.PI) delta += 2 * Math.PI;
+      item.headingAngle = (item.headingAngle || 0) + Math.max(-0.25, Math.min(0.25, delta));
+      heading = ((item.headingAngle * 180 / Math.PI) % 360 + 360) % 360;
+    } else {
+      item.headingAngle = (item.headingAngle || 0) + item.headingSpeed * 0.2;
+      heading = ((item.headingAngle * 180 / Math.PI) % 360 + 360) % 360;
+    }
+    } // end if (heading === undefined)
     const dLat = (north / R) * 180 / Math.PI;
     const dLon = (east  / (R * cosLat)) * 180 / Math.PI;
+    // on_foot nach Kind (walker=true, cockpit=false) — bestimmt das Radar-Icon.
+    // Das Audio-Profil-Matching laeuft separat ueber p.isTestPeer in updateAudioFor.
+    const peerOnFoot = (item.kind === 'walker');
     item.peer.sim = {
       lat: state.mySim.lat + dLat,
       lon: state.mySim.lon + dLon,
       alt_ft: (state.mySim.alt_ft || 0) + item.altOffset,
-      agl_ft: (item.kind === 'cockpit') ? 3000 : 0,
+      agl_ft: peerOnFoot ? 0 : 3000,
       heading_deg: heading,
-      hearRangeM: (item.kind === 'walker')
-                  ? audioConfig.walker.maxRangeM
-                  : audioConfig.cockpit.maxRangeM,
-      on_foot: (item.kind === 'walker'),
-      camera_state: (item.kind === 'walker') ? 26 : 2,
+      // Hoerweite (Trichter) kommt aus dem Audio-Range-Slider (audioConfig).
+      // Walker → walker.maxRangeM, Cockpit → cockpit.maxRangeM. Slider in der
+      // UI verstellt direkt den Cone — Test-Peer-Bewegungs-Radius bleibt davon
+      // unberuehrt.
+      hearRangeM: peerOnFoot ? audioConfig.walker.maxRangeM : audioConfig.cockpit.maxRangeM,
+      on_foot: peerOnFoot,
+      camera_state: peerOnFoot ? 26 : 2,
       callsign: item.callsign,
     };
     item.peer.lastSeen = Date.now();
-    updateAudioFor(item.peer);
-    item.peer.speaking = detectSpeaking(item.peer);
+    // testRadius = Audio-Hoerweite (Trichter), modusabhaengig — NICHT der Slider-Radius.
+    item.peer.testRadius = peerOnFoot ? audioConfig.walker.maxRangeM : audioConfig.cockpit.maxRangeM;
+    const _enabled = ov.enabled !== false;
+    const _vol = (typeof ov.volume === 'number') ? ov.volume : 0.5;
+    if (_enabled) {
+      updateAudioFor(item.peer);
+      // Volume-Override: _vol (0..2) × Basis-Gain × 0.3 (globaler Test-Peer-
+      // Daempfungsfaktor). 100%-Slider entspricht 30% des normalen Peer-Gains —
+      // sonst ist naher Test-Peer sofort ohrenbetaeubend.
+      if (item.peer.gainNode) {
+        const baseV = item.peer.currentVolume || 0;
+        item.peer.gainNode.gain.setTargetAtTime(
+          baseV * _vol * 0.3, audioCtx.currentTime, 0.05);
+      }
+    } else {
+      // Muted: Distanz+Panner aktualisieren (UI-Anzeige bleibt korrekt),
+      // aber Audio hart auf 0 halten ohne updateAudioFor-Override.
+      if (state.mySim && item.peer.sim)
+        item.peer.currentDistance = distMeters(state.mySim, item.peer.sim);
+      if (item.peer.gainNode) {
+        item.peer.gainNode.gain.cancelScheduledValues(audioCtx.currentTime);
+        item.peer.gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+      }
+    }
+    // Test-Peers spielen permanent Audio — kein VAD noetig. speaking=true
+    // solange aktiviert, sonst flackert die Anzeige durch Sweep-Ton-Vibrato.
+    item.peer.speaking = _enabled;
   }
   // Radar/Peer-Liste live aktualisieren — sonst flackert das Test-Peer-Icon
   // weil andere Render-Trigger (z.B. WS-Pulse) den Frame ohne diese Peers
@@ -3280,6 +3862,9 @@ function _testPeerTick() {
 }
 
 function _stopAllTestPeers() {
+  // Sources stoppen ABER Room erst nach dem Aufruf raeumen — Caller der
+  // sofort neue Peers spawnt sollte danach _testPeerState.peers.clear()
+  // und state.rooms.delete() selbst aufrufen wenn fertig.
   for (const [, item] of _testPeerState.peers) {
     try { item.src.stop(); } catch (_) {}
   }
@@ -3347,6 +3932,308 @@ function getTestPeerStatus() {
   };
 }
 
+// --- Per-Peer-API fuer Debug-UI ---------------------------------------------
+// Liefert eine flache Liste der aktuell laufenden Test-Peers (aus Map, nicht
+// aus config.count) — korrekt auch nach Einzelloeschungen (Luecken im Index).
+function listTestPeers() {
+  const cfg = _testPeerState.config;
+  const walkers = [], cockpits = [];
+  for (const [key, item] of _testPeerState.peers) {
+    const m = /^test-(walker|cockpit)-(\d+)$/.exec(key);
+    if (!m) continue;
+    const kind  = m[1];
+    const index = parseInt(m[2], 10);
+    const ov    = _testPeerState.overrides.get(key) || {};
+    const entry = {
+      peerKey: key, kind, index,
+      callsign: item.callsign,
+      enabled:      ov.enabled !== false,
+      volume:       (typeof ov.volume      === 'number') ? ov.volume      : 0.5,
+      radius:       (typeof ov.radius      === 'number') ? ov.radius      : (kind === 'walker' ? cfg.walkerRadius : cfg.cockpitRadius),
+      audioName:    ov.audioName || null,
+      pathType:     ov.pathType  || 'organic',
+      speedFactor:  (typeof ov.speedFactor === 'number') ? ov.speedFactor : 1.0,
+      recordedPathName: ov.recordedPathName || null,
+    };
+    if (kind === 'walker') walkers.push(entry);
+    else cockpits.push(entry);
+  }
+  walkers.sort((a, b) => a.index - b.index);
+  cockpits.sort((a, b) => a.index - b.index);
+  return [...walkers, ...cockpits];
+}
+
+// Einzelnen Peer entfernen (Audio stoppen, aus Maps loeschen, Count anpassen).
+function removeOnePeer(peerKey) {
+  const item = _testPeerState.peers.get(peerKey);
+  if (!item) return;
+  try { item.src && item.src.stop(); } catch (_) {}
+  if (item.peer && item.peer._ambient) {
+    const a = item.peer._ambient;
+    try { a.stepSrc.stop(); } catch (_) {}
+    try { a.propSrc.stop(); } catch (_) {}
+    try { a.jetSrc.stop();  } catch (_) {}
+    try { a.heliSrc.stop(); } catch (_) {}
+  }
+  try { item.peer.gainNode.disconnect(); }   catch (_) {}
+  try { item.peer.pannerNode.disconnect(); } catch (_) {}
+  _testPeerState.peers.delete(peerKey);
+  _testPeerState.overrides.delete(peerKey);
+  const room = state.rooms.get('__test__');
+  if (room) room.peers.delete(peerKey);
+  // Count neu zaehlen.
+  let wc = 0, cc = 0;
+  for (const k of _testPeerState.peers.keys()) {
+    if (k.startsWith('test-walker-')) wc++;
+    else if (k.startsWith('test-cockpit-')) cc++;
+  }
+  _testPeerState.config.walkerCount  = wc;
+  _testPeerState.config.cockpitCount = cc;
+  if (_testPeerState.peers.size === 0 && _testPeerState.walkTimer) {
+    clearInterval(_testPeerState.walkTimer);
+    _testPeerState.walkTimer = null;
+  }
+}
+
+// Patch fuer einen einzelnen Peer. Felder die nicht im patch sind bleiben
+// unveraendert. enabled/volume/pathType wirken sofort (im Tick gelesen).
+// radius wirkt fuer Bewegung sofort, fuer Spawn erst beim naechsten Apply.
+function setPeerOverride(peerKey, patch) {
+  if (!peerKey || !patch) return;
+  const cur = _testPeerState.overrides.get(peerKey) || {};
+  const next = { ...cur, ...patch };
+  _testPeerState.overrides.set(peerKey, next);
+}
+
+// Nur EINEN Peer neu spawnen — sodass die anderen weiterlaufen mit ihrer
+// aktuellen Phase und Audio nicht aussetzt.
+function _respawnSinglePeer(peerKey) {
+  const item = _testPeerState.peers.get(peerKey);
+  if (!item) return;
+  const m = /^test-(walker|cockpit)-(\d+)$/.exec(peerKey);
+  if (!m) return;
+  const kind  = m[1];
+  const index = parseInt(m[2], 10);
+  const cfg   = _testPeerState.config;
+  const baseRadius = (kind === 'walker') ? cfg.walkerRadius : cfg.cockpitRadius;
+  const seed   = (kind === 'walker') ? (index * 137 + 1) : (index * 211 + 17);
+  // Neuen Peer ZUERST spawnen (schreibt sofort in room.peers + _testPeerState.peers).
+  // Dann erst alte Source stoppen — so gibt es kein Zeitfenster wo der Peer
+  // aus renderPeers/iterAllPeersDeduped verschwindet (= kein Flackern).
+  const newItem = _spawnSingleTestPeer(peerKey, kind, index, baseRadius, seed);
+  _testPeerState.peers.set(peerKey, newItem);
+  try { item.src && item.src.stop(); } catch (_) {}
+  if (item.peer && item.peer._ambient) {
+    const a = item.peer._ambient;
+    try { a.stepSrc.stop(); } catch (_) {}
+    try { a.propSrc.stop(); } catch (_) {}
+    try { a.jetSrc.stop();  } catch (_) {}
+    try { a.heliSrc.stop(); } catch (_) {}
+  }
+}
+
+// --- Pfad-Aufzeichnung -------------------------------------------------------
+let _recPath     = [];
+let _recBase     = null;   // {lat, lon} Startpunkt der Aufnahme (Metadata)
+let _recPrev     = null;   // letzte Sample-Position fuer Delta-Berechnung
+let _recInterval = null;
+const _pathCache = new Map(); // name → {base, points: [{dx,dy,h}]}
+
+function _recordTick() {
+  if (!state.mySim) return;
+  const R = 6371000;
+  // Inkrementell: dx/dy = Bewegung in Metern seit dem LETZTEN Sample.
+  // _recPrev haelt die letzte Position. Erste Probe = (0,0).
+  if (!_recPrev) {
+    _recPrev = { lat: state.mySim.lat, lon: state.mySim.lon };
+    _recPath.push({ dx: 0, dy: 0, h: Math.round(state.mySim.heading_deg || 0) });
+    return;
+  }
+  const cosLat = Math.cos(_recPrev.lat * Math.PI / 180);
+  const dy = (state.mySim.lat - _recPrev.lat) * Math.PI / 180 * R;
+  const dx = (state.mySim.lon - _recPrev.lon) * Math.PI / 180 * R * cosLat;
+  _recPath.push({
+    dx: Math.round(dx * 100) / 100,
+    dy: Math.round(dy * 100) / 100,
+    h:  Math.round(state.mySim.heading_deg || 0),
+  });
+  _recPrev = { lat: state.mySim.lat, lon: state.mySim.lon };
+}
+
+function pausePathRecording() {
+  if (_recInterval) { clearInterval(_recInterval); _recInterval = null; }
+}
+
+function startPathRecording() {
+  if (_recInterval) return false;
+  if (!state.mySim) { console.warn('[rec] kein mySim — im Sim sein'); return false; }
+  _recBase = { lat: state.mySim.lat, lon: state.mySim.lon };
+  _recPrev = null;     // wird beim ersten _recordTick initialisiert
+  _recPath = [];
+  _recordTick();
+  _recInterval = setInterval(_recordTick, 1000);
+  return true;
+}
+
+function stopPathRecording(name) {
+  if (_recInterval) { clearInterval(_recInterval); _recInterval = null; }
+  if (!name || _recPath.length < 2) return 0;
+  const key = 'vw.path.' + name;
+  // WICHTIG: Base-Position mitspeichern, damit Wiedergabe den ABSOLUTEN
+  // GPS-Pfad reproduziert, nicht relativ zur aktuellen Spielerposition.
+  const data = { base: _recBase, points: _recPath };
+  try { localStorage.setItem(key, JSON.stringify(data)); } catch (e) {
+    console.warn('[rec] localStorage voll?', e); }
+  let idx = [];
+  try { idx = JSON.parse(localStorage.getItem('vw.paths.index') || '[]'); } catch {}
+  if (!idx.includes(name)) idx.push(name);
+  try { localStorage.setItem('vw.paths.index', JSON.stringify(idx)); } catch {}
+  _pathCache.set(name, data);
+  const n = _recPath.length;
+  _recPath = [];
+  return n;
+}
+
+function getRecordingStatus() {
+  return { active: !!_recInterval, count: _recPath.length };
+}
+
+function listSavedPaths() {
+  let idx = [];
+  try { idx = JSON.parse(localStorage.getItem('vw.paths.index') || '[]'); } catch {}
+  return idx.map(name => {
+    let pts = 0;
+    try { const d = localStorage.getItem('vw.path.' + name);
+          pts = d ? JSON.parse(d).length : 0; } catch {}
+    return { name, points: pts };
+  });
+}
+
+function deleteSavedPath(name) {
+  try { localStorage.removeItem('vw.path.' + name); } catch {}
+  _pathCache.delete(name);
+  let idx = [];
+  try { idx = JSON.parse(localStorage.getItem('vw.paths.index') || '[]'); } catch {}
+  idx = idx.filter(n => n !== name);
+  try { localStorage.setItem('vw.paths.index', JSON.stringify(idx)); } catch {}
+}
+
+function _loadCachedPath(name) {
+  if (_pathCache.has(name)) return _pathCache.get(name);
+  try {
+    const d = localStorage.getItem('vw.path.' + name);
+    if (!d) return null;
+    const parsed = JSON.parse(d);
+    // Backwards-compat: alte Pfade waren reines Array.
+    const data = Array.isArray(parsed)
+      ? { base: null, points: parsed }
+      : parsed;
+    _pathCache.set(name, data);
+    return data;
+  } catch { return null; }
+}
+
+// --- Peer-Config-Persistenz --------------------------------------------------
+function saveTestPeerConfig(name) {
+  if (!name) return false;
+  const cfg = _testPeerState.config;
+  const peers = listTestPeers().map(p => {
+    const ov = _testPeerState.overrides.get(p.peerKey) || {};
+    return {
+      peerKey: p.peerKey, kind: p.kind, index: p.index,
+      enabled:          ov.enabled !== false,
+      volume:           (typeof ov.volume      === 'number') ? ov.volume      : 0.5,
+      radius:           (typeof ov.radius      === 'number') ? ov.radius      : null,
+      speedFactor:      (typeof ov.speedFactor === 'number') ? ov.speedFactor : 1.0,
+      pathType:         ov.pathType         || 'organic',
+      recordedPathName: ov.recordedPathName || null,
+    };
+  });
+  const config = {
+    walkerCount: cfg.walkerCount, cockpitCount: cfg.cockpitCount,
+    walkerRadius: cfg.walkerRadius, cockpitRadius: cfg.cockpitRadius,
+    peers,
+  };
+  try { localStorage.setItem('vw.peerConfig.' + name, JSON.stringify(config)); } catch { return false; }
+  let idx = [];
+  try { idx = JSON.parse(localStorage.getItem('vw.peerConfigs.index') || '[]'); } catch {}
+  if (!idx.includes(name)) idx.push(name);
+  try { localStorage.setItem('vw.peerConfigs.index', JSON.stringify(idx)); } catch {}
+  return true;
+}
+
+function loadTestPeerConfig(name) {
+  if (!name) return false;
+  let config;
+  try { config = JSON.parse(localStorage.getItem('vw.peerConfig.' + name)); } catch { return false; }
+  if (!config) return false;
+  applyTestPeers({
+    walkerCount: config.walkerCount, cockpitCount: config.cockpitCount,
+    walkerRadius: config.walkerRadius, cockpitRadius: config.cockpitRadius,
+  });
+  (config.peers || []).forEach(p => {
+    const patch = {};
+    if (p.enabled === false) patch.enabled = false;
+    if (typeof p.volume      === 'number') patch.volume      = p.volume;
+    if (typeof p.radius      === 'number') patch.radius      = p.radius;
+    if (typeof p.speedFactor === 'number') patch.speedFactor = p.speedFactor;
+    if (p.pathType)         patch.pathType         = p.pathType;
+    if (p.recordedPathName) patch.recordedPathName = p.recordedPathName;
+    if (Object.keys(patch).length) setPeerOverride(p.peerKey, patch);
+  });
+  return true;
+}
+
+function listSavedPeerConfigs() {
+  let idx = [];
+  try { idx = JSON.parse(localStorage.getItem('vw.peerConfigs.index') || '[]'); } catch {}
+  return idx.map(name => {
+    try {
+      const c = JSON.parse(localStorage.getItem('vw.peerConfig.' + name));
+      return { name, walkerCount: c.walkerCount || 0, cockpitCount: c.cockpitCount || 0 };
+    } catch { return { name, walkerCount: 0, cockpitCount: 0 }; }
+  });
+}
+
+function deleteSavedPeerConfig(name) {
+  try { localStorage.removeItem('vw.peerConfig.' + name); } catch {}
+  let idx = [];
+  try { idx = JSON.parse(localStorage.getItem('vw.peerConfigs.index') || '[]'); } catch {}
+  idx = idx.filter(n => n !== name);
+  try { localStorage.setItem('vw.peerConfigs.index', JSON.stringify(idx)); } catch {}
+}
+
+// Eine MP3 fuer einen einzelnen Peer setzen. ArrayBuffer wird hier decoded
+// und im override gespeichert. Wenn der Peer gerade laeuft, wird er einzeln
+// neu gespawnt damit die neue AudioBufferSourceNode greift (alte Source
+// laesst sich nicht reattachen).
+async function setPeerAudio(peerKey, arrayBuffer, name) {
+  if (!peerKey) return null;
+  const ctx = ensureCtx();
+  let buffer = null;
+  if (arrayBuffer) {
+    try { buffer = await ctx.decodeAudioData(arrayBuffer.slice(0)); }
+    catch (e) { console.warn('[test] decodeAudioData failed:', e); throw e; }
+  }
+  const cur = _testPeerState.overrides.get(peerKey) || {};
+  _testPeerState.overrides.set(peerKey, {
+    ...cur,
+    audioBuffer: buffer,
+    audioName: buffer ? (name || 'mp3') : null,
+  });
+  if (_testPeerState.peers.has(peerKey)) _respawnSinglePeer(peerKey);
+  return buffer;
+}
+
+function clearPeerAudio(peerKey) {
+  const cur = _testPeerState.overrides.get(peerKey);
+  if (!cur) return;
+  delete cur.audioBuffer;
+  delete cur.audioName;
+  _testPeerState.overrides.set(peerKey, cur);
+  if (_testPeerState.peers.has(peerKey)) _respawnSinglePeer(peerKey);
+}
+
 
 // --- Sim-Spoofing (Debug-Build) --------------------------------------------
 // Erlaubt das Setzen einer fake Sim-Position fuer Tests ohne echten Flug.
@@ -3401,6 +4288,20 @@ window.__voicewalker = {
   loadTestAudioBuffers,     // ArrayBuffer[] aus multi-File-Input → decoded → als Audio-Pool setzen
   clearTestAudioBuffers,    // zurueck auf Default-Sweep-Tone
   getTestPeerStatus,        // aktuelle Counts/Radien/AudioBuffer-Info
+  // Per-Peer-Steuerung (Liste in der Debug-UI)
+  listTestPeers,            // → [{ peerKey, kind, callsign, enabled, volume, radius, audioName, pathType, recordedPathName }]
+  setPeerOverride,          // (peerKey, { enabled?, volume?, radius?, pathType?, recordedPathName?, speedFactor? })
+  setPeerAudio,             // (peerKey, arrayBuffer, name) → decoded buffer
+  clearPeerAudio,           // (peerKey) → zurueck auf Pool/Sweep-Default
+  removeOnePeer,            // (peerKey) → einzelnen Peer entfernen
+  // Globale Ambient-Lautstaerken (Schritte/Prop/Jet/Heli)
+  // setAmbientLevel ist no-op wenn isEventRangesActive() — schuetzt vor Trolling im Event.
+  setAmbientLevel, getAmbientLevels, isEventRangesActive,
+  // Pfad-Aufzeichnung
+  startPathRecording, pausePathRecording, stopPathRecording, getRecordingStatus,
+  listSavedPaths, deleteSavedPath,
+  // Peer-Config-Persistenz
+  saveTestPeerConfig, loadTestPeerConfig, listSavedPeerConfigs, deleteSavedPeerConfig,
   get testPeerActive() { return state.rooms.has('__test__'); },
   // Spoof: state.mySim mit fake-Daten ueberschreiben fuer Tests ohne Sim
   setSpoofedSim,

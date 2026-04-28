@@ -36,6 +36,8 @@ static FsAVarId s_planeAlt     = FS_VAR_INVALID_ID;
 static FsAVarId s_heading      = FS_VAR_INVALID_ID;
 static FsAVarId s_altAboveGnd  = FS_VAR_INVALID_ID;
 static FsAVarId s_cameraState  = FS_VAR_INVALID_ID;
+static FsAVarId s_engineType   = FS_VAR_INVALID_ID;
+static FsAVarId s_engCombust1  = FS_VAR_INVALID_ID;
 
 static FsUnitId s_unitDegLat   = FS_INVALID_UNIT;
 static FsUnitId s_unitDegLon   = FS_INVALID_UNIT;
@@ -81,11 +83,13 @@ struct VoiceWalkerPos {
     double av_lat;   double av_lon;   double av_alt;   double av_hdg;   double av_agl;
     double cur_lat;  double cur_lon;  double cur_alt;  double cur_hdg;  double cur_agl;
     double cam_state;
+    double engine_type;       // 0=piston, 1=jet, 2=none, 3=heli, 4=unsupported, 5=turboprop
+    double engines_running;   // 0=aus, 1=an (ENG COMBUSTION:1)
     double tick;
 };
 #pragma pack(pop)
-static_assert(sizeof(VoiceWalkerPos) == 17 * 8,
-              "VoiceWalkerPos must be exactly 136 bytes (17 doubles, packed)");
+static_assert(sizeof(VoiceWalkerPos) == 19 * 8,
+              "VoiceWalkerPos must be exactly 152 bytes (19 doubles, packed)");
 
 // ----------------------------------------------------------------------------
 struct TargetPos { double lat=0, lon=0, alt=0, hdg=0, agl=0; };
@@ -100,6 +104,8 @@ static void resolve_ids() {
     s_heading      = fsVarsGetAVarId("PLANE HEADING DEGREES TRUE");
     s_altAboveGnd  = fsVarsGetAVarId("PLANE ALT ABOVE GROUND");
     s_cameraState  = fsVarsGetAVarId("CAMERA STATE");
+    s_engineType   = fsVarsGetAVarId("ENGINE TYPE");
+    s_engCombust1  = fsVarsGetAVarId("GENERAL ENG COMBUSTION:1");
     s_unitDegLat   = fsVarsGetUnitId("degrees latitude");
     s_unitDegLon   = fsVarsGetUnitId("degrees longitude");
     s_unitDegrees  = fsVarsGetUnitId("degrees");
@@ -180,6 +186,12 @@ static void fire_probe() {
     fsVarsAVarGet(s_cameraState, s_unitEnum, noParams, &camState,
                    FS_OBJECT_ID_USER_CURRENT);
 
+    double engType = 0.0, engRun = 0.0;
+    fsVarsAVarGet(s_engineType,  s_unitEnum, noParams, &engType,
+                   FS_OBJECT_ID_USER_AIRCRAFT);
+    fsVarsAVarGet(s_engCombust1, s_unitEnum, noParams, &engRun,
+                   FS_OBJECT_ID_USER_AIRCRAFT);
+
     VoiceWalkerPos p{};
     p.ac_lat  = ac.lat;  p.ac_lon  = ac.lon;  p.ac_alt  = ac.alt;
     p.ac_hdg  = ac.hdg;  p.ac_agl  = ac.agl;
@@ -188,6 +200,8 @@ static void fire_probe() {
     p.cur_lat = cur.lat; p.cur_lon = cur.lon; p.cur_alt = cur.alt;
     p.cur_hdg = cur.hdg; p.cur_agl = cur.agl;
     p.cam_state = camState;
+    p.engine_type     = engType;
+    p.engines_running = engRun;
     p.tick = (double)(++s_tickCount);
 
     HRESULT hr = SimConnect_SetClientData(

@@ -407,7 +407,7 @@ _CD_DEF_ID    = 0x56574C4B
 _CD_NAME      = b"VoiceWalkerPos"
 _CD_REQ_ID    = 0x56574C4B
 _CD_PERIOD_ON_SET = 3
-_CD_STRUCT_SIZE   = 17 * 8  # 136 Bytes
+_CD_STRUCT_SIZE   = 19 * 8  # 152 Bytes
 
 
 class _VoiceWalkerPos(ctypes.Structure):
@@ -423,8 +423,10 @@ class _VoiceWalkerPos(ctypes.Structure):
         ("cur_lat",   ctypes.c_double), ("cur_lon", ctypes.c_double),
         ("cur_alt",   ctypes.c_double), ("cur_hdg", ctypes.c_double),
         ("cur_agl",   ctypes.c_double),
-        ("cam_state", ctypes.c_double),
-        ("tick",      ctypes.c_double),
+        ("cam_state",       ctypes.c_double),
+        ("engine_type",     ctypes.c_double),
+        ("engines_running", ctypes.c_double),
+        ("tick",            ctypes.c_double),
     ]
 
 assert ctypes.sizeof(_VoiceWalkerPos) == _CD_STRUCT_SIZE, (
@@ -641,8 +643,10 @@ class AvatarReader:
                             "curLat": payload.cur_lat, "curLon": payload.cur_lon,
                             "curAlt": payload.cur_alt, "curHdg": payload.cur_hdg,
                             "curAgl": payload.cur_agl,
-                            "cam":    payload.cam_state,
-                            "tick":   payload.tick,
+                            "cam":            payload.cam_state,
+                            "engineType":     payload.engine_type,
+                            "enginesRunning": payload.engines_running,
+                            "tick":           payload.tick,
                         }
                         STATE.wasm_pos_at = time.time()
 
@@ -965,6 +969,9 @@ class SimReader:
             "camera_state": cam,
             "on_foot": on_foot,
             "in_menu": in_menu,
+            # Engine-Info aus WASM (0 wenn WASM nicht verfuegbar).
+            "engine_type":     int(wp.get("engineType", 0)) if wasm_fresh else 0,
+            "engines_running": bool(wp.get("enginesRunning", 0) >= 0.5) if wasm_fresh else False,
             # "wasm"-Flag im UI bedeutet "wir haben getrennte Aircraft+Avatar-
             # Positionen" — WASM-Modul ODER Avatar-Reader erfuellen das.
             "wasm": bool(wasm_fresh or ar_fresh),
@@ -1681,6 +1688,8 @@ async def watch_web_dir(web_dir: pathlib.Path):
                 # Kurze Entprellung, damit mehrere Änderungen in Folge nur einen
                 # Reload auslösen
                 await asyncio.sleep(0.3)
+        except asyncio.CancelledError:
+            return
         except Exception as e:
             record_error("watch_web_dir", e)
         await asyncio.sleep(0.5)
@@ -1957,15 +1966,26 @@ async def main():
     except Exception as e:
         log.debug("tray.start_ui_hidden failed: %s", e)
 
+    # Hintergrund-Tasks als explizite Task-Objekte anlegen damit wir sie
+    # nach Server-Close sauber canceln koennen. asyncio.gather() auf einem
+    # Mix aus server.wait_closed() + while-True-Loops haengt sonst ewig —
+    # server.wait_closed() endet, aber gather() wartet weiter auf alle anderen.
+    _bg_tasks = [
+        asyncio.create_task(broadcast_sim(reader),               name="broadcast_sim"),
+        asyncio.create_task(watch_web_dir(WEB_DIR),              name="watch_web_dir"),
+        asyncio.create_task(updater.check_loop(
+            on_update_found=_on_update_found),                   name="updater"),
+        asyncio.create_task(tray_status_loop(tray_icon, reader), name="tray_status"),
+    ]
     try:
-        await asyncio.gather(
-            broadcast_sim(reader),
-            watch_web_dir(WEB_DIR),
-            updater.check_loop(on_update_found=_on_update_found),
-            tray_status_loop(tray_icon, reader),
-            server.wait_closed(),
-        )
+        # Blockiert bis server.close() aufgerufen wird (Tray-Quit oder
+        # MSFS-gone). Danach alle Hintergrund-Tasks canceln + kurz warten.
+        await server.wait_closed()
     finally:
+        log.info("server closed — cancelling background tasks")
+        for t in _bg_tasks:
+            t.cancel()
+        await asyncio.gather(*_bg_tasks, return_exceptions=True)
         try: tray.stop_processes()
         except Exception as e: log.debug("tray.stop_processes: %s", e)
         if tray_icon is not None:

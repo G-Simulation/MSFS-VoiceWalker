@@ -180,12 +180,12 @@ function initDebugPanel() {
           <h4>Hörgrenzen — Walker (zu Fuß)</h4>
           <div class="row">
             <label>volle Lautstärke bis</label>
-            <input type="range" id="c-w-full" min="0.5" max="50" step="0.5" value="1">
+            <input type="range" id="c-w-full" min="0.5" max="10" step="0.5" value="1">
             <span class="readout" id="c-w-full-r">1 m</span>
           </div>
           <div class="row">
             <label>Hörgrenze</label>
-            <input type="range" id="c-w-max" min="2" max="500" step="1" value="10">
+            <input type="range" id="c-w-max" min="2" max="50" step="1" value="10">
             <span class="readout" id="c-w-max-r">10 m</span>
           </div>
           <div class="row">
@@ -203,13 +203,13 @@ function initDebugPanel() {
           <h4>Hörgrenzen — Cockpit (im Flugzeug)</h4>
           <div class="row">
             <label>volle Lautstärke bis</label>
-            <input type="range" id="c-c-full" min="10" max="500" step="5" value="50">
-            <span class="readout" id="c-c-full-r">50 m</span>
+            <input type="range" id="c-c-full" min="0.01" max="0.20" step="0.01" value="0.03">
+            <span class="readout" id="c-c-full-r">0.03 NM</span>
           </div>
           <div class="row">
             <label>Hörgrenze</label>
-            <input type="range" id="c-c-max" min="100" max="20000" step="100" value="5000">
-            <span class="readout" id="c-c-max-r">5000 m</span>
+            <input type="range" id="c-c-max" min="1" max="30" step="1" value="3">
+            <span class="readout" id="c-c-max-r">3 NM</span>
           </div>
           <div class="row">
             <label>Rolloff-Faktor</label>
@@ -217,8 +217,8 @@ function initDebugPanel() {
             <span class="readout" id="c-c-roll-r">0.8</span>
           </div>
           <div class="hint">
-            Cockpit hört rundum (Funk-Feeling) — Reichweite typisch 1–10 km.
-            Default 5 km, Slider geht bis 20 km für Long-Range-Funk.
+            Cockpit hört rundum (Funk-Feeling) — Reichweite typisch 1–10 NM.
+            Default 3 NM, Slider geht bis 30 NM für Long-Range-Funk.
           </div>
         </section>
 
@@ -276,41 +276,58 @@ function initDebugPanel() {
 
         <section>
           <h4>Test-Peers (durch echte Audio-Pipeline)</h4>
-          <div class="row">
-            <label>Audio-Pool</label>
-            <input type="file" id="test-audio-file" accept="audio/*" multiple
-                   style="flex:1; min-width:0; padding:2px;">
-            <button id="btn-test-audio-clear" style="flex:0 0 60px">Default</button>
+          <div class="btnrow" style="margin-bottom:6px">
+            <button id="btn-test-add-walker">+ Walker</button>
+            <button id="btn-test-add-cockpit">+ Cockpit</button>
+            <button id="btn-test-pause">Pause</button>
+            <button id="btn-test-resume">Weiter</button>
+            <button id="btn-test-stop">Alle löschen</button>
           </div>
-          <div class="hint" id="test-audio-status" style="margin-bottom:6px">
-            Default: Sweep-Tone. Mehrere Files moeglich — jeder Test-Peer bekommt
-            deterministisch einen Buffer aus dem Pool zugewiesen.
+          <div class="hint" id="test-peers-status" style="margin-bottom:6px">Keine Test-Peers aktiv.</div>
+
+          <!-- Crossover-Schwelle: ab dieser Distanz hört Walker einen Cockpit-
+               Peer (oder umgekehrt). 0 = strikte Trennung, kein Crossover. -->
+          <div class="row" style="margin-bottom:6px">
+            <label>Crossover</label>
+            <input type="range" id="test-crossover" min="0" max="20" step="1" value="5">
+            <span class="readout" id="test-crossover-r">5 m</span>
           </div>
-          <div class="row">
-            <label>Walker (on_foot)</label>
-            <input type="range" id="test-walker-count" min="0" max="10" step="1" value="0">
-            <span class="readout" id="test-walker-count-r">0</span>
+
+          <!-- Globale Ambient-Lautstaerken (Schritte / Triebwerke).
+               Multipliziert pro Peer den Ambient-Gain. Persistiert. -->
+          <div class="row" style="margin-bottom:3px">
+            <label>Schritte</label>
+            <input type="range" id="amb-footstep" min="0" max="100" step="1" value="30">
+            <span class="readout" id="amb-footstep-r">30%</span>
           </div>
-          <div class="row">
-            <label>Walker-Radius</label>
-            <input type="range" id="test-walker-radius" min="2" max="500" step="1" value="40">
-            <span class="readout" id="test-walker-radius-r">40 m</span>
+          <div class="row" style="margin-bottom:3px">
+            <label>Propeller</label>
+            <input type="range" id="amb-propeller" min="0" max="100" step="1" value="20">
+            <span class="readout" id="amb-propeller-r">20%</span>
           </div>
-          <div class="row">
-            <label>Cockpit</label>
-            <input type="range" id="test-cockpit-count" min="0" max="10" step="1" value="0">
-            <span class="readout" id="test-cockpit-count-r">0</span>
+          <div class="row" style="margin-bottom:3px">
+            <label>Jet</label>
+            <input type="range" id="amb-jet" min="0" max="100" step="1" value="20">
+            <span class="readout" id="amb-jet-r">20%</span>
           </div>
-          <div class="row">
-            <label>Cockpit-Radius</label>
-            <input type="range" id="test-cockpit-radius" min="200" max="20000" step="100" value="2000">
-            <span class="readout" id="test-cockpit-radius-r">2000 m</span>
+          <div class="row" style="margin-bottom:6px">
+            <label>Helikopter</label>
+            <input type="range" id="amb-helicopter" min="0" max="100" step="1" value="20">
+            <span class="readout" id="amb-helicopter-r">20%</span>
           </div>
-          <div class="btnrow">
-            <button id="btn-test-apply">Anwenden</button>
-            <button id="btn-test-stop">Alle stoppen</button>
+
+          <!-- Per-Peer-Liste: nach jedem Add/Stop gefuellt. Pro Peer eine
+               Karte mit Toggle, Volume, Radius, MP3, Pfad-Modus. -->
+          <div id="test-peer-list"></div>
+        </section>
+
+        <section id="sec-peer-configs">
+          <h4>Peer-Konfigurationen</h4>
+          <div class="btnrow" style="margin-bottom:4px">
+            <input id="cfg-name" type="text" placeholder="Config-Name" style="flex:1;font-size:10px;padding:2px 4px">
+            <button id="btn-cfg-save">Speichern</button>
           </div>
-          <div class="hint" id="test-peers-status">Aktiv: 0 Walker, 0 Cockpit</div>
+          <div id="cfg-list"></div>
         </section>
       </div>
 
@@ -360,11 +377,30 @@ function initDebugPanel() {
     const out = $(readoutSel);
     const cfg = window.__voicewalker?.audioConfig;
     if (!cfg || !cfg[profile]) return;
-    inp.value = cfg[profile][key];
+    // Slider-Wert in NM, audioConfig speichert immer in Meter.
+    const NM = 1852;
+    if (unit === 'nm') {
+      const cur = cfg[profile][key] / NM;
+      // Slider-step bestimmt Genauigkeit: <1 NM → fractional, sonst gerundet.
+      const step = parseFloat(inp.step) || 1;
+      inp.value = step < 1 ? cur.toFixed(2) : Math.max(1, Math.round(cur));
+    } else {
+      inp.value = cfg[profile][key];
+    }
     const fmt = () => {
       const v = parseFloat(inp.value);
-      out.textContent = unit === 'm' ? `${Math.round(v)} m` : v.toFixed(1);
-      cfg[profile][key] = v;
+      if (unit === 'nm') {
+        const step = parseFloat(inp.step) || 1;
+        const txt = step < 1 ? v.toFixed(2) : v.toFixed(0);
+        out.textContent = `${txt} NM`;
+        cfg[profile][key] = v * NM;
+      } else if (unit === 'm') {
+        out.textContent = `${Math.round(v)} m`;
+        cfg[profile][key] = v;
+      } else {
+        out.textContent = v.toFixed(1);
+        cfg[profile][key] = v;
+      }
       try { window.__voicewalker?.reconcileAudioStreams?.(); } catch {}
       try { window.__voicewalker?.renderRadar?.(); } catch {}
     };
@@ -374,8 +410,8 @@ function initDebugPanel() {
   bindProfileSlider('#c-w-full', '#c-w-full-r', 'walker',  'fullVolumeM', 'm');
   bindProfileSlider('#c-w-max',  '#c-w-max-r',  'walker',  'maxRangeM',   'm');
   bindProfileSlider('#c-w-roll', '#c-w-roll-r', 'walker',  'rolloff');
-  bindProfileSlider('#c-c-full', '#c-c-full-r', 'cockpit', 'fullVolumeM', 'm');
-  bindProfileSlider('#c-c-max',  '#c-c-max-r',  'cockpit', 'maxRangeM',   'm');
+  bindProfileSlider('#c-c-full', '#c-c-full-r', 'cockpit', 'fullVolumeM', 'nm');
+  bindProfileSlider('#c-c-max',  '#c-c-max-r',  'cockpit', 'maxRangeM',   'nm');
   bindProfileSlider('#c-c-roll', '#c-c-roll-r', 'cockpit', 'rolloff');
 
 
@@ -539,87 +575,423 @@ function initDebugPanel() {
   });
 
   // ==== Test-Peers ========================================================
-  // Sliders binden Live-Werte ans __voicewalker.applyTestPeers ueber den
-  // "Anwenden"-Knopf. Counts/Radien werden in den Readout-Spans gespiegelt.
-  function bindReadout(inputSel, readoutSel, suffix) {
-    const inp = $(inputSel), out = $(readoutSel);
-    const fmt = () => { out.textContent = inp.value + (suffix || ''); };
-    inp.addEventListener('input', fmt);
-    fmt();
-  }
-  bindReadout('#test-walker-count',  '#test-walker-count-r',  '');
-  bindReadout('#test-walker-radius', '#test-walker-radius-r', ' m');
-  bindReadout('#test-cockpit-count', '#test-cockpit-count-r', '');
-  bindReadout('#test-cockpit-radius','#test-cockpit-radius-r',' m');
+  // Neues Modell: keine globalen Counter/Radien. Stattdessen "+ Walker" /
+  // "+ Cockpit"-Knoepfe spawnen je einen Peer mit Default-Radius (40 m
+  // walker, 2000 m cockpit). Pro Peer dann individuelle Settings in der
+  // Liste darunter (Vol, Radius, MP3, Pfad-Modus, Mute).
+  const _DEFAULT_WALKER_RADIUS = 5;
+  const _DEFAULT_COCKPIT_RADIUS = 2000;
 
-  function applyTestPeers() {
+  function addPeer(kind) {
     const fn = window.__voicewalker?.applyTestPeers;
-    if (typeof fn !== 'function') {
-      alert('Test-Peer-Bridge fehlt — Tab neu laden.');
-      return;
+    const status = window.__voicewalker?.getTestPeerStatus?.();
+    if (typeof fn !== 'function' || !status) {
+      alert('Test-Peer-Bridge fehlt — Tab neu laden.'); return;
     }
-    fn({
-      walkerCount:   parseInt($('#test-walker-count').value, 10)  || 0,
-      cockpitCount:  parseInt($('#test-cockpit-count').value, 10) || 0,
-      walkerRadius:  parseInt($('#test-walker-radius').value, 10) || 40,
-      cockpitRadius: parseInt($('#test-cockpit-radius').value, 10) || 2000,
-    });
+    const cfg = {
+      walkerCount:   status.walkerActive,
+      cockpitCount:  status.cockpitActive,
+      walkerRadius:  status.walkerRadius || _DEFAULT_WALKER_RADIUS,
+      cockpitRadius: status.cockpitRadius || _DEFAULT_COCKPIT_RADIUS,
+    };
+    if (kind === 'walker') cfg.walkerCount = Math.min(10, cfg.walkerCount + 1);
+    else                   cfg.cockpitCount = Math.min(10, cfg.cockpitCount + 1);
+    fn(cfg);
     updateTestPeersStatus();
+    setTimeout(renderPeerList, 50);
   }
+
   function updateTestPeersStatus() {
     const s = window.__voicewalker?.getTestPeerStatus?.();
     const el = $('#test-peers-status');
     if (!s) { el.textContent = '—'; return; }
-    const audio = (s.audioBuffersCount > 0)
-      ? ' · Audio-Pool: ' + s.audioBuffersCount + ' Buffer ('
-        + s.audioBuffersDurations.map(d => d.toFixed(1) + 's').join(', ') + ')'
-      : ' · Audio: Default-Sweep';
-    el.textContent = 'Aktiv: ' + s.walkerActive + ' Walker (R=' + s.walkerRadius
-                   + 'm), ' + s.cockpitActive + ' Cockpit (R=' + s.cockpitRadius + 'm)'
-                   + audio;
+    const total = s.walkerActive + s.cockpitActive;
+    if (total === 0) { el.textContent = 'Keine Test-Peers aktiv.'; return; }
+    el.textContent = 'Aktiv: ' + s.walkerActive + ' Walker, ' + s.cockpitActive + ' Cockpit';
   }
-  $('#btn-test-apply').addEventListener('click', applyTestPeers);
+  // Ambient-Lautstaerken (Schritte / Prop / Jet / Heli) — global pro Audio-Typ.
+  // Im Event-Raum: Slider werden gelockt (Werte kommen vom Veranstalter, kein
+  // lokaler Override moeglich → kein Trolling).
+  (function() {
+    const types = ['footstep', 'propeller', 'jet', 'helicopter'];
+    function refresh() {
+      const lvls   = window.__voicewalker?.getAmbientLevels?.() || {};
+      const locked = !!window.__voicewalker?.isEventRangesActive?.();
+      types.forEach(function(t) {
+        const sl = $('#amb-' + t);
+        const rd = $('#amb-' + t + '-r');
+        if (!sl || !rd) return;
+        const cur = (typeof lvls[t] === 'number') ? lvls[t] : (t === 'footstep' ? 0.30 : 0.20);
+        sl.value = Math.round(cur * 100);
+        rd.textContent = sl.value + '%' + (locked ? ' 🔒' : '');
+        sl.disabled = locked;
+        sl.title = locked ? 'Vom Veranstalter gesetzt — im Event-Raum nicht aenderbar' : '';
+      });
+    }
+    types.forEach(function(t) {
+      const sl = $('#amb-' + t);
+      const rd = $('#amb-' + t + '-r');
+      if (!sl || !rd) return;
+      sl.addEventListener('input', function() {
+        if (window.__voicewalker?.isEventRangesActive?.()) { refresh(); return; }
+        const v = parseInt(sl.value, 10);
+        rd.textContent = v + '%';
+        window.__voicewalker?.setAmbientLevel?.(t, v / 100);
+      });
+    });
+    refresh();
+    // Polling: wenn der User Event betritt/verlaesst, Slider neu state'n.
+    setInterval(refresh, 2000);
+  })();
+
+  // Crossover-Slider: setzt audioConfig.crossoverM live.
+  (function() {
+    const sl = $('#test-crossover'), rd = $('#test-crossover-r');
+    const sync = () => {
+      const v = parseInt(sl.value, 10);
+      rd.textContent = v + ' m';
+      if (window.__voicewalker) window.__voicewalker.audioConfig.crossoverM = v;
+    };
+    sl.addEventListener('input', sync);
+    // Initial-Wert aus audioConfig lesen sobald Bridge verfuegbar.
+    setTimeout(() => {
+      const cur = window.__voicewalker?.audioConfig?.crossoverM;
+      if (typeof cur === 'number') { sl.value = Math.min(500, cur); rd.textContent = Math.round(cur) + ' m'; }
+    }, 500);
+  })();
+
+  $('#btn-test-add-walker').addEventListener('click', () => addPeer('walker'));
+  $('#btn-test-add-cockpit').addEventListener('click', () => addPeer('cockpit'));
+  $('#btn-test-pause').addEventListener('click', () => {
+    const peers = window.__voicewalker?.listTestPeers?.() || [];
+    peers.forEach(p => window.__voicewalker?.setPeerOverride?.(p.peerKey, { enabled: false }));
+    setTimeout(renderPeerList, 50);
+  });
+  $('#btn-test-resume').addEventListener('click', () => {
+    const peers = window.__voicewalker?.listTestPeers?.() || [];
+    peers.forEach(p => window.__voicewalker?.setPeerOverride?.(p.peerKey, { enabled: true }));
+    setTimeout(renderPeerList, 50);
+  });
   $('#btn-test-stop').addEventListener('click', () => {
     window.__voicewalker?.removeTestPeer?.();
-    $('#test-walker-count').value = 0;
-    $('#test-cockpit-count').value = 0;
-    $('#test-walker-count-r').textContent = '0';
-    $('#test-cockpit-count-r').textContent = '0';
     updateTestPeersStatus();
+    setTimeout(renderPeerList, 50);
   });
+  updateTestPeersStatus();
 
-  // Audio-Pool-Upload: User kann mehrere Files auf einmal auswaehlen. Jede
-  // Datei wird als ArrayBuffer eingelesen und gemeinsam an die App-Bridge
-  // uebergeben — die decoded den Pool und teilt pro Test-Peer einen Buffer
-  // deterministisch zu.
-  $('#test-audio-file').addEventListener('change', async (e) => {
-    const files = Array.from(e.target.files || []);
-    const status = $('#test-audio-status');
-    if (files.length === 0) return;
-    const fn = window.__voicewalker?.loadTestAudioBuffers;
-    if (typeof fn !== 'function') {
-      alert('Audio-Bridge fehlt — Tab neu laden.'); return;
+  // ==== Per-Peer-Liste ======================================================
+  // Nach jedem applyTestPeers() rendern wir die Liste der gespawnten Peers.
+  // Jede Zeile: Toggle | Callsign | Volume | Radius | MP3-Picker | Pfad-Modus.
+  // Aenderungen wirken live (ohne Re-Apply); MP3-Wechsel triggert
+  // applyTestPeers automatisch (alte Source kann nicht reattached werden).
+  // Globale Hilfsfunktion fuer onchange-Inline-Handler auf File-Inputs.
+  // Coherent GT schluckt manchmal window-capture 'change'-Events von
+  // File-Inputs — daher direkt per Attribut verdrahtet.
+  window.__vwFileChange = function(el) {
+    const file = el.files && el.files[0];
+    if (!file) return;
+    const peer = el.dataset.peer;
+    if (!peer) return;
+    file.arrayBuffer()
+      .then(ab => window.__voicewalker?.setPeerAudio?.(peer, ab, file.name))
+      .then(() => renderPeerList())
+      .catch(err => alert('MP3-Decode: ' + err.message));
+  };
+
+  function renderPeerList() {
+    const host = $('#test-peer-list');
+    const fn = window.__voicewalker?.listTestPeers;
+    if (typeof fn !== 'function') { host.innerHTML = ''; return; }
+    const peers = fn();
+    if (peers.length === 0) {
+      host.innerHTML = '<div class="hint">Keine Test-Peers aktiv. Counter setzen + Anwenden.</div>';
+      return;
     }
-    try {
-      const arrayBuffers = await Promise.all(files.map(f => f.arrayBuffer()));
-      const decoded = await fn(arrayBuffers);
-      status.textContent = 'Pool: ' + decoded.length + ' Buffer geladen ('
-        + files.map(f => f.name).join(', ') + ')';
+    // Pro Peer eine Karte mit grid-template-columns "label | wert" — passt
+    // sich an JEDE Containerbreite an. Slider haben width:100%, kein min-width.
+    // Header-Row: Toggle + Callsign (sticky bei knappem Platz).
+    let html = '<div class="hint" style="margin-bottom:4px">Pro Peer einstellbar:</div>';
+    for (const p of peers) {
+      const k = p.peerKey;
+      const cs = p.callsign;
+      const enChecked = p.enabled ? 'checked' : '';
+      const vol = (p.volume * 100) | 0;
+      // Cockpit-Radius in NM, Walker in Meter. Slider speichert intern Meter.
+      const NM = 1852;
+      const isCockpit = (p.kind === 'cockpit');
+      const rMin  = isCockpit ? 0.1 : 0;
+      const rMax  = isCockpit ? 2   : 20;
+      const rStep = isCockpit ? 0.1 : 1;
+      const rVal  = isCockpit ? (p.radius / NM).toFixed(1) : (p.radius | 0);
+      const rRead = isCockpit ? `${rVal} NM` : `${rVal} m`;
+      const spd = Math.round((p.speedFactor !== undefined ? p.speedFactor : 1.0) * 10) / 10;
+      const audioLabel = p.audioName || 'Pool/Sweep';
+      const pathType = p.pathType || 'organic';
+      const recName  = p.recordedPathName || '';
+      const fileId = 'pf-' + k;
+      html += '<div style="border:1px solid rgba(255,255,255,0.12);border-radius:4px;'
+            + 'padding:5px 6px;margin-bottom:5px;font-size:11px">'
+            // Header
+            + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'
+            +   '<input type="checkbox" data-peer="' + k + '" data-field="enabled" ' + enChecked + '>'
+            +   '<span style="font-weight:bold;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+            +     cs + '</span>'
+            +   '<select data-peer="' + k + '" data-field="pathType" style="font-size:10px;color:#111;background:#d8e2f0">'
+            +     '<option value="organic"'  + (pathType === 'organic'   ? ' selected' : '') + '>Organisch</option>'
+            +     '<option value="recorded"' + (pathType === 'recorded'  ? ' selected' : '') + '>Aufgezeichnet</option>'
+            +     '<option value="line"'     + (pathType === 'line'      ? ' selected' : '') + '>Linie</option>'
+            +     '<option value="circle"'   + (pathType === 'circle'    ? ' selected' : '') + '>Kreis</option>'
+            +     '<option value="static"'   + (pathType === 'static'    ? ' selected' : '') + '>Statisch</option>'
+            +   '</select>'
+            +   '<button data-peer="' + k + '" data-field="peer-delete"'
+            +     ' style="font-size:10px;padding:1px 5px;color:#f88;border-color:#f88" title="Peer entfernen">×</button>'
+            + '</div>'
+            // Pfad-Picker + Aufnahme-Controls (immer sichtbar — Pfad
+            // wird bei Zuweisung automatisch abgespielt, unabhaengig
+            // von pathType).
+            + (true ? (function() {
+                const paths = window.__voicewalker?.listSavedPaths?.() || [];
+                const recS  = window.__voicewalker?.getRecordingStatus?.() || {};
+                const isRec = recS.active && _recActivePeer === k;
+                let opts = '<option value="">-- Pfad wählen --</option>';
+                paths.forEach(function(pt) {
+                  opts += '<option value="' + pt.name + '"'
+                       + (pt.name === recName ? ' selected' : '') + '>'
+                       + pt.name + ' (' + pt.points + ' Pkt)</option>';
+                });
+                let html2 = '<div style="margin-bottom:3px;display:flex;gap:4px;align-items:center">'
+                  + '<span style="font-size:10px;opacity:0.7;flex-shrink:0">Pfad</span>'
+                  + '<select data-peer="' + k + '" data-field="recordedPath" style="font-size:10px;flex:1;color:#111;background:#d8e2f0">'
+                  + opts + '</select>'
+                  + '<button data-peer="' + k + '" data-field="rec-toggle" style="font-size:10px;padding:1px 5px;flex-shrink:0">'
+                  + (isRec ? '■ ' + recS.count : '● Rec') + '</button>'
+                  + '</div>';
+                if (isRec || (recS.count > 1 && _recActivePeer === k)) {
+                  html2 += '<div style="display:flex;gap:4px;margin-bottom:3px;align-items:center">'
+                    + '<input id="rec-name-' + k + '" type="text" placeholder="Pfad-Name" style="flex:1;font-size:10px;padding:2px 4px">'
+                    + '<button data-peer="' + k + '" data-field="rec-save" style="font-size:10px;padding:1px 5px">Speichern</button>'
+                    + '</div>';
+                }
+                return html2;
+              })() : '')
+            // Volume-Zeile: Label links, Slider voll breit, Readout rechts
+            + '<div style="display:grid;grid-template-columns:32px 1fr 44px;gap:4px;align-items:center;margin-bottom:3px">'
+            +   '<span>Vol</span>'
+            +   '<input type="range" min="0" max="200" step="1" value="' + vol
+            +     '" data-peer="' + k + '" data-field="volume" style="width:100%;min-width:0">'
+            +   '<span class="readout" style="text-align:right">' + vol + '%</span>'
+            + '</div>'
+            // Radius-Zeile (Walker in m, Cockpit in NM)
+            + '<div style="display:grid;grid-template-columns:32px 1fr 50px;gap:4px;align-items:center;margin-bottom:3px">'
+            +   '<span>Rad</span>'
+            +   '<input type="range" min="' + rMin + '" max="' + rMax + '" step="' + rStep + '" value="' + rVal
+            +     '" data-peer="' + k + '" data-field="radius"' + (isCockpit ? ' data-unit="nm"' : '')
+            +     ' style="width:100%;min-width:0">'
+            +   '<span class="readout" style="text-align:right">' + rRead + '</span>'
+            + '</div>'
+            // Speed-Zeile
+            + '<div style="display:grid;grid-template-columns:32px 1fr 44px;gap:4px;align-items:center;margin-bottom:3px">'
+            +   '<span>Spd</span>'
+            +   '<input type="range" min="0" max="50" step="1" value="' + Math.round(spd * 10)
+            +     '" data-peer="' + k + '" data-field="speed" style="width:100%;min-width:0">'
+            +   '<span class="readout" style="text-align:right">' + spd.toFixed(1) + 'x</span>'
+            + '</div>'
+            // MP3-Zeile: Button + Name + Clear
+            + '<div style="display:grid;grid-template-columns:auto 1fr auto;gap:4px;align-items:center">'
+            +   '<input type="file" accept="audio/*" id="' + fileId + '" data-peer="' + k
+            +     '" data-field="audio" style="display:none" onchange="__vwFileChange(this)">'
+            +   '<button data-target="' + fileId + '" style="font-size:10px;padding:2px 6px">MP3</button>'
+            +   '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
+            +     'font-size:10px;opacity:0.85">' + audioLabel + '</span>'
+            +   '<button data-peer="' + k + '" data-field="audio-clear" '
+            +     'style="font-size:10px;padding:2px 6px" title="MP3 entfernen">×</button>'
+            + '</div>'
+            + '</div>';
+    }
+    host.innerHTML = html;
+
+    // Event-Wiring: Coherent GT verschluckt per-Element-Listener innerhalb
+    // von <ingame-ui>. Deshalb window-capture fuer alle Input-Typen, dann
+    // per closest() auf den jeweiligen Peer-Host routen.
+    // (Gleiche Strategie wie panel.js setupEventRouter fuer Action-Buttons.)
+  }
+
+  // Per-Peer-Steuerung: window-capture auf Input/Change/Click — einmalig
+  // registriert, unabhaengig von renderPeerList-Refresh-Zyklen.
+  function _peerListRoute(e) {
+    const t = e.target;
+    if (!t || !t.dataset || !t.dataset.peer) return;
+    const peer = t.dataset.peer;
+    const field = t.dataset.field;
+    if (!peer || !field) return;
+
+    if (t.tagName === 'INPUT' && t.type === 'checkbox' && field === 'enabled') {
+      window.__voicewalker?.setPeerOverride?.(peer, { enabled: t.checked });
+      return;
+    }
+    if (t.tagName === 'INPUT' && t.type === 'range') {
+      const readout = t.parentElement && t.parentElement.querySelector('.readout');
+      if (field === 'volume') {
+        const v = parseInt(t.value, 10) / 100;
+        if (readout) readout.textContent = t.value + '%';
+        window.__voicewalker?.setPeerOverride?.(peer, { volume: v });
+      } else if (field === 'speed') {
+        const v = parseInt(t.value, 10) / 10;
+        if (readout) readout.textContent = v.toFixed(1) + 'x';
+        window.__voicewalker?.setPeerOverride?.(peer, { speedFactor: v });
+      } else if (field === 'radius') {
+        const isNM = t.dataset.unit === 'nm';
+        const sv = parseFloat(t.value);
+        const meters = isNM ? sv * 1852 : sv;
+        if (readout) readout.textContent = isNM ? `${sv.toFixed(1)} NM` : `${Math.round(sv)} m`;
+        window.__voicewalker?.setPeerOverride?.(peer, { radius: meters });
+      }
+      return;
+    }
+    if (t.tagName === 'SELECT' && field === 'pathType') {
+      window.__voicewalker?.setPeerOverride?.(peer, { pathType: t.value });
+      setTimeout(renderPeerList, 50); // Pfad-Picker ein-/ausblenden
+      return;
+    }
+    if (t.tagName === 'SELECT' && field === 'recordedPath') {
+      window.__voicewalker?.setPeerOverride?.(peer, { recordedPathName: t.value || null });
+      return;
+    }
+    if (t.tagName === 'INPUT' && t.type === 'file' && field === 'audio') {
+      const file = t.files && t.files[0];
+      if (!file) return;
+      file.arrayBuffer().then(ab => {
+        return window.__voicewalker?.setPeerAudio?.(peer, ab, file.name);
+      }).then(() => renderPeerList())
+        .catch(err => alert('MP3-Decode fehlgeschlagen: ' + err.message));
+      return;
+    }
+    if (t.tagName === 'BUTTON' && field === 'audio-clear') {
+      e.stopPropagation(); e.preventDefault();
+      window.__voicewalker?.clearPeerAudio?.(peer);
+      renderPeerList();
+      return;
+    }
+  }
+  // input (live waehrend Ziehen) + change (beim Loslassen) — beide binden
+  // damit auch Coherent-GT-Varianten die nur eines der Events feuern abgedeckt sind.
+  window.addEventListener('input',  _peerListRoute, { capture: true });
+  window.addEventListener('change', _peerListRoute, { capture: true });
+  window.addEventListener('click',  function(e) {
+    const t = e.target;
+    if (!t || !t.dataset) return;
+    // Aufnahme starten/stoppen pro Peer
+    if (t.dataset.field === 'rec-toggle' && t.dataset.peer) {
+      e.stopPropagation(); e.preventDefault();
+      const peerKey = t.dataset.peer;
+      const s = window.__voicewalker?.getRecordingStatus?.() || {};
+      if (s.active && _recActivePeer === peerKey) {
+        window.__voicewalker?.pausePathRecording?.();
+      } else {
+        if (s.active) window.__voicewalker?.pausePathRecording?.();
+        const ok = window.__voicewalker?.startPathRecording?.();
+        if (!ok) { alert('Kein Sim aktiv.'); return; }
+        _recActivePeer = peerKey;
+      }
+      setTimeout(renderPeerList, 50);
+      return;
+    }
+    // Aufnahme speichern + Peer zuweisen
+    if (t.dataset.field === 'rec-save' && t.dataset.peer) {
+      e.stopPropagation(); e.preventDefault();
+      const peerKey = t.dataset.peer;
+      const inp = document.getElementById('rec-name-' + peerKey);
+      const name = (inp?.value || '').trim() || (peerKey + '-pfad');
+      const s = window.__voicewalker?.getRecordingStatus?.() || {};
+      if (s.active) window.__voicewalker?.pausePathRecording?.();
+      const n = window.__voicewalker?.stopPathRecording?.(name) || 0;
+      if (n < 2) { alert('Zu wenige Punkte aufgezeichnet.'); return; }
+      window.__voicewalker?.setPeerOverride?.(peerKey, { pathType: 'recorded', recordedPathName: name });
+      _recActivePeer = null;
+      setTimeout(renderPeerList, 50);
+      return;
+    }
+    // Peer-Delete-Button
+    if (t.dataset.field === 'peer-delete' && t.dataset.peer) {
+      e.stopPropagation(); e.preventDefault();
+      window.__voicewalker?.removeOnePeer?.(t.dataset.peer);
       updateTestPeersStatus();
-    } catch (err) {
-      status.textContent = 'Decode-Fehler: ' + err.message;
-      console.error('[debug] audio decode failed:', err);
+      setTimeout(renderPeerList, 50);
+      return;
     }
-  });
-  $('#btn-test-audio-clear').addEventListener('click', () => {
-    window.__voicewalker?.clearTestAudioBuffers?.();
-    $('#test-audio-file').value = '';
-    $('#test-audio-status').textContent =
-      'Default: Sweep-Tone. Mehrere Files moeglich — jeder Test-Peer bekommt '
-      + 'deterministisch einen Buffer aus dem Pool zugewiesen.';
-    updateTestPeersStatus();
-  });
+    // Audio-Clear-Button
+    if (t.dataset.field === 'audio-clear' && t.dataset.peer) {
+      e.stopPropagation(); e.preventDefault();
+      window.__voicewalker?.clearPeerAudio?.(t.dataset.peer);
+      renderPeerList();
+      return;
+    }
+    // "MP3 wählen"-Button triggert verstecktes File-Input
+    if (t.dataset.target) {
+      e.stopPropagation(); e.preventDefault();
+      const fi = document.getElementById(t.dataset.target);
+      if (fi) { fi.value = ''; fi.click(); }
+    }
+  }, { capture: true });
 
+  // Initial leere Liste rendern (Hint "Keine Test-Peers aktiv").
+  renderPeerList();
+
+
+  // ==== Per-Peer Aufnahme ===================================================
+  let _recActivePeer = null; // peerKey der gerade aufnimmt
+
+  // Polling: nur den Rec-Button-Text updaten ohne die ganze Liste neu zu bauen
+  // (sonst wird das Name-Eingabefeld jede Sekunde geleert).
+  setInterval(function() {
+    if (!_recActivePeer) return;
+    const s = window.__voicewalker?.getRecordingStatus?.() || {};
+    const btn = panel.querySelector('[data-field="rec-toggle"][data-peer="' + _recActivePeer + '"]');
+    if (btn) btn.textContent = s.active ? '■ ' + s.count : '● Rec';
+  }, 1000);
+
+  // ==== Peer-Konfigurationen ===============================================
+  function renderCfgList() {
+    const host = $('#cfg-list');
+    if (!host) return;
+    const cfgs = window.__voicewalker?.listSavedPeerConfigs?.() || [];
+    if (cfgs.length === 0) { host.innerHTML = '<div class="hint">Keine Konfigurationen gespeichert.</div>'; return; }
+    let html = '';
+    cfgs.forEach(function(c) {
+      html += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;font-size:10px">'
+            + '<span style="flex:1">' + c.name + ' <span style="opacity:0.5">(' + c.walkerCount + 'W/' + c.cockpitCount + 'C)</span></span>'
+            + '<button data-cfg-load="' + c.name + '" style="font-size:10px;padding:1px 5px">Laden</button>'
+            + '<button data-cfg-del="'  + c.name + '" style="font-size:10px;padding:1px 5px;color:#f88;border-color:#f88">×</button>'
+            + '</div>';
+    });
+    host.innerHTML = html;
+  }
+
+  (function() {
+    const btnSave = $('#btn-cfg-save');
+    if (btnSave) btnSave.addEventListener('click', function() {
+      const name = ($('#cfg-name')?.value || '').trim();
+      if (!name) { alert('Bitte einen Config-Namen eingeben.'); return; }
+      window.__voicewalker?.saveTestPeerConfig?.(name);
+      renderCfgList();
+    });
+    const host = $('#cfg-list');
+    if (host) host.addEventListener('click', function(e) {
+      const loadName = e.target.dataset.cfgLoad;
+      const delName  = e.target.dataset.cfgDel;
+      if (loadName) {
+        window.__voicewalker?.loadTestPeerConfig?.(loadName);
+        updateTestPeersStatus();
+        setTimeout(renderPeerList, 100);
+      } else if (delName) {
+        if (!confirm('Config "' + delName + '" löschen?')) return;
+        window.__voicewalker?.deleteSavedPeerConfig?.(delName);
+        renderCfgList();
+      }
+    });
+  })();
+
+  renderCfgList();
 
   // ==== Toggle / Hotkey ===================================================
   function toggle(force) {

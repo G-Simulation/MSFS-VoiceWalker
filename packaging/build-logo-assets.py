@@ -196,14 +196,38 @@ print(f"[logo] wrote {horiz_out} ({horiz_out.stat().st_size} bytes, {horiz.size}
 #    Toolbar-Icons im Active-State invertieren.
 #    Plus: viewBox enger auf den BBox des Logos (43..471) — Default
 #    "0 0 512 512" laesst ~17% Padding rundum, das Icon wirkte klein.
+#
+#    KRITISCH: Das Master-SVG hat zwei Klassen von Fill-Pfaden:
+#       fill="#000000" = eigentliche Logo-Form
+#       fill="#ffffff" = Negativraeume / Loecher im Logo
+#    Wenn wir beide behalten und alle fill-Attribute strippen, toent MSFS
+#    Logo UND Loch in derselben State-Farbe — sie heben sich auf und
+#    uebrig bleibt nur die Aussenkante als haarduenne Outline. Im aktiven
+#    Toolbar-Slot (weisser Hintergrund) ist das Icon dann praktisch
+#    unsichtbar.
+#    Fix: weisse Negativraum-Pfade VOR dem fill-Strip entfernen. Verlust
+#    der Innenraum-Loecher ist akzeptabel — ein solides Logo das man
+#    sieht ist besser als ein perfektes Logo das unsichtbar ist.
 toolbar_clean = _strip_outlines(src_svg)
-# Alle fill-Attribute aus den Paths streichen — MSFS injiziert State-Farbe.
+# Negativraum-Pfade (fill="#ffffff") ENTFERNEN — sonst kannibalisieren sie
+# das Logo wenn MSFS alles in derselben Farbe toent. Multiline weil
+# <path>-Bloecke ueber viele Zeilen mit d="..." gehen.
+toolbar_clean = re.sub(
+    r'<path[^>]*?fill="#ffffff"[^>]*?/>',
+    '',
+    toolbar_clean,
+    flags=re.DOTALL,
+)
+# Alle restlichen fill-Attribute aus den Paths streichen — MSFS injiziert
+# State-Farbe. Nach dem Negativraum-Strip oben sind das nur noch die
+# schwarzen Logo-Pfade.
 toolbar_clean = re.sub(r'\s*fill="[^"]*"', '', toolbar_clean)
-# viewBox auf engere BBox setzen damit das Logo den Toolbar-Slot besser
-# fuellt (~13% mehr Auslastung, 13px Sicherheits-Puffer um den Content).
+# viewBox leicht groesser als Logo-BBox → ~12% Padding um den Content,
+# damit das Toolbar-Icon nicht den ganzen Slot ausfuellt (sieht sonst
+# zu wuchtig aus neben den anderen MSFS-Toolbar-Icons).
 toolbar_clean = re.sub(
     r'viewBox="[^"]*"',
-    'viewBox="30 30 452 452"',
+    'viewBox="0 0 512 512"',
     toolbar_clean,
     count=1,
 )
@@ -281,3 +305,13 @@ if i18n_src.is_file():
     i18n_dst = ROOT / "msfs-project" / "PackageSources" / "html_ui" / "InGamePanels" / "VoiceWalker" / "i18n.js"
     shutil.copy2(i18n_src, i18n_dst)
     print(f"[i18n] copied to {i18n_dst}")
+
+# Stamp-Datei fuer MSBuild-Inkremental-Logik. Das Skript schreibt MEHR als
+# eine Output-Datei (Toolbar-SVG, EFB-Icon, Thumbnail, i18n-Mirror, PNGs);
+# wenn wixproj nur das Toolbar-SVG als Outputs= deklariert, skippt MSBuild
+# das Target sobald irgendwer das SVG anfasst (mtime aktueller als Inputs).
+# Stamp wird ausschliesslich von diesem Skript geschrieben — wenn Stamp
+# aelter als ein Input ist, laeuft das Skript zuverlaessig erneut.
+stamp = ROOT / "packaging" / ".assets.stamp"
+stamp.write_text(f"build-logo-assets ok\n", encoding="utf-8")
+print(f"[stamp] wrote {stamp}")

@@ -85,3 +85,6 @@ msfs-project/Sources/wasm/MSFS/
 *.lastbuildstate
 *.recipe
 *.obj
+
+# Build-Stamp fuer GenerateLogoAssets-Target (MSBuild Inkremental-Tracker)
+packaging/.assets.stamp

@@ -133,11 +133,15 @@
 
   function attach() {
     function appendBoth() {
-      // Reihenfolge wichtig: FAB muss NACH dem overlay im DOM stehen,
-      // damit der CSS-Sibling-Selektor `#vw-debug-overlay.open ~ #vw-debug-fab`
-      // den FAB ausblenden kann wenn das Overlay offen ist.
-      document.body.appendChild(overlay);
-      document.body.appendChild(fab);
+      // Coherent GT im Toolbar-Panel routet Click-Events nur an Elemente
+      // INNERHALB des <ingame-ui>-Render-Targets. Direkt am document.body
+      // angehaengte Elemente sind zwar visuell sichtbar, bekommen aber
+      // keine Clicks (Hit-Test ist auf den Panel-Inhalt begrenzt). Daher:
+      // Overlay UND FAB als Kind des <ingame-ui> einhaengen. Im EFB-Tablet
+      // (kein <ingame-ui>) fallen wir auf body zurueck.
+      const host = document.querySelector('ingame-ui') || document.body;
+      host.appendChild(overlay);
+      host.appendChild(fab);
     }
     if (document.body) {
       appendBoth();
@@ -183,29 +187,41 @@
   // — gleiches Pattern hier, sonst sind die Debug-Buttons im Toolbar tot
   // (im EFB-Tablet kein <ingame-ui>-Wrapper, dort gingen sie schon vorher).
   // Siehe panel.js setupEventRouter() — exakt dieselbe Begruendung.
-  window.addEventListener('click', function (e) {
-    if (!e.target || !e.target.closest) return;
-    if (e.target.closest('#vw-dbg-reload')) {
+  // Routing-Funktion: gemeinsam fuer click + pointerdown. Wenn Coherent
+  // 'click' verschluckt aber 'pointerdown' durchlaesst (oder umgekehrt),
+  // sehen wir das im Diagnose-Output unten.
+  function _route(e, evName) {
+    var t = e.target;
+    var tInfo = t ? (t.id || t.tagName || '?') : '(null)';
+    var hit = t && t.closest && (t.closest('[id^="vw-dbg-"]') || t.closest('#vw-debug-fab'));
+    var hitId = hit ? hit.id : null;
+    console.info('[VW Debug] ' + evName + ' target=', tInfo,
+                 'hit=', hitId, 'phase=', e.eventPhase, 'composed=', e.composed);
+    if (!t || !t.closest) return;
+    if (t.closest('#vw-dbg-reload')) {
       e.stopPropagation(); e.preventDefault();
       location.reload();
       return;
     }
-    if (e.target.closest('#vw-dbg-clear')) {
+    if (t.closest('#vw-dbg-clear')) {
       e.stopPropagation(); e.preventDefault();
       ring.length = 0; renderLog();
       return;
     }
-    if (e.target.closest('#vw-dbg-close')) {
+    if (t.closest('#vw-dbg-close')) {
       e.stopPropagation(); e.preventDefault();
+      console.info('[VW Debug] close-route hit, calling toggle(false)');
       toggle(false);
       return;
     }
-    if (e.target.closest('#vw-debug-fab')) {
+    if (t.closest('#vw-debug-fab')) {
       e.stopPropagation(); e.preventDefault();
       toggle(true);
       return;
     }
-  }, { capture: true });
+  }
+  window.addEventListener('click',       function (e) { _route(e, 'click'); },       { capture: true });
+  window.addEventListener('pointerdown', function (e) { _route(e, 'pointerdown'); }, { capture: true });
 
   // Hotkeys.
   // Strg+Shift+D = Toggle (auch global, immer aktiv).

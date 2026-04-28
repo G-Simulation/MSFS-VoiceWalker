@@ -31,6 +31,11 @@ define('GSIM_EVENTS_META_VISIBILITY',   '_gsim_event_visibility');  // 'public' 
 define('GSIM_EVENTS_META_RANGE_WALKER',  '_gsim_event_range_walker');   // Meter
 define('GSIM_EVENTS_META_RANGE_COCKPIT', '_gsim_event_range_cockpit');  // Meter
 define('GSIM_EVENTS_META_CROSSOVER',     '_gsim_event_crossover_m');    // Meter
+// Ambient-Lautstaerken (0..100 = Prozent). Leer/0 = App-Default nutzen.
+define('GSIM_EVENTS_META_AMB_FOOTSTEP',   '_gsim_event_amb_footstep');   // %
+define('GSIM_EVENTS_META_AMB_PROPELLER',  '_gsim_event_amb_propeller');  // %
+define('GSIM_EVENTS_META_AMB_JET',        '_gsim_event_amb_jet');        // %
+define('GSIM_EVENTS_META_AMB_HELICOPTER', '_gsim_event_amb_helicopter'); // %
 
 // WC-Produkt-ID des "Fly-In Event Hosting"-Produkts. Beim Kauf dieses Produkts
 // wird der Käufer zum event_organizer. Kann via Filter überschrieben werden.
@@ -142,6 +147,10 @@ add_action('add_meta_boxes_tribe_events', function () {
             $rngWalk  = get_post_meta($post->ID, GSIM_EVENTS_META_RANGE_WALKER, true);
             $rngCpt   = get_post_meta($post->ID, GSIM_EVENTS_META_RANGE_COCKPIT, true);
             $rngCross = get_post_meta($post->ID, GSIM_EVENTS_META_CROSSOVER, true);
+            $ambStep  = get_post_meta($post->ID, GSIM_EVENTS_META_AMB_FOOTSTEP,   true);
+            $ambProp  = get_post_meta($post->ID, GSIM_EVENTS_META_AMB_PROPELLER,  true);
+            $ambJet   = get_post_meta($post->ID, GSIM_EVENTS_META_AMB_JET,        true);
+            $ambHeli  = get_post_meta($post->ID, GSIM_EVENTS_META_AMB_HELICOPTER, true);
             wp_nonce_field('gsim_events_meta_save', 'gsim_events_meta_nonce');
             ?>
             <p><strong>Passphrase</strong> (auto-generiert, wird beim ersten Speichern gesetzt):<br>
@@ -173,10 +182,42 @@ add_action('add_meta_boxes_tribe_events', function () {
                        value="<?php echo esc_attr($rngCross); ?>" style="width:80px">
             </label></p>
 
+            <hr style="margin:12px 0;border:0;border-top:1px solid #ddd">
+            <p style="font-weight:600;margin-bottom:4px">Ambient-Sounds (Lautstärke %)</p>
+            <p style="color:#888;font-size:11px;margin:0 0 8px 0;line-height:1.4">
+                Pegel der automatischen Hintergrund-Sounds (Schritte, Triebwerke).
+                Werte 0–100. Leer lassen = App-Defaults (30/20/20/20). Im Event-Raum
+                können Teilnehmer diese Werte nicht überschreiben — schützt vor Trolling.
+            </p>
+            <p style="margin:4px 0"><label>
+                Schritte (%):
+                <input type="number" name="gsim_amb_footstep" min="0" max="100" step="1"
+                       value="<?php echo esc_attr($ambStep); ?>" style="width:80px"
+                       placeholder="30">
+            </label></p>
+            <p style="margin:4px 0"><label>
+                Propeller (%):
+                <input type="number" name="gsim_amb_propeller" min="0" max="100" step="1"
+                       value="<?php echo esc_attr($ambProp); ?>" style="width:80px"
+                       placeholder="20">
+            </label></p>
+            <p style="margin:4px 0"><label>
+                Jet (%):
+                <input type="number" name="gsim_amb_jet" min="0" max="100" step="1"
+                       value="<?php echo esc_attr($ambJet); ?>" style="width:80px"
+                       placeholder="20">
+            </label></p>
+            <p style="margin:4px 0"><label>
+                Helikopter (%):
+                <input type="number" name="gsim_amb_helicopter" min="0" max="100" step="1"
+                       value="<?php echo esc_attr($ambHeli); ?>" style="width:80px"
+                       placeholder="20">
+            </label></p>
+
             <p style="color:#888;font-size:12px;margin-top:12px">
                Teilnehmer klickt auf den Join-Link → VoiceWalker-App öffnet sich →
                tritt automatisch dem privaten Raum bei + übernimmt (falls gesetzt)
-               die Event-Ranges.
+               die Event-Ranges + Ambient-Pegel.
             </p>
             <?php
         },
@@ -207,6 +248,10 @@ add_action('save_post_tribe_events', function ($post_id) {
     $save('gsim_range_walker',    GSIM_EVENTS_META_RANGE_WALKER,  0, 1000);
     $save('gsim_range_cockpit',   GSIM_EVENTS_META_RANGE_COCKPIT, 0, 50000);
     $save('gsim_range_crossover', GSIM_EVENTS_META_CROSSOVER,     0, 500);
+    $save('gsim_amb_footstep',    GSIM_EVENTS_META_AMB_FOOTSTEP,   0, 100);
+    $save('gsim_amb_propeller',   GSIM_EVENTS_META_AMB_PROPELLER,  0, 100);
+    $save('gsim_amb_jet',         GSIM_EVENTS_META_AMB_JET,        0, 100);
+    $save('gsim_amb_helicopter',  GSIM_EVENTS_META_AMB_HELICOPTER, 0, 100);
 }, 15, 1);
 
 // -----------------------------------------------------------------------------
@@ -551,6 +596,13 @@ function gsim_events_shape_event($event) {
     $rngWalk  = (int) get_post_meta($event->ID, GSIM_EVENTS_META_RANGE_WALKER, true);
     $rngCpt   = (int) get_post_meta($event->ID, GSIM_EVENTS_META_RANGE_COCKPIT, true);
     $rngCross = (int) get_post_meta($event->ID, GSIM_EVENTS_META_CROSSOVER, true);
+    $ambStep  = get_post_meta($event->ID, GSIM_EVENTS_META_AMB_FOOTSTEP,   true);
+    $ambProp  = get_post_meta($event->ID, GSIM_EVENTS_META_AMB_PROPELLER,  true);
+    $ambJet   = get_post_meta($event->ID, GSIM_EVENTS_META_AMB_JET,        true);
+    $ambHeli  = get_post_meta($event->ID, GSIM_EVENTS_META_AMB_HELICOPTER, true);
+    // Ambient-Werte sind nur dann gesetzt wenn der Veranstalter sie explizit eingegeben hat
+    // (leer/0 = App-Default beibehalten, nicht uebersteuern).
+    $hasAmb   = ($ambStep !== '' || $ambProp !== '' || $ambJet !== '' || $ambHeli !== '');
     return [
         'id'             => $event->ID,
         'title'          => $event->post_title,
@@ -568,10 +620,14 @@ function gsim_events_shape_event($event) {
         'url'            => get_permalink($event->ID),
         // Optionale Event-spezifische Audio-Ranges (0/leer = App-Defaults).
         // Client wendet diese waehrend der Raum-Mitgliedschaft an.
-        'ranges'         => ($rngWalk || $rngCpt || $rngCross) ? [
-            'walker_m'    => $rngWalk  ?: null,
-            'cockpit_m'   => $rngCpt   ?: null,
-            'crossover_m' => $rngCross ?: null,
+        'ranges'         => ($rngWalk || $rngCpt || $rngCross || $hasAmb) ? [
+            'walker_m'         => $rngWalk  ?: null,
+            'cockpit_m'        => $rngCpt   ?: null,
+            'crossover_m'      => $rngCross ?: null,
+            'ambient_footstep'   => ($ambStep !== '') ? (int) $ambStep : null,
+            'ambient_propeller'  => ($ambProp !== '') ? (int) $ambProp : null,
+            'ambient_jet'        => ($ambJet  !== '') ? (int) $ambJet  : null,
+            'ambient_helicopter' => ($ambHeli !== '') ? (int) $ambHeli : null,
         ] : null,
     ];
 }

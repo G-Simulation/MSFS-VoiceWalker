@@ -66,6 +66,51 @@ Public WebTorrent trackers (network service, not code)
     No audio data transits these trackers — only short SDP signaling
     exchanges that establish direct WebRTC connections between peers.
 
+Audio assets
+------------
+
+Ambient sound samples bundled in `web/assets/`. Each sample is used under
+its individual license as documented below. Samples are trimmed and
+seamlessly looped at runtime via runtime crossfade; the original files
+are not redistributed as standalone products.
+
+    web/assets/footstep.mp3
+        Source: Freesound — sound id 851919 by user "Gasdust_cloud"
+                ("asphalt sneakers steps")
+        URL:    https://freesound.org/s/851919/
+        License: Creative Commons 0 (CC0) — public domain dedication.
+        Used as: walker ambient (footstep loop) for any peer in walker
+                mode while the peer is moving.
+
+    web/assets/propeller.mp3
+        Source: Freesound — sound id 737571 by user "therandomsoundbyte2637"
+                ("N386EP 2022 Textron Aviation Inc 172S")
+        URL:    https://freesound.org/s/737571/
+        License: Creative Commons 0 (CC0) — public domain dedication.
+        Used as: cockpit ambient for piston / turboprop aircraft
+                (selected when MSFS SimVar ENGINE TYPE is 0 or 5).
+
+    web/assets/jet.mp3
+        Source: Freesound — sound id 100432 by user "2hear"
+                ("Transatlantic jet internal cruising")
+        URL:    https://freesound.org/s/100432/
+        License: Creative Commons Attribution 4.0 International (CC-BY 4.0).
+                https://creativecommons.org/licenses/by/4.0/
+        Attribution: Original sound by "2hear" (Freesound). Used unmodified
+                in form (only trimmed and looped for playback). Redistributed
+                as part of VoiceWalker under CC-BY 4.0; the present NOTICE
+                file constitutes the required attribution.
+        Used as: cockpit ambient for jet aircraft
+                (selected when MSFS SimVar ENGINE TYPE is 1).
+
+    web/assets/helicopter.mp3
+        Source: Freesound — sound id 436449 by user "underlineddesigns"
+                ("helicopter rotor")
+        URL:    https://freesound.org/s/436449/
+        License: Creative Commons 0 (CC0) — public domain dedication.
+        Used as: cockpit ambient for helicopters
+                (selected when MSFS SimVar ENGINE TYPE is 3).
+
 Google Public STUN
     stun.l.google.com:19302 (and equivalents).
     Usage: Session Traversal Utilities for NAT — a free public service
