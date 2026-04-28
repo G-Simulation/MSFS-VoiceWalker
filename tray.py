@@ -22,6 +22,7 @@ import logging
 import os
 import pathlib
 import subprocess
+import threading
 import webbrowser
 from typing import Callable, Optional
 
@@ -61,6 +62,11 @@ def _edge_user_data_dir(suffix: str) -> str:
 _active_port: Optional[int] = None
 _headless_proc: Optional[subprocess.Popen] = None
 _app_proc:      Optional[subprocess.Popen] = None
+# Tray-Icon-Reference fuer die Close-Notification: wenn der User das
+# sichtbare App-Fenster mit X schliesst, zeigen wir am Tray einen Hinweis
+# dass die App im Hintergrund weiterlaeuft (Standard-Verhalten von Apps
+# die ins Tray minimieren). Wird in setup_tray() gesetzt.
+_tray_icon: Optional[object] = None
 
 
 def start_ui_hidden() -> bool:
@@ -143,6 +149,7 @@ def show_ui() -> bool:
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             _app_proc = subprocess.Popen(args, creationflags=flags, close_fds=True)
             log.info("tray: app-Fenster geoeffnet (pid=%d)", _app_proc.pid)
+            _watch_app_close(_app_proc)
             return True
         except Exception as e:
             log.warning("tray: Edge --app-Start fehlgeschlagen: %s", e)
@@ -155,6 +162,32 @@ def show_ui() -> bool:
     except Exception as e:
         log.warning("tray.show_ui: webbrowser.open failed: %s", e)
         return False
+
+
+def _watch_app_close(proc: subprocess.Popen) -> None:
+    """Daemon-Thread der wartet bis das sichtbare App-Fenster geschlossen
+    wird, dann eine Tray-Notification zeigt ("VoiceWalker laeuft weiter").
+    Standard-Verhalten von Apps die ins Tray minimieren — Endnutzer sieht
+    sonst kein Feedback dass das X-Schliessen die App nicht beendet hat."""
+    def _wait():
+        try:
+            proc.wait()
+        except Exception:
+            return
+        # Process ist beendet — User hat das Fenster geschlossen (X-Klick
+        # oder Alt+F4). Hinweis am Tray zeigen falls Icon noch lebt.
+        if _tray_icon is None:
+            return
+        try:
+            _tray_icon.notify(
+                "VoiceWalker laeuft weiter im Hintergrund.\n"
+                "Klick auf das Tray-Icon zum Oeffnen.",
+                "VoiceWalker",
+            )
+        except Exception as e:
+            log.debug("tray.notify failed: %s", e)
+
+    threading.Thread(target=_wait, daemon=True, name="vw-app-watch").start()
 
 
 def stop_processes() -> None:
@@ -297,5 +330,7 @@ def setup_tray(port: int, on_quit: Callable[[], None]) -> Optional[object]:
         return None
 
     icon.run_detached()
+    global _tray_icon
+    _tray_icon = icon
     log.info("tray: icon aktiv")
     return icon
