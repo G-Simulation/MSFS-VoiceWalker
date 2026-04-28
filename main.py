@@ -1079,17 +1079,22 @@ async def http_handler(connection, request):
     # funktionierenden Coherent GT Debugger (der in MSFS 2024 oft haengt).
     # Format: GET /debug/log?level=info&msg=...  (URL-encoded)
     if path.startswith("/debug/log"):
-        if not DEBUG_BUILD:
-            return _make_response(HTTPStatus.NOT_FOUND, [], b"")
+        # Bewusst KEIN DEBUG_BUILD-Gate: Panel-Logs sind nicht security-
+        # kritisch (eigene Panel-Messages, kein Backend-State), Server bindet
+        # auf 127.0.0.1, also kein externer Zugriff. Wir wollen Endnutzer-
+        # Diagnostik auch im Public-Build — sonst nicht debuggbar wenn der
+        # User ein Toolbar-/EFB-Problem meldet.
         try:
             from urllib.parse import urlparse, parse_qs
             parsed = urlparse(path)
             qs = parse_qs(parsed.query)
-            level = (qs.get("level", ["info"])[0] or "info").lower()
-            msg = qs.get("msg", [""])[0] or ""
-            # Nutze den Module-Logger (`log`) direkt, Prefix mit [panel] damit
-            # Panel-Logs im voicewalker.log optisch von Backend-Logs trennbar sind.
-            prefixed = "[panel] " + msg
+            level  = (qs.get("level",  ["info"])[0]  or "info").lower()
+            source = (qs.get("source", ["panel"])[0] or "panel").lower()
+            msg    = qs.get("msg", [""])[0] or ""
+            # Whitelist gegen log-injection ueber den Source-Param.
+            if source not in ("toolbar", "efb", "panel"):
+                source = "panel"
+            prefixed = "[%s] %s" % (source, msg)
             if level == "debug":
                 log.debug(prefixed)
             elif level == "warning":

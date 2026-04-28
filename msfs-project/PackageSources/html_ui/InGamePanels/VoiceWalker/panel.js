@@ -32,7 +32,7 @@
   };
 
   const HOSTS = ['localhost:7801', '127.0.0.1:7801'];
-  const DEBUG = false;  // true = HTTP-Log-Forwarding an /debug/log anschalten
+  const DEBUG = true;  // HTTP-Log-Forwarding an /debug/log — Endnutzer-Diagnostik
 
   // Zoom: rastet auf RADAR_SNAP_VALUES ein. Clamp [2.5 m, 25 km].
   const RADAR_RANGE_DEFAULT = 1000;
@@ -80,12 +80,19 @@
   };
 
   // --- Log-Helpers ------------------------------------------------------
+  // Source-Detection: panel-efb.html laeuft im EFB-Tablet, panel.html in
+  // der MSFS-Toolbar. Backend prefixt die Logs entsprechend in
+  // voicewalker.log damit man Toolbar-/EFB-Probleme nachverfolgen kann
+  // ohne den (in MSFS 2024 oft kaputten) Coherent-GT-Debugger zu brauchen.
+  const LOG_SOURCE = (typeof location !== 'undefined' && location.pathname &&
+                      location.pathname.indexOf('panel-efb') >= 0) ? 'efb' : 'toolbar';
   function plog(level, msg) {
     if (!DEBUG) return;
     HOSTS.forEach(function (h) {
       try {
         fetch('http://' + h + '/debug/log?level=' + encodeURIComponent(level)
-              + '&msg=' + encodeURIComponent('[panel-v4] ' + msg),
+              + '&source=' + LOG_SOURCE
+              + '&msg=' + encodeURIComponent(msg),
               { method: 'GET', cache: 'no-cache' }).catch(function () {});
       } catch (e) {}
     });
