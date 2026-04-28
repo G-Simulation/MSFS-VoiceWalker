@@ -103,7 +103,13 @@ def start_ui_hidden() -> bool:
     args = [
         edge,
         "--headless=new",
+        # use-fake-ui: Permission-UI auto-allow (im Headless eh kein UI da)
         "--use-fake-ui-for-media-stream",
+        # auto-accept: Mic-Permission wird auch ohne UI sofort granted
+        # (sonst muesste der User-Gesture den Permission-Flow triggern,
+        # was im Headless nicht moeglich ist). Permission persistiert dann
+        # im --user-data-dir und ist auch beim naechsten Start cached.
+        "--auto-accept-camera-and-microphone-capture",
         "--disable-features=Translate",
         f"--user-data-dir={_edge_user_data_dir('headless')}",
         url,

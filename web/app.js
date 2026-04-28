@@ -1260,6 +1260,27 @@ _appStartPromise.then(ok => {
 async function populateAudioDevices() {
   try {
     if (!navigator.mediaDevices?.enumerateDevices) return;
+
+    // Mic-Permission-Probe (einmalig pro Session): enumerateDevices() liefert
+    // ohne aktive Mic-Permission nur generic "Default"-Labels — keine echten
+    // Geraete-Namen. Das passiert insbesondere im Headless-Edge der vom
+    // Tray gestartet wird (kein User-Gesture-Fenster wo Permission gefragt
+    // werden koennte). Loesung: einmal getUserMedia({audio:true}) aufrufen,
+    // damit Chromium intern die Permission auf "granted" setzt; mit dem
+    // Edge-Flag --use-fake-ui-for-media-stream ist das im Headless eh
+    // auto-allow. Stream sofort schliessen — wir brauchten ihn nur fuer
+    // den Permission-Trigger.
+    if (!state._micPermissionProbed) {
+      state._micPermissionProbed = true;
+      try {
+        const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+        probe.getTracks().forEach(t => t.stop());
+      } catch (e) {
+        // Mic verweigert / nicht vorhanden — enumerate liefert dann eben
+        // nur Default-Labels. Nicht fatal.
+      }
+    }
+
     const devices = await navigator.mediaDevices.enumerateDevices();
     const inEl  = document.getElementById('audioInput');
     const outEl = document.getElementById('audioOutput');
