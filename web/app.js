@@ -1263,18 +1263,33 @@ async function populateAudioDevices() {
 
     // Mic-Permission-Probe (einmalig pro Session): enumerateDevices() liefert
     // ohne aktive Mic-Permission nur generic "Default"-Labels — keine echten
-    // Geraete-Namen. Das passiert insbesondere im Headless-Edge der vom
-    // Tray gestartet wird (kein User-Gesture-Fenster wo Permission gefragt
-    // werden koennte). Loesung: einmal getUserMedia({audio:true}) aufrufen,
-    // damit Chromium intern die Permission auf "granted" setzt; mit dem
-    // Edge-Flag --use-fake-ui-for-media-stream ist das im Headless eh
-    // auto-allow. Stream sofort schliessen — wir brauchten ihn nur fuer
-    // den Permission-Trigger.
+    // Geraete-Namen. Loesung: einmal getUserMedia({audio:true}) aufrufen,
+    // damit Chromium intern die Permission auf "granted" setzt. Stream
+    // sofort schliessen — wir brauchten ihn nur fuer den Permission-Trigger.
+    //
+    // First-Run-Detection: wenn die Permission VORHER auf 'prompt' war
+    // (User wurde noch nie gefragt), dann ist das der vom Tray gestartete
+    // sichtbare First-Run-Fenster. Nach erteilter Permission soll das
+    // Fenster sich automatisch schliessen — der naechste App-Start nutzt
+    // dann das gecachte 'granted' und laeuft off-screen weiter.
     if (!state._micPermissionProbed) {
       state._micPermissionProbed = true;
+      let wasFirstRun = false;
+      try {
+        const perm = await navigator.permissions.query({ name: 'microphone' });
+        wasFirstRun = (perm.state === 'prompt');
+      } catch (e) { /* permissions-API evtl. nicht verfuegbar */ }
       try {
         const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
         probe.getTracks().forEach(t => t.stop());
+        if (wasFirstRun) {
+          // Permission gerade erst granted → First-Run-Fenster schliessen.
+          // window.close() darf nur scripted-Windows schliessen — Edge --app
+          // wird via Chrome als solches behandelt, das funktioniert.
+          // Kurze Verzoegerung damit das overlay_state-Broadcast die
+          // Audio-Listen noch ans Backend schickt bevor wir zumachen.
+          setTimeout(() => { try { window.close(); } catch (e) {} }, 800);
+        }
       } catch (e) {
         // Mic verweigert / nicht vorhanden — enumerate liefert dann eben
         // nur Default-Labels. Nicht fatal.

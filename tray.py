@@ -69,21 +69,51 @@ _app_proc:      Optional[subprocess.Popen] = None
 _tray_icon: Optional[object] = None
 
 
+def _screen_center(width: int, height: int) -> tuple:
+    """Berechnet die Bildschirm-Mitte fuer ein Fenster der gegebenen Groesse,
+    via Win32 GetSystemMetrics. Fallback auf 200,100 wenn nicht ermittelbar."""
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        sw = user32.GetSystemMetrics(0)  # SM_CXSCREEN
+        sh = user32.GetSystemMetrics(1)  # SM_CYSCREEN
+        x = max(0, (sw - width) // 2)
+        y = max(0, (sh - height) // 2)
+        return x, y
+    except Exception:
+        return 200, 100
+
+
+def _is_first_run() -> bool:
+    """First-run = Audio-Profile-Folder leer/nicht da. Wir nutzen ein
+    eigenes Sub-Verzeichnis "audio" damit das nicht mit dem normalen
+    edge-app-Profile kollidiert."""
+    base = pathlib.Path(os.environ.get("LOCALAPPDATA", str(pathlib.Path.home())))
+    profile = base / "VoiceWalker" / "edge-audio"
+    if not profile.exists():
+        return True
+    try:
+        return not any(profile.iterdir())
+    except Exception:
+        return True
+
+
 def start_ui_hidden() -> bool:
-    """App-Start: headless Edge im Hintergrund starten.
+    """App-Start: Edge --app fuer Audio-Discovery starten.
 
-    --headless=new = neuer Headless-Mode (Chromium 88+) mit voller WebRTC-
-                     und Media-Devices-Unterstuetzung
-    --use-fake-ui-for-media-stream = Mic-Permission ohne User-Klick
-                     (sonst wuerde der Permission-Dialog im unsichtbaren
-                     Fenster haengenbleiben und enumerateDevices liefert
-                     nur "default"-Labels).
-    --user-data-dir = eigenes Profil damit Cookies/Permissions persistieren.
+    First-Run (Profile leer): Window SICHTBAR und MITTIG auf dem Bildschirm.
+    User sieht den Permission-Dialog (Mic), klickt "Zulassen". Nach erteilter
+    Permission ruft web/app.js window.close() — der Process endet.
 
-    Headless-Edge laeuft unsichtbar, kein Fenster, kein Taskbar-Eintrag,
-    kein Alt+Tab-Eintrag. Macht JS, WebSocket, getUserMedia,
-    enumerateDevices — alles. Broadcastet die Audio-Geraete-Liste ans
-    Sim-Panel/EFB via WebSocket-Backend.
+    Folge-Runs (Permission gecached): Window OFF-SCREEN
+    (--window-position=-32000,-32000) — laeuft im Hintergrund unsichtbar
+    fuer Audio-Discovery. Taskbar-Eintrag bleibt zwar (Edge --app spawnt
+    immer einen), aber das Fenster ist nie im Sichtbereich.
+
+    Wir nutzen NICHT --headless mehr: Edge headless hat keinen Zugriff auf
+    System-Audio-Hardware → enumerateDevices liefert nur Stub-Listen.
+    Off-screen Edge --app dagegen ist eine echte Browser-Engine mit voller
+    Media-Devices-API.
     """
     global _headless_proc
     if _active_port is None:
@@ -92,35 +122,52 @@ def start_ui_hidden() -> bool:
 
     edge = _edge_path()
     if not edge:
-        log.warning("tray: Edge nicht gefunden — kein Headless-Auto-Start")
+        log.warning("tray: Edge nicht gefunden — kein Audio-Auto-Start")
         return False
 
     if _headless_proc is not None and _headless_proc.poll() is None:
-        log.debug("tray.start_ui_hidden: headless laeuft schon")
+        log.debug("tray.start_ui_hidden: laeuft schon")
         return True
 
     url = f"http://127.0.0.1:{_active_port}/"
-    args = [
-        edge,
-        "--headless=new",
-        # use-fake-ui: Permission-UI auto-allow (im Headless eh kein UI da)
-        "--use-fake-ui-for-media-stream",
-        # auto-accept: Mic-Permission wird auch ohne UI sofort granted
-        # (sonst muesste der User-Gesture den Permission-Flow triggern,
-        # was im Headless nicht moeglich ist). Permission persistiert dann
-        # im --user-data-dir und ist auch beim naechsten Start cached.
-        "--auto-accept-camera-and-microphone-capture",
-        "--disable-features=Translate",
-        f"--user-data-dir={_edge_user_data_dir('headless')}",
-        url,
-    ]
+    first_run = _is_first_run()
+
+    if first_run:
+        # First-run: sichtbar mittig, ohne auto-accept damit der User
+        # bewusst klickt und sieht was passiert.
+        WIN_W, WIN_H = 800, 600
+        cx, cy = _screen_center(WIN_W, WIN_H)
+        args = [
+            edge,
+            f"--app={url}",
+            f"--window-size={WIN_W},{WIN_H}",
+            f"--window-position={cx},{cy}",
+            "--disable-features=Translate",
+            f"--user-data-dir={_edge_user_data_dir('audio')}",
+        ]
+        log_msg = "tray: first-run audio-window mittig sichtbar (pid=%d)"
+    else:
+        # Folge-runs: off-screen mit auto-accept (sollte sowieso schon
+        # gecached sein, aber doppelt haelt besser).
+        args = [
+            edge,
+            f"--app={url}",
+            "--window-size=800,600",
+            "--window-position=-32000,-32000",
+            "--use-fake-ui-for-media-stream",
+            "--auto-accept-camera-and-microphone-capture",
+            "--disable-features=Translate",
+            f"--user-data-dir={_edge_user_data_dir('audio')}",
+        ]
+        log_msg = "tray: audio-window off-screen aktiv (pid=%d)"
+
     try:
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         _headless_proc = subprocess.Popen(args, creationflags=flags, close_fds=True)
-        log.info("tray: headless Edge gestartet (pid=%d) — Audio-Discovery aktiv", _headless_proc.pid)
+        log.info(log_msg, _headless_proc.pid)
         return True
     except Exception as e:
-        log.warning("tray: Headless-Edge-Start fehlgeschlagen: %s", e)
+        log.warning("tray: Audio-Edge-Start fehlgeschlagen: %s", e)
         return False
 
 
