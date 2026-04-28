@@ -941,7 +941,16 @@
 
       // Action-Buttons (Radar-Pane)
       if (id === 'vw-track')      { sendAction('toggle-tracking'); return; }
-      if (id === 'vw-far')        { sendAction('toggle-far');      return; }
+      if (id === 'vw-far')        {
+        // Optimistic toggle: visuelles Feedback sofort, ohne auf den
+        // Browser-Tab-Echo via overlay_state.ui.showFar zu warten (das
+        // kann verzoegert sein wenn der Tab off-screen suspended ist).
+        if (!state.ui) state.ui = {};
+        state.ui.showFar = !state.ui.showFar;
+        scheduleRender();
+        sendAction('toggle-far');
+        return;
+      }
 
       // Setup-Tab
       if (id === 'vw-mode-ptt') {
