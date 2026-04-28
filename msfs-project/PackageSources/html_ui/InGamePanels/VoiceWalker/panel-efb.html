@@ -476,10 +476,11 @@
         display: flex;
         flex-direction: column;
       }
-      /* Mehr Luft oben — die EFB-OS-Statusleiste mit Datum/Wetter klebt
-         sonst direkt am vw-header (Conn-Dot, Callsign, Pro-Badge). */
+      /* Mehr Luft oben — die EFB-OS-Statusleiste mit Datum/Wetter ist ca.
+         42px hoch und ueberlappt sonst mit unserem vw-header (Conn-Dot,
+         Callsign, Pro-Badge, Zoom-Anzeige). */
       #vw-root {
-        padding-top: 18px;
+        padding-top: 48px;
       }
       #pane-radar #vw-peers {
         max-height: 50%;
