@@ -505,7 +505,12 @@ function initDebugPanel() {
     }
   });
 
-  if (new URLSearchParams(location.search).get('debug') === '1') toggle(true);
+  // Debug-Build erkannt am Vorhandensein dieser Datei (wird im Public-MSI
+  // via wixproj Exclude komplett rausgehalten — Public-Nutzer kommen
+  // nichtmal an die debug.js ran). Also: wenn dieser Code laeuft, sind
+  // wir im Debug-Build → Panel direkt auto-open, kein Strg+Shift+D oder
+  // ?debug=1 noetig. Strg+Shift+D bleibt zum Toggeln on/off.
+  toggle(true);
 
 
   // ==== Rendering =========================================================
