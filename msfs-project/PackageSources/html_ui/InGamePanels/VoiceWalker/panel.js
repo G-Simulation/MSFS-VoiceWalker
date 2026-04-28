@@ -574,7 +574,6 @@
         '<div class="vw-peers-empty-state">'
         +   '<svg class="vw-peers-empty-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>'
         +   '<div class="vw-peers-empty-msg">' + T('panel.peers.empty') + '</div>'
-        +   '<div class="vw-peers-empty-hint">' + T('panel.peers.empty.hint') + '</div>'
         + '</div>';
     } else {
       peers.sort(function (a, b) { return a.d - b.d; });
