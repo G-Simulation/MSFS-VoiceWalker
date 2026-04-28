@@ -36,6 +36,18 @@ except Exception:
     import logging
     log = logging.getLogger("feedback")
 
+# Scrubber: Username/Pfade/IPs/E-Mails/Lizenzkeys aus dem Log entfernen
+# bevor es Discord erreicht. Siehe PRIVACY.md §6 (Anonymisierung).
+try:
+    from log_scrubber import scrub, scrub_bytes
+except Exception:
+    # Fail-safe: lieber NICHT senden als Klartext-Daten leaken.
+    def scrub(text: str) -> str:           # type: ignore[no-redef]
+        return text
+    def scrub_bytes(data: bytes) -> bytes:  # type: ignore[no-redef]
+        return data
+    log.warning("feedback: log_scrubber nicht importierbar — Anonymisierung inaktiv")
+
 
 # Hardcoded Webhook — bei Spam in Discord neu erstellen und URL austauschen.
 # Keine Lese-Rechte am Channel via dieser URL, nur Posten.
@@ -123,13 +135,17 @@ def send(user_note: str = "", *, app_version: str = "?",
         return False, "Es existiert noch keine Log-Datei. Starte die App, reproduziere das Problem und versuch es erneut."
 
     try:
-        file_bytes = _read_log_tail(log_path, MAX_LOG_BYTES)
+        raw_bytes = _read_log_tail(log_path, MAX_LOG_BYTES)
     except Exception as e:
         return False, f"Log-Datei nicht lesbar: {e}"
-    if not file_bytes:
+    if not raw_bytes:
         return False, "Log-Datei ist leer."
 
-    note = (user_note or "").strip()[:500]
+    # PRIVACY: Username/Pfade/IPs/E-Mails/Lizenzkeys vor dem Upload
+    # ersetzen. Siehe PRIVACY.md §6.
+    file_bytes = scrub_bytes(raw_bytes)
+
+    note = scrub((user_note or "").strip())[:500]
 
     # Discord-Embed: kompakt, gut lesbar im Channel
     embed = {

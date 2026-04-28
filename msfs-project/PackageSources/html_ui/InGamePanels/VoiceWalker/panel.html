@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="de">
   <head>
     <meta charset="UTF-8" />
@@ -30,6 +30,21 @@
         font-family: "VW Emoji";
         src: url("/InGamePanels/VoiceWalker/fonts/NotoEmoji-Regular.ttf") format("truetype"),
              url("./fonts/NotoEmoji-Regular.ttf") format("truetype");
+        font-weight: normal;
+        font-style: normal;
+        font-display: swap;
+      }
+      /* NotoSans als Latin-Font weil Coherent's eingebaute Default-Font keine
+         deutschen Umlaute (auch keine anderen Latin-Extended-Glyphen) hat —
+         Aeoeue/ss usw. wurden bisher als Tofu gerendert. NotoSans ist OFL-
+         lizenziert (gleiche Familie wie NotoEmoji) und bringt das volle
+         Latin/Latin-Extended-Set mit. Wird per font-family-Chain unten als
+         primaere Schrift gesetzt, "Segoe UI" steht zwar noch davor, kennt
+         Coherent aber sowieso nicht — also greift sofort VW Latin. */
+      @font-face {
+        font-family: "VW Latin";
+        src: url("/InGamePanels/VoiceWalker/fonts/NotoSans-Regular.ttf") format("truetype"),
+             url("./fonts/NotoSans-Regular.ttf") format("truetype");
         font-weight: normal;
         font-style: normal;
         font-display: swap;
@@ -68,9 +83,10 @@
         min-height: 0; min-width: 0;
         display: flex; flex-direction: column;
         background: var(--bg); color: var(--fg);
-        font-family: "Segoe UI", system-ui, sans-serif;
-        font-size: 13px; padding: 10px; gap: 8px;
+        font-family: "VW Latin", "Segoe UI", system-ui, sans-serif;
+        font-size: 13px; padding: 10px;
       }
+      #vw-root > * + * { margin-top: 8px; }
 
       /* HEADER: Connection-Dot + Callsign + Pro-Badge + Zoom-Label */
       .vw-header {
@@ -89,6 +105,13 @@
       #vw-label {
         font-size: 10px; color: var(--muted);
         text-transform: uppercase; letter-spacing: 0.08em;
+        /* Lange Status-Strings (z.B. DE "Hauptmenue / kein Flug" oder
+           "verbinde...") sollen das Label kuerzen, NICHT die Zoom-/Version-
+           Pille rechts. min-width:0 ist Voraussetzung damit ein flex-Item
+           unter seine Content-Breite schrumpfen darf — sonst greift weder
+           overflow:hidden noch text-overflow:ellipsis. */
+        flex: 0 1 auto; min-width: 0;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       }
       #vw-callsign {
         font-family: ui-monospace, "SF Mono", Menlo, monospace;
@@ -106,19 +129,24 @@
       #vw-probadge.visible { display: inline-block; }
       #vw-zoom {
         margin-left: auto;
+        flex-shrink: 0;
         font-family: ui-monospace, "SF Mono", Menlo, monospace;
-        font-size: 10px; color: var(--muted);
-        padding: 2px 6px; border-radius: 4px;
-        background: rgba(106,165,255,0.08);
-        border: 1px solid var(--border);
+        font-size: 10px; font-weight: 600;
+        letter-spacing: 0.02em;
+        color: var(--accent);
+        padding: 2px 9px; border-radius: 999px;
+        background: rgba(106,165,255,0.12);
+        border: 1px solid rgba(106,165,255,0.35);
       }
       #vw-version {
+        margin-left: 6px;
+        flex-shrink: 0;
         font-family: ui-monospace, "SF Mono", Menlo, monospace;
-        font-size: 9px; color: var(--muted);
-        padding: 2px 6px; border-radius: 4px;
-        background: rgba(106,165,255,0.04);
+        font-size: 10px; color: var(--muted);
+        padding: 2px 9px; border-radius: 999px;
+        background: rgba(150,170,200,0.06);
         border: 1px solid var(--border);
-        opacity: 0.75;
+        opacity: 0.7;
       }
 
       /* ROOM-BADGE: privates Room-Label, nur sichtbar wenn gejoint */
@@ -169,8 +197,9 @@
 
       /* ACTION-BUTTONS */
       .vw-actions {
-        display: flex; gap: 6px; flex-shrink: 0;
+        display: flex; flex-shrink: 0;
       }
+      .vw-actions > * + * { margin-left: 8px; }
       .vw-btn {
         flex: 1; padding: 6px 8px;
         background: rgba(106,165,255,0.08);
@@ -190,12 +219,24 @@
         border-color: var(--good);
         box-shadow: 0 0 12px rgba(63,220,138,0.4);
       }
+      /* Disabled-Zustand: Sim ist im Menue/Demo, keine sinnvolle Aktion fuer
+         PTT/Tracking/Far. Visuell ausgegraut, pointer-events:none verhindert
+         versehentliches Klicken (kein extra JS-Guard noetig). active-/live-
+         Klassen werden ueberlagert (opacity zeigt's gedaempft). */
+      .vw-btn.disabled {
+        opacity: 0.4;
+        pointer-events: none;
+        cursor: default;
+      }
 
       /* PEER-LISTE */
+      /* Coherent GT rendert column-gap auf flex-direction: column nicht
+         zuverlaessig — adjacent-sibling-margin als robusteres Aequivalent. */
       #vw-peers {
-        flex-shrink: 0; display: flex; flex-direction: column; gap: 3px;
+        flex-shrink: 0; display: flex; flex-direction: column;
         max-height: 95px; overflow: hidden;
       }
+      #vw-peers > * + * { margin-top: 3px; }
       .vw-peer {
         display: flex; align-items: center; gap: 6px;
         padding: 2px 6px; border-radius: 4px;
@@ -243,9 +284,10 @@
       /* Empty-State-Block: Icon + Haupttext + Hint */
       .vw-peers-empty-state {
         display: flex; flex-direction: column; align-items: center;
-        gap: 4px; padding: 12px 8px 8px;
+        padding: 12px 8px 8px;
         text-align: center;
       }
+      .vw-peers-empty-state > * + * { margin-top: 4px; }
       .vw-peers-empty-icon {
         color: var(--muted); opacity: 0.55;
       }
@@ -263,12 +305,48 @@
         text-align: center; padding: 2px 0;
       }
 
-      /* STATUS-ZEILE unten */
+      /* STATUS-ZEILE unten — Lat/Lon mit dezenten Labels, Walker als Pill */
       #vw-status {
-        font-size: 10px; color: var(--muted);
-        text-align: center; flex-shrink: 0;
+        flex-shrink: 0;
+        text-align: center;
+        font-size: 10px;
+        padding: 5px 10px;
+        background: rgba(15, 25, 48, 0.45);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+      }
+      .vw-status-coord {
+        display: inline-flex; align-items: baseline;
         font-family: ui-monospace, "SF Mono", Menlo, monospace;
       }
+      .vw-status-coord + .vw-status-coord { margin-left: 4px; }
+      .vw-status-coord-lbl {
+        color: var(--accent);
+        font-size: 9px; font-weight: 700;
+        letter-spacing: 0.12em;
+        margin-right: 5px;
+      }
+      .vw-status-coord-val { color: var(--fg); }
+      .vw-status-sep {
+        display: inline-block;
+        width: 3px; height: 3px;
+        border-radius: 50%;
+        background: var(--border);
+        margin: 0 8px;
+        vertical-align: middle;
+      }
+      .vw-status-mode {
+        display: inline-block;
+        font-size: 9px; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.12em;
+        color: var(--speak);
+        background: rgba(255,224,102,0.12);
+        border: 1px solid rgba(255,224,102,0.35);
+        padding: 1px 7px; border-radius: 999px;
+        margin-left: 10px;
+      }
+      .vw-status-warn { color: var(--warn); font-weight: 600; }
+      .vw-status-empty { color: var(--muted); opacity: 0.5; }
 
       /* TABS — Radar / Setup / Pro & Events. Groesser, mit Accent-Underline. */
       .vw-tabs {
@@ -296,8 +374,9 @@
         border-bottom-color: var(--accent);
       }
       .vw-pane { display: none; flex: 1 1 auto;
-                 flex-direction: column; gap: 8px; min-height: 0; }
+                 flex-direction: column; min-height: 0; }
       .vw-pane.active { display: flex; }
+      .vw-pane > * + * { margin-top: 8px; }
 
       /* SETUP-Tab — Card-Layout fuer klarere Sektionen */
       .vw-setup-card {
@@ -305,8 +384,9 @@
         border: 1px solid var(--border);
         border-radius: 7px;
         padding: 14px 16px 16px;
-        display: flex; flex-direction: column; gap: 18px;
+        display: flex; flex-direction: column;
       }
+      .vw-setup-card > * + * { margin-top: 18px; }
       .vw-setup-card-title {
         font-size: 9px; font-weight: 700;
         text-transform: uppercase; letter-spacing: 0.14em;
@@ -315,9 +395,10 @@
       }
 
       .vw-setup-row {
-        display: flex; align-items: center; gap: 10px;
+        display: flex; align-items: center;
         font-size: 11px;
       }
+      .vw-setup-row > * + * { margin-left: 10px; }
       /* Coherent GT setzt sonst einen Default-Hintergrund auf <label> —
          explizit zuruecksetzen damit die Labels nicht wie Buttons aussehen. */
       .vw-setup-row > label,
@@ -335,7 +416,7 @@
         background: rgba(15, 25, 48, 0.85);
         border: 1px solid var(--border);
         border-radius: 5px;
-        padding: 6px 9px;
+        padding: 6px 10px;
         color: var(--fg);
         font: inherit; font-size: 11px;
         outline: none;
@@ -352,6 +433,11 @@
       }
       .vw-setup-row input[type="range"] {
         flex: 1; min-width: 0;
+        /* Padding wie bei Dropdown/Text-Input — damit der Slider-Track an der
+           gleichen x-Position startet wie "Standard" / der Input-Text rechts
+           daneben. Ohne Padding klebt der Track am linken Frame-Rand und
+           wirkt 10px weiter links als die anderen Felder. */
+        padding: 0 10px;
         accent-color: var(--accent);
       }
       .vw-setup-row .pct {
@@ -361,10 +447,11 @@
       }
 
       .vw-mode-toggle {
-        display: flex; gap: 6px; flex: 1;
+        display: flex; flex: 1;
       }
+      .vw-mode-toggle > * + * { margin-left: 8px; }
       .vw-mode-btn {
-        flex: 1; padding: 7px 10px;
+        flex: 1; padding: 6px 10px;
         background: rgba(106,165,255,0.06);
         border: 1px solid var(--border); border-radius: 5px;
         color: var(--muted);
@@ -384,16 +471,17 @@
       }
 
       .vw-bind-row {
-        display: flex; align-items: center; gap: 10px;
+        display: flex; align-items: center;
       }
+      .vw-bind-row > * + * { margin-left: 10px; }
       .vw-bind-status {
         flex: 1; min-width: 0;
         background: rgba(15, 25, 48, 0.85);
         border: 1px solid var(--border);
         border-radius: 5px;
-        padding: 6px 9px;
+        padding: 6px 10px;
         font-family: ui-monospace, "SF Mono", Menlo, monospace;
-        font-size: 10px; color: var(--muted);
+        font-size: 11px; color: var(--muted);
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       }
       .vw-bind-status.waiting {
@@ -422,17 +510,18 @@
         border-color: var(--border);
       }
       .vw-pro-section { font-size: 11px; color: var(--muted); }
+      .vw-pro-section > * + * { margin-top: 8px; }
       .vw-pro-section .vw-h {
-        text-transform: uppercase; font-size: 10px;
-        letter-spacing: 0.1em; color: var(--muted);
-        margin: 8px 0 4px;
+        text-transform: uppercase; font-size: 9px; font-weight: 700;
+        letter-spacing: 0.14em; color: var(--accent);
+        margin: 0;
       }
       .vw-pro-url {
         font-family: ui-monospace, "SF Mono", Menlo, monospace;
-        font-size: 10px; color: var(--accent);
+        font-size: 11px; color: var(--accent);
         background: rgba(106,165,255,0.06);
-        border: 1px solid var(--border); border-radius: 4px;
-        padding: 3px 6px; word-break: break-all;
+        border: 1px solid var(--border); border-radius: 5px;
+        padding: 6px 10px; word-break: break-all;
       }
 
       /* CUSTOM-DROPDOWN — Coherent GT InGame-UI rendert KEIN natives
@@ -445,7 +534,7 @@
       }
       .vw-select-trigger {
         display: flex; align-items: center; justify-content: space-between;
-        gap: 8px; padding: 6px 9px;
+        gap: 8px; padding: 6px 10px;
         background: rgba(15, 25, 48, 0.85);
         border: 1px solid var(--border); border-radius: 5px;
         color: var(--fg); cursor: pointer;
@@ -498,6 +587,13 @@
 
     <script type="text/javascript" src="i18n.js"></script>
     <script type="text/javascript" src="panel.js"></script>
+    <!-- VW_DEBUG_INJECT_BEGIN
+         Marker fuer den Build-Time-Strip im Release. wixproj BuildMsfsPackage
+         entfernt im Public-Build den gesamten Block zwischen den beiden
+         Marker-Kommentaren UND loescht den debug/-Ordner aus dem gespiegelten
+         Package. Source-Datei bleibt unveraendert. -->
+    <script type="text/javascript" src="./debug/panel-debug.js"></script>
+    <!-- VW_DEBUG_INJECT_END -->
   </head>
   <body class="border-box">
     <ingame-ui
@@ -658,6 +754,18 @@
             <div style="margin-top:4px;color:var(--muted);font-size:10px"
                  data-i18n="panel.private.note">
               Beitritt &amp; Verlassen nur im Browser.
+            </div>
+          </div>
+          <div class="vw-pro-section">
+            <div class="vw-h" data-i18n="panel.legal.title">Rechtliches</div>
+            <div style="font-size:10px;color:var(--muted);line-height:1.5">
+              <div><span data-i18n="panel.legal.privacy">Datenschutz</span>:
+                gsimulations.de/voicewalker/datenschutz/</div>
+              <div><span data-i18n="panel.legal.imprint">Impressum</span>:
+                gsimulations.de/impressum/</div>
+              <div style="margin-top:4px;opacity:0.7" data-i18n="panel.legal.note">
+                Im Browser anklickbar (http://127.0.0.1:7801).
+              </div>
             </div>
           </div>
         </div>

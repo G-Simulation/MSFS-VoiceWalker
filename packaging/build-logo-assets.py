@@ -187,14 +187,23 @@ horiz_out = BRAND / "voicewalker-logo-horizontal.png"
 horiz.save(horiz_out, format="PNG", optimize=True)
 print(f"[logo] wrote {horiz_out} ({horiz_out.stat().st_size} bytes, {horiz.size})")
 
-# 6) MSFS-Toolbar-Icon — echtes Vektor-SVG, weisse Pfade, fill="?" am Root
-#    fuer Idle/Highlight-Tönung im Toolbar.
+# 6) MSFS-Toolbar-Icon — Pattern aus offiziellen MSFS-SDK-Samples
+#    (ICON_TOOLBAR_KNEEBOARD.svg, ICON_TOOLBAR_AUTOPILOT.svg): KEIN fill-
+#    Attribut, weder am Root noch an Paths. MSFS toent das Icon selbst je
+#    nach State (idle = weiss, active = schwarz). Frueher hatten wir hier
+#    fill="#ffffff" auf den Paths plus fill="?" am Root, was sich gegen-
+#    seitig blockiert hat — das Icon blieb dauerhaft weiss waehrend andere
+#    Toolbar-Icons im Active-State invertieren.
+#    Plus: viewBox enger auf den BBox des Logos (43..471) — Default
+#    "0 0 512 512" laesst ~17% Padding rundum, das Icon wirkte klein.
 toolbar_clean = _strip_outlines(src_svg)
-toolbar_clean = _recolor_fills(toolbar_clean, "#ffffff")
-# fill am Root auf "?" — Toolbar-Icons in MSFS werden monochrom getoent
+# Alle fill-Attribute aus den Paths streichen — MSFS injiziert State-Farbe.
+toolbar_clean = re.sub(r'\s*fill="[^"]*"', '', toolbar_clean)
+# viewBox auf engere BBox setzen damit das Logo den Toolbar-Slot besser
+# fuellt (~13% mehr Auslastung, 13px Sicherheits-Puffer um den Content).
 toolbar_clean = re.sub(
-    r'(<svg\b[^>]*?)(\s*>)',
-    r'\1 fill="?"\2',
+    r'viewBox="[^"]*"',
+    'viewBox="30 30 452 452"',
     toolbar_clean,
     count=1,
 )

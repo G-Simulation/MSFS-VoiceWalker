@@ -1,4 +1,4 @@
-// VoiceWalker — MSFS Toolbar Panel (v4)
+﻿// VoiceWalker — MSFS Toolbar Panel (v4)
 // ==========================================================================
 // Phase 1+2+3 Panel-Rewrite:
 //  - HiDPI-Canvas, Top-Down-Flugzeug, adaptive Range-Ringe, Heading-Up-Pfeil,
@@ -513,31 +513,58 @@
       }
     }
 
+    // Action-Buttons (PTT / Tracking / Far) sind im Menue oder Demo nutzlos:
+    // keine Sim-Position → kein Tracking, kein PTT-Empfaenger, kein Far-Filter
+    // anwendbar. Disabled-Klasse rendert sie ausgegraut UND macht sie via CSS
+    // pointer-events:none unklickbar — kein versehentliches Toggle.
+    const inactiveSim = !!(state.mySim && (state.mySim.in_menu || state.mySim.demo));
+    const ptt = $('vw-ptt');
+    if (ptt) ptt.classList.toggle('disabled', inactiveSim);
     // PTT-Button: live-State spiegeln (Browser hat noch kein "ptt_state
     // raw"-Broadcast, also setzen wir nur auf Mouse-Events)
-    // Tracking-Button
+    // Tracking-Button — leuchtet wenn Backend tracking_enabled meldet (Default
+    // ist true bei aktivem Flug/Walker, persistiert ueber Restart hinweg).
     const tb = $('vw-track');
-    if (tb) tb.classList.toggle('active', !!(state.ui && state.ui.trackingEnabled));
+    if (tb) {
+      tb.classList.toggle('active', !!(state.ui && state.ui.trackingEnabled));
+      tb.classList.toggle('disabled', inactiveSim);
+    }
     // Far-Button
     const fb = $('vw-far');
-    if (fb) fb.classList.toggle('active', !!(state.ui && state.ui.showFar));
+    if (fb) {
+      fb.classList.toggle('active', !!(state.ui && state.ui.showFar));
+      fb.classList.toggle('disabled', inactiveSim);
+    }
 
     // Peer-Liste
     renderPeerList();
 
-    // Status-Koord-Zeile unten
+    // Status-Koord-Zeile unten — strukturiert als LAT/LON-Pills mit Trenner,
+    // Walker-Modus als eigener Pill rechts daneben.
     const st = $('vw-status');
     if (st) {
       const T = (k) => (window.i18n ? window.i18n.t(k) : k);
       if (state.trackingOff) {
-        st.innerHTML = '<span style="color:var(--warn)">' + T('panel.peers.tracking_off') + '</span>';
+        st.innerHTML = '<span class="vw-status-warn">' + T('panel.peers.tracking_off') + '</span>';
       } else if (state.mySim) {
         const la = (+state.mySim.lat).toFixed(5);
         const lo = (+state.mySim.lon).toFixed(5);
-        const mode = state.mySim.on_foot ? ('  |  ' + T('peer.badge.foot')) : '';
-        st.textContent = la + ', ' + lo + mode;
+        const mode = state.mySim.on_foot
+          ? '<span class="vw-status-mode">' + T('peer.badge.foot') + '</span>'
+          : '';
+        st.innerHTML =
+          '<span class="vw-status-coord">'
+          +   '<span class="vw-status-coord-lbl">LAT</span>'
+          +   '<span class="vw-status-coord-val">' + la + '</span>'
+          + '</span>'
+          + '<span class="vw-status-sep"></span>'
+          + '<span class="vw-status-coord">'
+          +   '<span class="vw-status-coord-lbl">LON</span>'
+          +   '<span class="vw-status-coord-val">' + lo + '</span>'
+          + '</span>'
+          + mode;
       } else {
-        st.textContent = '-';
+        st.innerHTML = '<span class="vw-status-empty">-</span>';
       }
     }
   }
@@ -659,7 +686,13 @@
     VW.tryCount++;
     const host = _host();
     const url = 'ws://' + host + '/ui';
-    setConn('retry', 'verbinde #' + VW.tryCount);
+    // KEIN setConn('retry', 'verbinde #N') hier — sonst flackert das UI bei
+    // jedem Reconnect-Versuch zwischen "verbinde #N" und "offline" und der
+    // Counter waechst sichtbar hoch (#176, #177, ...). Reconnect-Versuche
+    // laufen still im Hintergrund. Der Status bleibt auf dem letzten echten
+    // Wert (offline / online / im Menue / Demo) — und wird nur dann geaendert
+    // wenn entweder ein Fail-Pfad wirklich offline meldet oder die naechste
+    // sim-Message den echten Sim-Zustand setzt.
 
     let ws;
     try { ws = new WebSocket(url); }
@@ -702,7 +735,10 @@
     ws.onopen = function () {
       L('WS open ' + url);
       clearTimeout(VW.wsTimeout);
-      setConn('online', 'online');
+      // KEIN setConn('online', ...) hier — sonst flackert die UI grün ("online")
+      // bevor die erste sim-Message ankommt und korrekt auf "im Menue" / "Demo"
+      // / "online" entscheidet. Der Status wird nur dort gesetzt wo wir den
+      // echten Sim-Zustand kennen (in_menu / demo / aktiver Flug / on_foot).
       bumpBackendHeartbeat();
     };
 
@@ -715,6 +751,12 @@
       let m;
       try { m = JSON.parse(evt.data); } catch (e) { return; }
       if (!m || typeof m !== 'object') return;
+      // Debug-Trace: nur die 'version'-Message ist interessant (zur Diagnose
+      // ob das Header-Pill leer bleibt). Andere Message-Typen (overlay_state
+      // alle 250 ms, sim alle 500 ms, etc.) wuerden das Log fluten.
+      if (m.type === 'version') {
+        try { console.info('WS recv: version', m.version); } catch (e) {}
+      }
       if (m.type === 'sim') {
         state.mySim = m.data || null;
         state.trackingOff = false;
@@ -1116,7 +1158,8 @@
         if (b.type === 'keyboard') {
           bs.textContent = T('panel.bind.key_prefix') + ': ' + (b.key || '?');
         } else if (b.type === 'joystick') {
-          bs.textContent = (b.device_name || 'Joystick') + ' Btn ' + b.button;
+          bs.textContent = (b.device_name || T('panel.bind.joystick_fallback'))
+            + ' ' + T('panel.bind.btn_short') + ' ' + b.button;
         } else {
           bs.textContent = T('panel.bind.bound');
         }

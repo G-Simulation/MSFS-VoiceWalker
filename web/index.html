@@ -740,6 +740,17 @@
           ☕ via PayPal
         </a>
       </div>
+      <div class="space-x-3">
+        <a href="https://www.gsimulations.de/voicewalker/datenschutz/"
+           target="_blank" rel="noopener"
+           class="hover:text-[color:var(--color-accent)] transition"
+           data-i18n="consent.privacy_link">Datenschutz</a>
+        <span aria-hidden="true">·</span>
+        <a href="https://www.gsimulations.de/impressum/"
+           target="_blank" rel="noopener"
+           class="hover:text-[color:var(--color-accent)] transition"
+           data-i18n="consent.imprint_link">Impressum</a>
+      </div>
     </footer>
 
   </div>
@@ -802,13 +813,37 @@
             Avatars in MSFS — keine echten GPS-Daten vom PC.</span>
           </div>
         </li>
+        <li class="flex gap-3">
+          <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--color-accent)] mt-2 shrink-0"></span>
+          <div>
+            <strong data-i18n="consent.b5.bold">Pro-Lizenz wird gegen unseren eigenen Server geprüft.</strong>
+            <span data-i18n="consent.b5.body">Wenn du einen Pro-Key eingibst, schickt die App nur diesen Key
+            an gsimulations.de zur Validierung. Ergebnis wird lokal gecacht (7 Tage Offline-Grace).
+            In der Free-Variante passiert das gar nicht.</span>
+          </div>
+        </li>
+        <li class="flex gap-3">
+          <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--color-accent)] mt-2 shrink-0"></span>
+          <div>
+            <strong data-i18n="consent.b6.bold">Logs senden ist freiwillig (Standard: aus).</strong>
+            <span data-i18n="consent.b6.body">Wenn du im Fehlerfall „Logs senden" einschaltest oder den Knopf
+            drückst, geht das voicewalker.log an einen Entwickler-Discord. Vor dem Upload werden Username,
+            Pfade, IP-Adressen, E-Mails und Lizenzkeys automatisch ersetzt. Audiodaten landen ohnehin nie
+            im Log.</span>
+          </div>
+        </li>
       </ul>
 
       <div class="flex flex-col sm:flex-row gap-3 items-center justify-end">
-        <a href="https://www.gsimulations.de/datenschutzerklaerung/" target="_blank" rel="noopener"
+        <a href="https://www.gsimulations.de/voicewalker/datenschutz/" target="_blank" rel="noopener"
            class="text-xs text-[color:var(--color-muted)] hover:text-[color:var(--color-accent)] underline decoration-dotted"
            data-i18n="consent.privacy_link">
           Vollständige Datenschutzerklärung
+        </a>
+        <a href="https://www.gsimulations.de/impressum/" target="_blank" rel="noopener"
+           class="text-xs text-[color:var(--color-muted)] hover:text-[color:var(--color-accent)] underline decoration-dotted"
+           data-i18n="consent.imprint_link">
+          Impressum
         </a>
         <button id="consentDeclineBtn" type="button"
                 class="px-4 py-2 text-sm rounded-lg border border-[color:var(--color-border)]
@@ -837,89 +872,116 @@
        aria-hidden="true">
     <div class="glass rounded-2xl max-w-2xl w-full p-6 md:p-8 border border-[color:var(--color-border)] max-h-[90vh] overflow-y-auto"
          role="dialog" aria-labelledby="welcomeTitle">
-      <h2 id="welcomeTitle" class="text-xl md:text-2xl font-bold mb-1">
+      <h2 id="welcomeTitle" class="text-xl md:text-2xl font-bold mb-1" data-i18n="welcome.title">
         Willkommen bei VoiceWalker
       </h2>
-      <p class="text-sm text-[color:var(--color-muted)] mb-5">
-        Kurz einrichten, dann laeuft's. Eine Bestaetigung, fertig.
+      <p class="text-sm text-[color:var(--color-muted)] mb-5" data-i18n="welcome.intro">
+        Kurz einrichten, dann läuft's. Eine Bestätigung, fertig.
       </p>
 
       <!-- ===== Datenschutz-Sektion ===== -->
-      <h3 class="text-sm font-semibold uppercase tracking-wide text-[color:var(--color-accent)] mb-3">
+      <h3 class="text-sm font-semibold uppercase tracking-wide text-[color:var(--color-accent)] mb-3"
+          data-i18n="welcome.privacy_h">
         Datenschutz
       </h3>
       <ul class="space-y-3 text-sm mb-6">
         <li class="flex gap-3">
           <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--color-accent)] mt-2 shrink-0"></span>
           <div>
-            <strong>Dein Mikrofon wird an Piloten in deiner Nähe übertragen.</strong>
-            Stimme gilt nach DSGVO als biometrisches Datum — wir fragen deshalb
-            hier ausdrücklich. Du kannst jederzeit stumm schalten.
+            <strong data-i18n="welcome.b1.bold">Dein Mikrofon wird an Piloten in deiner Nähe übertragen.</strong>
+            <span data-i18n="welcome.b1.body">Stimme gilt nach DSGVO als biometrisches Datum — wir fragen deshalb
+            hier ausdrücklich. Du kannst jederzeit stumm schalten.</span>
           </div>
         </li>
         <li class="flex gap-3">
           <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--color-accent)] mt-2 shrink-0"></span>
           <div>
-            <strong>Peer-to-Peer, kein zentraler Server.</strong>
-            Für's Matchmaking kontaktiert dein Browser öffentliche WebTorrent-
+            <strong data-i18n="welcome.b2.bold">Peer-to-Peer, kein zentraler Server.</strong>
+            <span data-i18n="welcome.b2.body">Für's Matchmaking kontaktiert dein Browser öffentliche WebTorrent-
             Tracker — dabei wird deine IP kurz sichtbar. Keine Namen, keine
-            Audio-Daten. Audio läuft direkt zwischen den Piloten.
+            Audio-Daten. Audio läuft direkt zwischen den Piloten.</span>
           </div>
         </li>
         <li class="flex gap-3">
           <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--color-accent)] mt-2 shrink-0"></span>
           <div>
-            <strong>Nichts wird dauerhaft gespeichert.</strong>
-            Weder wir noch irgendein Server kennen deine Flüge, Positionen oder
-            Gespräche. Lokal: Callsign, Audio-Geräte, Tracking-Schalter.
+            <strong data-i18n="welcome.b3.bold">Nichts wird dauerhaft gespeichert.</strong>
+            <span data-i18n="welcome.b3.body">Weder wir noch irgendein Server kennen deine Flüge, Positionen oder
+            Gespräche. Lokal: Callsign, Audio-Geräte, Tracking-Schalter.</span>
           </div>
         </li>
         <li class="flex gap-3">
           <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--color-accent)] mt-2 shrink-0"></span>
           <div>
-            <strong>Virtuelle Sim-Koordinaten, nicht dein echter Ort.</strong>
-            Geteilt wird die Position deines Avatars in MSFS — keine echten
-            GPS-Daten vom PC.
+            <strong data-i18n="welcome.b4.bold">Virtuelle Sim-Koordinaten, nicht dein echter Ort.</strong>
+            <span data-i18n="welcome.b4.body">Geteilt wird die Position deines Avatars in MSFS — keine echten
+            GPS-Daten vom PC.</span>
+          </div>
+        </li>
+        <li class="flex gap-3">
+          <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--color-accent)] mt-2 shrink-0"></span>
+          <div>
+            <strong data-i18n="welcome.b5.bold">Pro-Lizenz wird gegen unseren eigenen Server geprüft.</strong>
+            <span data-i18n="welcome.b5.body">Wenn du einen Pro-Key eingibst, schickt die App nur diesen Key
+            an gsimulations.de zur Validierung. In der Free-Variante passiert
+            das gar nicht.</span>
+          </div>
+        </li>
+        <li class="flex gap-3">
+          <span class="w-1.5 h-1.5 rounded-full bg-[color:var(--color-accent)] mt-2 shrink-0"></span>
+          <div>
+            <strong data-i18n="welcome.b6.bold">Logs senden ist freiwillig.</strong>
+            <span data-i18n="welcome.b6.body">Username, Pfade, IPs, E-Mails und Lizenzkeys werden vor dem Upload
+            automatisch ersetzt. Audiodaten landen ohnehin nie im Log.</span>
           </div>
         </li>
       </ul>
 
       <!-- ===== Einstellungen-Sektion ===== -->
-      <h3 class="text-sm font-semibold uppercase tracking-wide text-[color:var(--color-accent)] mb-3">
+      <h3 class="text-sm font-semibold uppercase tracking-wide text-[color:var(--color-accent)] mb-3"
+          data-i18n="welcome.settings_h">
         Einstellungen
       </h3>
       <div class="space-y-3 text-sm mb-6">
         <label class="flex items-center gap-3 cursor-pointer">
           <input type="checkbox" id="welAutostart"
                  class="w-4 h-4 accent-[color:var(--color-accent)]" />
-          <span>Mit Windows starten</span>
+          <span data-i18n="welcome.autostart">Mit Windows starten</span>
         </label>
         <label class="flex items-center gap-3 cursor-pointer">
           <input type="checkbox" id="welAutoUpdate" checked
                  class="w-4 h-4 accent-[color:var(--color-accent)]" />
-          <span>Automatisch aktualisieren</span>
+          <span data-i18n="welcome.autoupdate">Automatisch aktualisieren</span>
         </label>
         <label class="flex items-center gap-3 cursor-pointer">
           <input type="checkbox" id="welSendLogs"
                  class="w-4 h-4 accent-[color:var(--color-accent)]" />
-          <span>Bei Fehlern anonyme Logs senden (hilft bei Bug-Suche)</span>
+          <span data-i18n="welcome.sendlogs">Bei Fehlern anonyme Logs senden (hilft bei Bug-Suche)</span>
         </label>
       </div>
 
       <div class="flex flex-col sm:flex-row gap-3 items-center justify-end">
-        <a href="https://www.gsimulations.de/datenschutzerklaerung/" target="_blank" rel="noopener"
-           class="text-xs text-[color:var(--color-muted)] hover:text-[color:var(--color-accent)] underline decoration-dotted">
+        <a href="https://www.gsimulations.de/voicewalker/datenschutz/" target="_blank" rel="noopener"
+           class="text-xs text-[color:var(--color-muted)] hover:text-[color:var(--color-accent)] underline decoration-dotted"
+           data-i18n="consent.privacy_link">
           Vollständige Datenschutzerklärung
+        </a>
+        <a href="https://www.gsimulations.de/impressum/" target="_blank" rel="noopener"
+           class="text-xs text-[color:var(--color-muted)] hover:text-[color:var(--color-accent)] underline decoration-dotted"
+           data-i18n="consent.imprint_link">
+          Impressum
         </a>
         <button id="welcomeDeclineBtn" type="button"
                 class="px-4 py-2 text-sm rounded-lg border border-[color:var(--color-border)]
-                       text-[color:var(--color-muted)] hover:bg-white/5 transition">
+                       text-[color:var(--color-muted)] hover:bg-white/5 transition"
+                data-i18n="welcome.decline">
           Ablehnen
         </button>
         <button id="welcomeAcceptBtn" type="button"
                 class="px-5 py-2 text-sm font-semibold rounded-lg
                        bg-[color:var(--color-accent)] text-[#0b1220]
-                       hover:bg-blue-300 transition">
+                       hover:bg-blue-300 transition"
+                data-i18n="welcome.accept">
           Akzeptieren &amp; Starten
         </button>
       </div>

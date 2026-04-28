@@ -248,36 +248,69 @@ function initDebugPanel() {
         </section>
 
         <section>
-          <h4>Test-Peer (laeuft im Kreis, Ton-Burst alle 5 s)</h4>
+          <h4>Sim-Position (Spoof fuer Tests ohne Flug)</h4>
           <div class="btnrow">
-            <button id="btn-test-start">Test-Peer starten</button>
-            <button id="btn-test-stop">Test-Peer stoppen</button>
+            <button data-spoof-preset="off">Live (echte Sim)</button>
+            <button data-spoof-preset="eddf">EDDF Apron (Walker)</button>
+            <button data-spoof-preset="eddf-cruise">EDDF +10 000 ft (Cockpit)</button>
+            <button data-spoof-preset="edds-cruise">EDDS +10 000 ft (Cockpit)</button>
           </div>
-          <div class="hint">
-            Synth-Peer laeuft in 100 m Radius und spielt alle 5 s einen
-            HRTF-positionierten Ton-Burst fuer Radar/VAD-Tests.
-          </div>
-        </section>
-
-        <section>
-          <h4>Position spoofen (nur lokal, für Tests ohne Sim)</h4>
           <div class="row">
             <label>Lat</label>
             <input type="number" id="spoof-lat" step="0.0001" placeholder="50.0379">
-          </div>
-          <div class="row">
-            <label>Lon</label>
+            <label style="flex:0 0 30px">Lon</label>
             <input type="number" id="spoof-lon" step="0.0001" placeholder="8.5622">
           </div>
           <div class="row">
             <label>Heading °</label>
             <input type="number" id="spoof-hdg" step="1" min="0" max="359" placeholder="0">
+            <label style="flex:0 0 30px">Alt ft</label>
+            <input type="number" id="spoof-alt" step="100" min="0" placeholder="0">
           </div>
           <div class="btnrow">
-            <button id="btn-spoof-on">Spoof aktivieren</button>
-            <button id="btn-spoof-off">Aus (echt)</button>
+            <button id="btn-spoof-walker">Walker (on_foot)</button>
+            <button id="btn-spoof-cockpit">Cockpit</button>
           </div>
-          <div class="hint">Überschreibt deine Position nur in deiner eigenen App — Peers sehen die Spoof-Position.</div>
+          <div class="hint" id="spoof-status">Status: live (Backend-Sim)</div>
+        </section>
+
+        <section>
+          <h4>Test-Peers (durch echte Audio-Pipeline)</h4>
+          <div class="row">
+            <label>Audio-Pool</label>
+            <input type="file" id="test-audio-file" accept="audio/*" multiple
+                   style="flex:1; min-width:0; padding:2px;">
+            <button id="btn-test-audio-clear" style="flex:0 0 60px">Default</button>
+          </div>
+          <div class="hint" id="test-audio-status" style="margin-bottom:6px">
+            Default: Sweep-Tone. Mehrere Files moeglich — jeder Test-Peer bekommt
+            deterministisch einen Buffer aus dem Pool zugewiesen.
+          </div>
+          <div class="row">
+            <label>Walker (on_foot)</label>
+            <input type="range" id="test-walker-count" min="0" max="10" step="1" value="0">
+            <span class="readout" id="test-walker-count-r">0</span>
+          </div>
+          <div class="row">
+            <label>Walker-Radius</label>
+            <input type="range" id="test-walker-radius" min="2" max="500" step="1" value="40">
+            <span class="readout" id="test-walker-radius-r">40 m</span>
+          </div>
+          <div class="row">
+            <label>Cockpit</label>
+            <input type="range" id="test-cockpit-count" min="0" max="10" step="1" value="0">
+            <span class="readout" id="test-cockpit-count-r">0</span>
+          </div>
+          <div class="row">
+            <label>Cockpit-Radius</label>
+            <input type="range" id="test-cockpit-radius" min="200" max="20000" step="100" value="2000">
+            <span class="readout" id="test-cockpit-radius-r">2000 m</span>
+          </div>
+          <div class="btnrow">
+            <button id="btn-test-apply">Anwenden</button>
+            <button id="btn-test-stop">Alle stoppen</button>
+          </div>
+          <div class="hint" id="test-peers-status">Aktiv: 0 Walker, 0 Cockpit</div>
         </section>
       </div>
 
@@ -434,61 +467,157 @@ function initDebugPanel() {
     setTimeout(() => { track.enabled = false; console.info('[debug] force-PTT: aus'); }, 2000);
   });
 
-  // Test-Peer
-  $('#btn-test-start').addEventListener('click', () => {
-    const app = window.__voicewalker;
-    if (!app?.spawnTestPeer) { alert('Test-Modus nicht verfuegbar.'); return; }
-    app.spawnTestPeer();
-  });
-  $('#btn-test-stop').addEventListener('click', () => {
-    window.__voicewalker?.removeTestPeer?.();
-  });
-
-
-  // ==== Position spoofen ==================================================
-  let spoofTimer = null;
-  let spoofSim = null;
-  $('#btn-spoof-on').addEventListener('click', () => {
-    const lat = parseFloat($('#spoof-lat').value);
-    const lon = parseFloat($('#spoof-lon').value);
-    const hdg = parseFloat($('#spoof-hdg').value) || 0;
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-      alert('Lat/Lon muss eine Zahl sein.');
+  // ==== Sim-Spoofing ======================================================
+  // Presets: Quick-Picks fuer typische Test-Szenarien. Manuelle Felder
+  // (Lat/Lon/Heading/Alt) werden vom Preset gefuellt damit man weiter
+  // editieren kann. Walker/Cockpit-Toggle setzt on_foot + camera_state.
+  const SPOOF_PRESETS = {
+    'eddf':         { lat: 50.0379, lon: 8.5622,  hdg: 90,  alt: 364,    on_foot: true  },  // EDDF Apron
+    'eddf-cruise':  { lat: 50.0379, lon: 8.5622,  hdg: 90,  alt: 10000,  on_foot: false },
+    'edds-cruise':  { lat: 48.6899, lon: 9.2219,  hdg: 90,  alt: 10000,  on_foot: false },
+  };
+  const spoofStatus = $('#spoof-status');
+  function spoofStatusText(sim) {
+    if (!sim) { spoofStatus.textContent = 'Status: live (Backend-Sim)'; return; }
+    spoofStatus.textContent =
+      'Status: SPOOF ' + (sim.on_foot ? 'Walker' : 'Cockpit') +
+      ' lat=' + sim.lat.toFixed(4) + ' lon=' + sim.lon.toFixed(4) +
+      ' hdg=' + Math.round(sim.heading_deg) + '° alt=' + sim.alt_ft + 'ft';
+  }
+  function applySpoof(sim) {
+    const setter = window.__voicewalker?.setSpoofedSim;
+    if (typeof setter !== 'function') {
+      alert('Spoof benoetigt App-Bridge — Tab neu laden.');
       return;
     }
-    spoofSim = {
-      t: Date.now()/1000, lat, lon,
-      alt_ft: 0, agl_ft: 0,
-      heading_deg: hdg, camera_state: 2, on_foot: false, demo: true,
+    setter(sim);
+    spoofStatusText(sim);
+  }
+  function buildSpoofFromInputs(onFoot) {
+    const lat = parseFloat($('#spoof-lat').value);
+    const lon = parseFloat($('#spoof-lon').value);
+    const hdg = parseFloat($('#spoof-hdg').value);
+    const alt = parseFloat($('#spoof-alt').value);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      alert('Lat/Lon muss eine Zahl sein. Erst Preset waehlen oder Werte eintragen.');
+      return null;
+    }
+    return {
+      t: Date.now() / 1000,
+      lat, lon,
+      alt_ft: Number.isFinite(alt) ? alt : 0,
+      agl_ft: 0,
+      heading_deg: Number.isFinite(hdg) ? hdg : 0,
+      on_foot: !!onFoot,
+      camera_state: onFoot ? 26 : 2,
+      in_menu: false,
+      demo: false,
     };
-    if (spoofTimer) clearInterval(spoofTimer);
-    spoofTimer = setInterval(() => {
-      const host = window.__voicewalker;
-      if (!host) return;
-      // Wir haben keinen direkten Setter; darum den state ueber den globalen
-      // Getter _spoofen_: wir speichern einen Shim am Window, und app.js's
-      // Logik liest nur mySim — also muessen wir state.mySim direkt schreiben.
-      // Das geht via getter: app.js exponiert mySim nur als getter. Workaround:
-      // wir ueberschreiben den __voicewalker.mySim-Zugriff, aber noch einfacher:
-      // wir simulieren einen eingehenden "sim"-WS-Frame, indem wir die WS-Logik
-      // nachbilden ist overkill. Stattdessen bearbeiten wir state direkt ueber
-      // einen Seitenkanal, den wir gleich in app.js einbauen sollten.
-      // Fuer jetzt: UI-Indikator aktualisieren.
-    }, 200);
-    console.info('[debug] spoof on:', spoofSim);
-    // Direkt in app.js schreiben via __voicewalker.setSpoofedSim
-    if (typeof window.__voicewalker?.setSpoofedSim === 'function') {
-      window.__voicewalker.setSpoofedSim(spoofSim);
-    } else {
-      alert('Spoof benötigt eine App-Seite — starte einmal neu falls der Schalter nichts tut.');
+  }
+  // Preset-Buttons (alle data-spoof-preset im Spoof-Section)
+  panel.querySelectorAll('[data-spoof-preset]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.spoofPreset;
+      if (key === 'off') { applySpoof(null); return; }
+      const p = SPOOF_PRESETS[key];
+      if (!p) return;
+      $('#spoof-lat').value = p.lat;
+      $('#spoof-lon').value = p.lon;
+      $('#spoof-hdg').value = p.hdg;
+      $('#spoof-alt').value = p.alt;
+      const sim = buildSpoofFromInputs(p.on_foot);
+      if (sim) applySpoof(sim);
+    });
+  });
+  $('#btn-spoof-walker').addEventListener('click', () => {
+    const sim = buildSpoofFromInputs(true);
+    if (sim) applySpoof(sim);
+  });
+  $('#btn-spoof-cockpit').addEventListener('click', () => {
+    const sim = buildSpoofFromInputs(false);
+    if (sim) applySpoof(sim);
+  });
+
+  // ==== Test-Peers ========================================================
+  // Sliders binden Live-Werte ans __voicewalker.applyTestPeers ueber den
+  // "Anwenden"-Knopf. Counts/Radien werden in den Readout-Spans gespiegelt.
+  function bindReadout(inputSel, readoutSel, suffix) {
+    const inp = $(inputSel), out = $(readoutSel);
+    const fmt = () => { out.textContent = inp.value + (suffix || ''); };
+    inp.addEventListener('input', fmt);
+    fmt();
+  }
+  bindReadout('#test-walker-count',  '#test-walker-count-r',  '');
+  bindReadout('#test-walker-radius', '#test-walker-radius-r', ' m');
+  bindReadout('#test-cockpit-count', '#test-cockpit-count-r', '');
+  bindReadout('#test-cockpit-radius','#test-cockpit-radius-r',' m');
+
+  function applyTestPeers() {
+    const fn = window.__voicewalker?.applyTestPeers;
+    if (typeof fn !== 'function') {
+      alert('Test-Peer-Bridge fehlt — Tab neu laden.');
+      return;
+    }
+    fn({
+      walkerCount:   parseInt($('#test-walker-count').value, 10)  || 0,
+      cockpitCount:  parseInt($('#test-cockpit-count').value, 10) || 0,
+      walkerRadius:  parseInt($('#test-walker-radius').value, 10) || 40,
+      cockpitRadius: parseInt($('#test-cockpit-radius').value, 10) || 2000,
+    });
+    updateTestPeersStatus();
+  }
+  function updateTestPeersStatus() {
+    const s = window.__voicewalker?.getTestPeerStatus?.();
+    const el = $('#test-peers-status');
+    if (!s) { el.textContent = '—'; return; }
+    const audio = (s.audioBuffersCount > 0)
+      ? ' · Audio-Pool: ' + s.audioBuffersCount + ' Buffer ('
+        + s.audioBuffersDurations.map(d => d.toFixed(1) + 's').join(', ') + ')'
+      : ' · Audio: Default-Sweep';
+    el.textContent = 'Aktiv: ' + s.walkerActive + ' Walker (R=' + s.walkerRadius
+                   + 'm), ' + s.cockpitActive + ' Cockpit (R=' + s.cockpitRadius + 'm)'
+                   + audio;
+  }
+  $('#btn-test-apply').addEventListener('click', applyTestPeers);
+  $('#btn-test-stop').addEventListener('click', () => {
+    window.__voicewalker?.removeTestPeer?.();
+    $('#test-walker-count').value = 0;
+    $('#test-cockpit-count').value = 0;
+    $('#test-walker-count-r').textContent = '0';
+    $('#test-cockpit-count-r').textContent = '0';
+    updateTestPeersStatus();
+  });
+
+  // Audio-Pool-Upload: User kann mehrere Files auf einmal auswaehlen. Jede
+  // Datei wird als ArrayBuffer eingelesen und gemeinsam an die App-Bridge
+  // uebergeben — die decoded den Pool und teilt pro Test-Peer einen Buffer
+  // deterministisch zu.
+  $('#test-audio-file').addEventListener('change', async (e) => {
+    const files = Array.from(e.target.files || []);
+    const status = $('#test-audio-status');
+    if (files.length === 0) return;
+    const fn = window.__voicewalker?.loadTestAudioBuffers;
+    if (typeof fn !== 'function') {
+      alert('Audio-Bridge fehlt — Tab neu laden.'); return;
+    }
+    try {
+      const arrayBuffers = await Promise.all(files.map(f => f.arrayBuffer()));
+      const decoded = await fn(arrayBuffers);
+      status.textContent = 'Pool: ' + decoded.length + ' Buffer geladen ('
+        + files.map(f => f.name).join(', ') + ')';
+      updateTestPeersStatus();
+    } catch (err) {
+      status.textContent = 'Decode-Fehler: ' + err.message;
+      console.error('[debug] audio decode failed:', err);
     }
   });
-  $('#btn-spoof-off').addEventListener('click', () => {
-    if (spoofTimer) { clearInterval(spoofTimer); spoofTimer = null; }
-    if (typeof window.__voicewalker?.setSpoofedSim === 'function') {
-      window.__voicewalker.setSpoofedSim(null);
-    }
-    console.info('[debug] spoof off');
+  $('#btn-test-audio-clear').addEventListener('click', () => {
+    window.__voicewalker?.clearTestAudioBuffers?.();
+    $('#test-audio-file').value = '';
+    $('#test-audio-status').textContent =
+      'Default: Sweep-Tone. Mehrere Files moeglich — jeder Test-Peer bekommt '
+      + 'deterministisch einen Buffer aus dem Pool zugewiesen.';
+    updateTestPeersStatus();
   });
 
 

@@ -42,6 +42,7 @@ und im Walker-/Zu-Fuß-Modus von MSFS 2024.
 8. [Debug-Modus](#debug-modus)
 9. [Deinstallieren](#deinstallieren)
 10. [Status](#status)
+11. [Datenschutz & Impressum](#datenschutz--impressum)
 
 ---
 
@@ -531,6 +532,18 @@ Drittanbieter-Bibliotheken (Trystero, SimConnect, pygame, WiX, Tailwind, …)
 und deren Lizenzen. Alle verwendeten APIs und Bibliotheken sind in ihrer
 Lizenz Apache-2.0-kompatibel; keine proprietäre oder lizenzrechtlich
 kritische Komponente ist eingebunden.
+
+## Datenschutz & Impressum
+
+- **Datenschutzerklärung (App):** [PRIVACY.md](PRIVACY.md) (Deutsch) ·
+  [PRIVACY.en.md](PRIVACY.en.md) (English).
+  Beschreibt sämtliche Datenflüsse: P2P-Audio/-Position via WebRTC,
+  WebTorrent-Tracker, STUN, Lizenzserver, optionale Discord-Log-Übermittlung
+  inkl. automatischer Anonymisierung (Username/Pfade/IPs/E-Mails/Lizenzkeys).
+- **Impressum:** [IMPRINT.md](IMPRINT.md) (Deutsch + English).
+- **Online-Versionen** (öffentlich verlinkt aus dem Consent-Dialog):
+  <https://www.gsimulations.de/voicewalker/datenschutz/> und
+  <https://www.gsimulations.de/impressum/>.
 
 ## Lizenz
 

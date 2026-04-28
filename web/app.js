@@ -930,7 +930,10 @@ function connectBackendWs() {
     let m;
     try { m = JSON.parse(e.data); } catch { return; }
     if (m.type === 'sim') {
-      state.mySim = m.data;
+      // Wenn ein Spoof aktiv ist (Debug-Panel), Backend-Daten ignorieren —
+      // sonst ueberschreibt der naechste 2-Hz-Sim-Pulse den gespooften State
+      // direkt wieder. Spoof haelt bis setSpoofedSim(null) aufgerufen wird.
+      if (!_spoofedSim) state.mySim = m.data;
       renderSelf();
     } else if (m.type === 'ptt_state') {
       state.ptt = m;
@@ -1900,12 +1903,11 @@ function updateAudioFor(p) {
   const bearingPeerToMe = bearingDeg(p.sim, state.mySim);
   const peerHeading = p.sim.heading_deg || 0;
   const deltaDeg = ((bearingPeerToMe - peerHeading) + 540) % 360 - 180; // -180..180
-  // Mundrichtungs-Faktor fuer Test-Peer deaktivieren — sein kuenstliches
-  // Heading rotiert mit dem Kreis und erzeugt Lautstaerke-Schwankungen die
-  // wie Richtungsfehler wirken koennen. Echte Peers behalten das Kardioid.
-  const mouthFactor = (p.callsign === 'TEST-WALK')
-    ? 1.0
-    : (0.5 + 0.5 * Math.cos(deltaDeg * Math.PI / 180));
+  // Standard-Kardioid fuer ALLE Peers — auch Test-Peers. Sie sollen durch
+  // exakt dieselbe Audio-Pipeline laufen wie echte Peers (Sinn der Sache:
+  // Tuning ohne echte Tester). Heading-Rotation mit Lautstaerke-Schwankung
+  // ist beabsichtigt und realistisch fuer kreisende Bewegung.
+  const mouthFactor = 0.5 + 0.5 * Math.cos(deltaDeg * Math.PI / 180);
 
   // Ducking: wenn ich gerade spreche und Ducking aktiv ist, alle Peer-Stimmen
   // runter (Discord-artig). Faktor = audioConfig.ducking.attenuation (typ. 0.3).
@@ -1991,18 +1993,6 @@ function updateAudioFor(p) {
   // Orientation gelegentlich still, dann panned HRTF aus unbekannter
   // Referenz und klingt "irgendwie falsch".
   updateListenerOrientation();
-
-  if (p.callsign === 'TEST-WALK') {
-    const now = performance.now();
-    if (!updateAudioFor._lastDbg || now - updateAudioFor._lastDbg > 500) {
-      updateAudioFor._lastDbg = now;
-      const hdgDeg = ((me.heading_deg || 0)).toFixed(1);
-      console.info('[audio-dbg] myHdg=%s east=%s north=%s right=%s fwd=%s nx=%s nz=%s',
-        hdgDeg, east.toFixed(1), north.toFixed(1),
-        right.toFixed(2), forward.toFixed(2),
-        nx.toFixed(2), nz.toFixed(2));
-    }
-  }
 }
 
 // Listener bleibt auf DEFAULT-Orientierung (forward=-Z, up=+Y). Die eigene
@@ -2991,33 +2981,137 @@ function publishOverlay() {
 // Nur primary-Tab sendet (siehe Guard oben); secondary-Tabs sind eh blockiert.
 setInterval(publishOverlay, 250);
 
-// --- Test-Peer ---------------------------------------------------------------
-// Synthetischer Peer der um dich herum laeuft und alle 5 s via Web Speech API
-// "Hallo <dein Callsign>" sagt. Dazu parallel ein kurzer HRTF-positionierter
-// Ton durch die normale Peer-Pipeline, damit Radar-Speaking-Indikator und
-// VAD auslosen (TTS-Output selbst laesst sich in Browsern leider nicht durch
-// einen PannerNode routen — das ist eine Web-Speech-API-Limitation).
-let _testPeerWalkTimer = null;
-let _testPeerSayTimer  = null;
+// --- Test-Peer-System (Debug-Build) ----------------------------------------
+// Multi-Peer-Setup zum Tunen von Audio/Mesh/Radar OHNE echte Mit-Pilot:innen.
+// Einstellbar via Debug-Panel (web/debug.js) ueber applyTestPeers().
+//
+// Architektur:
+//  - Walker- und Cockpit-Peers laufen durch DIESELBE Audio-Pipeline wie echte
+//    Peers: newPeerEntry → updateAudioFor → HRTF/equalpower-Panner →
+//    detectSpeaking → masterGain. Keine Special-Cases mehr (mouthFactor und
+//    debug-trace sind raus, Test-Peers sehen aus wie produktive Peers).
+//  - Audio-Quelle: AudioBuffer (User-MP3, vom Debug-Panel ueber File-Input
+//    geladen) ODER ein synthetischer Sweep-Tone-Loop als Default. Beide
+//    liefern ein KONTINUIERLICHES Signal — realistischer Pegel-Tuning-Test
+//    als die alten 5-s-Bursts.
+//  - Pro Peer deterministische Variation (Phase, Speed, Radius-Jitter) per
+//    Index-Seed. Peers unterscheidbar, zwischen Apply-Klicks reproduzierbar.
 
-function spawnTestPeer() {
-  if (!state.mySim) { console.warn('[test] noch keine Sim-Position'); return; }
-  removeTestPeer();
+const _testPeerState = {
+  config: {
+    walkerCount: 0, cockpitCount: 0,
+    walkerRadius: 40, cockpitRadius: 2000,
+  },
+  // Array von decoded AudioBuffers. Leer → Default-Sweep-Tone fuer alle Peers.
+  // Mit 1+ Buffern: jeder Peer bekommt deterministisch einen aus dem Pool
+  // zugewiesen (peerIndex % audioBuffers.length). So klingen mehrere Test-
+  // Peers unterschiedlich, wenn der User mehrere MP3s hochlaedt.
+  audioBuffers: [],
+  walkTimer: null,
+  peers: new Map(),       // peerKey → { peer, src, kind, callsign, radius, speed, phase, altOffset }
+};
 
-  const ctx = ensureCtx();
-
+function _testPeerEnsureRoom() {
   let entry = state.rooms.get('__test__');
   if (!entry) {
     entry = { room: null, peers: new Map(), posTimer: null };
     state.rooms.set('__test__', entry);
   }
+  return entry;
+}
 
-  const testId = 'test-peer-walker';
+// Default-Source: kontinuierlicher musikalischer Sweep-Tone. Pro Peer
+// individuelle Tonhoehe (chromatische Pentatonik-Skala) + leicht andere LFO-
+// Geschwindigkeit, sodass mehrere gleichzeitige Peers akustisch klar
+// unterscheidbar sind. Loopt von selbst.
+const _SWEEP_BASE_FREQS = [
+  // Pentatonik in A-moll uber 2 Oktaven, jeweils mit ihrer Quint
+  [196.00, 294.00],   // G3  + D4
+  [220.00, 330.00],   // A3  + E4
+  [261.63, 392.00],   // C4  + G4
+  [293.66, 440.00],   // D4  + A4
+  [329.63, 493.88],   // E4  + B4
+  [392.00, 587.33],   // G4  + D5
+  [440.00, 660.00],   // A4  + E5
+  [523.25, 783.99],   // C5  + G5
+  [587.33, 880.00],   // D5  + A5
+  [659.25, 988.00],   // E5  + B5
+];
+function _createSweepTone(ctx, voiceIndex) {
+  const idx = ((voiceIndex | 0) % _SWEEP_BASE_FREQS.length + _SWEEP_BASE_FREQS.length)
+              % _SWEEP_BASE_FREQS.length;
+  const [f1, f2] = _SWEEP_BASE_FREQS[idx];
+
+  const out = ctx.createGain();
+  out.gain.value = 0.32;   // Etwas lauter als die alte 0.18 — durch distance-
+                           // attenuation + mouthFactor (0.5 bei tangential)
+                           // bleibt's am User noch dezent.
+
+  const o1 = ctx.createOscillator(); o1.type = 'sine'; o1.frequency.value = f1;
+  const o2 = ctx.createOscillator(); o2.type = 'sine'; o2.frequency.value = f2;
+
+  // LFO-Frequenz leicht je nach voice variieren (0.05 .. 0.10 Hz) — sonst
+  // atmen alle Peers synchron und klingen bei der HRTF-Mischung verwaschen.
+  const lfoFreq = 0.05 + (idx * 0.013) % 0.05;
+  const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = lfoFreq;
+  const lfoGain = ctx.createGain(); lfoGain.gain.value = f1 * 0.04;  // ~+/-4% der Carrier
+  lfo.connect(lfoGain);
+  lfoGain.connect(o1.frequency); lfoGain.connect(o2.frequency);
+
+  // Vibrato auf Output-Pegel
+  const vibFreq = 0.35 + (idx * 0.07) % 0.3;
+  const vibLfo = ctx.createOscillator(); vibLfo.type = 'sine'; vibLfo.frequency.value = vibFreq;
+  const vibGain = ctx.createGain(); vibGain.gain.value = 0.06;
+  vibLfo.connect(vibGain); vibGain.connect(out.gain);
+
+  o1.connect(out); o2.connect(out);
+  o1.start(); o2.start(); lfo.start(); vibLfo.start();
+
+  return {
+    out,
+    stop() {
+      try { o1.stop(); o2.stop(); lfo.stop(); vibLfo.stop(); } catch (_) {}
+    },
+  };
+}
+
+// Vom User geladenes Audio als looping Source. Pro Peer eigene Source-Node
+// (AudioBufferSourceNode kann nicht geshared werden). Phase-Versatz damit
+// nicht alle Peers exakt synchron klingen.
+function _createBufferSource(ctx, buffer, phaseSec) {
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  src.loop = true;
+  const off = ((phaseSec % buffer.duration) + buffer.duration) % buffer.duration;
+  src.start(0, off);
+  return {
+    out: src,
+    stop() { try { src.stop(); } catch (_) {} },
+  };
+}
+
+// Mulberry32 — deterministischer PRNG. Gleicher Seed → gleiche Variation
+// bei jedem Apply-Klick. Macht das Verhalten zwischen Tests reproduzierbar.
+function _seededRand(seed) {
+  let s = (seed | 0) || 1;
+  return () => {
+    s = (s + 0x6D2B79F5) | 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function _spawnSingleTestPeer(peerKey, kind, index, baseRadius, seed) {
+  const ctx = ensureCtx();
+  const entry = _testPeerEnsureRoom();
   const p = newPeerEntry('__test__');
-  entry.peers.set(testId, p);
+  entry.peers.set(peerKey, p);
 
-  // Audio-Graph identisch zu einem echten Peer
-  p.gainNode    = ctx.createGain();
+  // Audio-Pipeline: identisch zu echten Peers (siehe joinCellRoom →
+  // onPeerStream).
+  p.gainNode = ctx.createGain();
   p.gainNode.gain.value = 0;
   p.analyserRaw = ctx.createAnalyser();
   p.analyserRaw.fftSize = 512;
@@ -3027,97 +3121,251 @@ function spawnTestPeer() {
   p.pannerNode.refDistance   = 1;
   p.pannerNode.maxDistance   = 1;
   p.pannerNode.rolloffFactor = 0;
-  p.pannerNode.positionX.value = 0;
-  p.pannerNode.positionY.value = 0;
-  p.pannerNode.positionZ.value = -1;
 
-  // Oszillator als Ton-Quelle (immer an, nur Hüllkurve schwingt)
-  const osc = ctx.createOscillator();
-  const env = ctx.createGain();
-  env.gain.value = 0;
-  osc.type = 'sawtooth';
-  osc.frequency.value = 280;
-  osc.connect(env);
-  env.connect(p.analyserRaw);
-  env.connect(p.gainNode).connect(p.pannerNode).connect(masterGain);
-  osc.start();
-  p._synth = { osc, env };
+  const rng = _seededRand(seed);
+  const phaseOffset = rng() * 30;     // 0..30 sec Versatz im Audio-Loop
+  let src;
+  const buffers = _testPeerState.audioBuffers;
+  if (buffers.length > 0) {
+    // Peer-Index in Buffer-Pool: kind+index → deterministisch. Walker-0 nimmt
+    // Buffer 0, Walker-1 nimmt Buffer 1, ... wraps mit modulo. Cockpits
+    // separat indexiert, damit Cockpit-0 nicht zwingend dasselbe wie
+    // Walker-0 spielt.
+    const bufIdx = ((kind === 'walker' ? index : index + 7) % buffers.length
+                    + buffers.length) % buffers.length;
+    src = _createBufferSource(ctx, buffers[bufIdx], phaseOffset);
+  } else {
+    // voiceIndex aus der globalen Test-Peer-Reihenfolge, damit Peer 1 + Peer 2
+    // klar unterschiedliche Tonhoehen haben (Pentatonik aufsteigend).
+    src = _createSweepTone(ctx, _testPeerState.peers.size);
+  }
+  src.out.connect(p.analyserRaw);
+  src.out.connect(p.gainNode).connect(p.pannerNode).connect(masterGain);
 
-  // Walking-Bewegung: 40 m Radius (INNERHALB Walker-Hoerweite 75 m) um den
-  // User, ca. 25 s fuer eine Umdrehung. Heading zeigt in Laufrichtung
-  // (tangential zum Kreis) und aendert sich kontinuierlich — damit man im
-  // Radar & bei Richtungs-Audio spuert, wohin der Test-Peer gerade laeuft.
-  //
-  // Wichtig: 100 m waere AUSSERHALB der Standard-Walker-Reichweite → Gain=0
-  // → nichts hoerbar ausser der TTS (die am HRTF-Panner vorbei geht).
-  const RADIUS_M = 40;
-  const SPEED    = 0.25;   // rad/s
-  let phase = 0;
-  _testPeerWalkTimer = setInterval(() => {
-    if (!state.mySim) return;
-    phase += SPEED * 0.2;
-    const east  = Math.cos(phase) * RADIUS_M;
-    const north = Math.sin(phase) * RADIUS_M;
-    // Tangentiale Laufrichtung (Ableitung der Kreisbewegung)
-    const vx = -Math.sin(phase);   // east-Geschwindigkeit
-    const vy =  Math.cos(phase);   // north-Geschwindigkeit
-    // Nautisches Bearing (0° = Nord, 90° = Ost)
-    const heading = (Math.atan2(vx, vy) * 180 / Math.PI + 360) % 360;
+  // Bewegungs-Variation deutlich aufgedreht damit man bei mehreren Peers
+  // auch wirklich Unterschiede sieht: Radius +/-50%, Speed +/-50%, zufaelliger
+  // Startwinkel auf vollen 2π. Plus halbe Peers laufen rueckwaerts (CCW)
+  // damit nicht alle in dieselbe Richtung kreisen.
+  const radius = baseRadius * (0.5 + rng() * 1.0);
+  const baseSpeed = (kind === 'walker') ? 0.25 : 0.052; // rad/s
+  const speedMag = baseSpeed * (0.5 + rng() * 1.0);
+  const direction = rng() < 0.5 ? -1 : 1;
+  const speed = speedMag * direction;
+  const phaseStart = rng() * Math.PI * 2;
+  const altOffset = (kind === 'cockpit') ? (2000 + rng() * 4000) : 0; // ft, fuer Cockpit 2000-6000ft Versatz
+
+  // Initial-Position direkt setzen — sonst filtert renderPeers (Filter auf
+  // !sim) den frisch gespawnten Peer raus und das UI zeigt ihn erst beim
+  // ersten Tick (~200ms spaeter), was als Flackern wahrnehmbar ist.
+  const callsign = 'TEST-' + (kind === 'walker' ? 'WALK' : 'COCK') + '-' + (index + 1);
+  if (state.mySim) {
+    const east  = Math.cos(phaseStart) * radius;
+    const north = Math.sin(phaseStart) * radius;
     const R = 6371000;
+    const cosLat = Math.cos(state.mySim.lat * Math.PI / 180);
     const dLat = (north / R) * 180 / Math.PI;
-    const dLon = (east  / (R * Math.cos(state.mySim.lat * Math.PI / 180))) * 180 / Math.PI;
+    const dLon = (east  / (R * cosLat)) * 180 / Math.PI;
+    const vx = -Math.sin(phaseStart) * direction;
+    const vy =  Math.cos(phaseStart) * direction;
+    const heading = (Math.atan2(vx, vy) * 180 / Math.PI + 360) % 360;
     p.sim = {
       lat: state.mySim.lat + dLat,
       lon: state.mySim.lon + dLon,
-      alt_ft: state.mySim.alt_ft || 0,
-      agl_ft: 0,
+      alt_ft: (state.mySim.alt_ft || 0) + altOffset,
+      agl_ft: (kind === 'cockpit') ? 3000 : 0,
       heading_deg: heading,
-      hearRangeM: audioConfig.maxRangeM,
-      on_foot: true,
-      camera_state: 26,           // Walker-Cam (konsistent mit on_foot)
-      callsign: 'TEST-WALK',
+      hearRangeM: (kind === 'walker') ? audioConfig.walker.maxRangeM : audioConfig.cockpit.maxRangeM,
+      on_foot: (kind === 'walker'),
+      camera_state: (kind === 'walker') ? 26 : 2,
+      callsign,
     };
     p.lastSeen = Date.now();
-    updateAudioFor(p);
-    p.speaking = detectSpeaking(p);
-  }, 200);
+  }
 
-  // Alle 5 s: Ton-Burst zur Richtungs-Ortung (HRTF-spatialisiert). Nur Ton,
-  // keine TTS — Sprachausgabe war akustisch verwirrend und wurde entfernt.
-  const sayHello = () => {
-    if (!p._synth) return;
-    const t = ctx.currentTime;
-    osc.frequency.setTargetAtTime(330, t,        0.02);
-    osc.frequency.setTargetAtTime(440, t + 0.45, 0.02);
-    env.gain.cancelScheduledValues(t);
-    env.gain.setValueAtTime(0,      t);
-    env.gain.linearRampToValueAtTime(0.22, t + 0.05);
-    env.gain.linearRampToValueAtTime(0.0,  t + 0.35);
-    env.gain.linearRampToValueAtTime(0.22, t + 0.50);
-    env.gain.linearRampToValueAtTime(0.0,  t + 0.85);
+  return {
+    peer: p, src, kind, callsign,
+    radius, speed, phase: phaseStart, altOffset,
   };
-  sayHello();
-  _testPeerSayTimer = setInterval(sayHello, 5000);
+}
+
+function applyTestPeers(config) {
+  // config (alle optional): { walkerCount, cockpitCount, walkerRadius, cockpitRadius, audioBuffers }
+  if (config) {
+    const c = _testPeerState.config;
+    if (typeof config.walkerCount  === 'number') c.walkerCount  = Math.max(0, Math.min(10, config.walkerCount  | 0));
+    if (typeof config.cockpitCount === 'number') c.cockpitCount = Math.max(0, Math.min(10, config.cockpitCount | 0));
+    if (typeof config.walkerRadius  === 'number') c.walkerRadius  = Math.max(5,  config.walkerRadius);
+    if (typeof config.cockpitRadius === 'number') c.cockpitRadius = Math.max(50, config.cockpitRadius);
+    if (Array.isArray(config.audioBuffers)) _testPeerState.audioBuffers = config.audioBuffers.slice();
+  }
+  if (!state.mySim) {
+    console.warn('[test] keine Sim-Position — bitte Spoof aktivieren oder Sim starten');
+    return;
+  }
+  ensureCtx();
+  const cfg = _testPeerState.config;
+
+  // Komplett neu aufbauen statt diffen — AudioBufferSourceNode lassen sich
+  // nach start() nicht reattach'en, neuer Spawn ist die robuste Variante.
+  _stopAllTestPeers();
+
+  for (let i = 0; i < cfg.walkerCount; i++) {
+    const key = 'test-walker-' + i;
+    _testPeerState.peers.set(key,
+      _spawnSingleTestPeer(key, 'walker', i, cfg.walkerRadius, i * 137 + 1));
+  }
+  for (let i = 0; i < cfg.cockpitCount; i++) {
+    const key = 'test-cockpit-' + i;
+    _testPeerState.peers.set(key,
+      _spawnSingleTestPeer(key, 'cockpit', i, cfg.cockpitRadius, i * 211 + 17));
+  }
+
+  // Bewegungs-Loop: ein einziger Timer fuer alle Peers (200 ms Tick).
+  const total = cfg.walkerCount + cfg.cockpitCount;
+  if (total === 0 && _testPeerState.walkTimer) {
+    clearInterval(_testPeerState.walkTimer);
+    _testPeerState.walkTimer = null;
+  } else if (total > 0 && !_testPeerState.walkTimer) {
+    _testPeerState.walkTimer = setInterval(_testPeerTick, 200);
+  }
 
   renderPeers();
   renderMeshChip();
-  console.info('[test] test peer spawned — laeuft 100 m Radius, Ton-Burst alle 5 s');
+  console.info('[test] applied:', cfg.walkerCount, 'walker +', cfg.cockpitCount,
+               'cockpit (radius', cfg.walkerRadius, '/', cfg.cockpitRadius, 'm)');
+}
+
+let _testPeerRenderCounter = 0;
+function _testPeerTick() {
+  if (!state.mySim) return;
+  if (_testPeerState.peers.size === 0) return;
+  const R = 6371000;
+  const cosLat = Math.cos(state.mySim.lat * Math.PI / 180);
+  for (const [, item] of _testPeerState.peers) {
+    item.phase += item.speed * 0.2;
+    const east  = Math.cos(item.phase) * item.radius;
+    const north = Math.sin(item.phase) * item.radius;
+    // Tangentiale Laufrichtung — bei direction=-1 dreht der Peer rueckwaerts,
+    // dann zeigt das Heading auch nach hinten, sonst rotiert das Icon falsch.
+    const vx = -Math.sin(item.phase) * Math.sign(item.speed);
+    const vy =  Math.cos(item.phase) * Math.sign(item.speed);
+    const heading = (Math.atan2(vx, vy) * 180 / Math.PI + 360) % 360;
+    const dLat = (north / R) * 180 / Math.PI;
+    const dLon = (east  / (R * cosLat)) * 180 / Math.PI;
+    item.peer.sim = {
+      lat: state.mySim.lat + dLat,
+      lon: state.mySim.lon + dLon,
+      alt_ft: (state.mySim.alt_ft || 0) + item.altOffset,
+      agl_ft: (item.kind === 'cockpit') ? 3000 : 0,
+      heading_deg: heading,
+      hearRangeM: (item.kind === 'walker')
+                  ? audioConfig.walker.maxRangeM
+                  : audioConfig.cockpit.maxRangeM,
+      on_foot: (item.kind === 'walker'),
+      camera_state: (item.kind === 'walker') ? 26 : 2,
+      callsign: item.callsign,
+    };
+    item.peer.lastSeen = Date.now();
+    updateAudioFor(item.peer);
+    item.peer.speaking = detectSpeaking(item.peer);
+  }
+  // Radar/Peer-Liste live aktualisieren — sonst flackert das Test-Peer-Icon
+  // weil andere Render-Trigger (z.B. WS-Pulse) den Frame ohne diese Peers
+  // bauen koennten. renderRadar laeuft per requestAnimationFrame eh oft,
+  // renderPeers nur eventbased — daher hier explizit alle 5 Ticks (~1 s).
+  if ((++_testPeerRenderCounter % 5) === 0) {
+    try { renderPeers(); } catch (_) {}
+    try { renderMeshChip(); } catch (_) {}
+  }
+}
+
+function _stopAllTestPeers() {
+  for (const [, item] of _testPeerState.peers) {
+    try { item.src.stop(); } catch (_) {}
+  }
+  _testPeerState.peers.clear();
+  state.rooms.delete('__test__');
 }
 
 function removeTestPeer() {
-  if (_testPeerWalkTimer) { clearInterval(_testPeerWalkTimer); _testPeerWalkTimer = null; }
-  if (_testPeerSayTimer)  { clearInterval(_testPeerSayTimer);  _testPeerSayTimer  = null; }
-  try { window.speechSynthesis.cancel(); } catch {}
-  const entry = state.rooms.get('__test__');
-  if (!entry) return;
-  for (const [, p] of entry.peers) {
-    if (p._synth) { try { p._synth.osc.stop(); } catch {} }
+  if (_testPeerState.walkTimer) {
+    clearInterval(_testPeerState.walkTimer);
+    _testPeerState.walkTimer = null;
   }
-  state.rooms.delete('__test__');
+  _stopAllTestPeers();
+  _testPeerState.config.walkerCount = 0;
+  _testPeerState.config.cockpitCount = 0;
   renderPeers();
   renderMeshChip();
-  console.info('[test] test peer removed');
+  console.info('[test] all test peers removed');
 }
+
+// Backwards-Compat: alter Aufruf spawnTestPeer() ohne Args spawnt 1 Walker.
+function spawnTestPeer() {
+  applyTestPeers({ walkerCount: 1, cockpitCount: 0 });
+}
+
+// Mehrere MP3/WAV/Audio-Dateien laden (vom Debug-Panel ueber multi-File-Input).
+// Jede Datei wird einzeln decoded, alle Buffer landen im Pool. Pro Peer wird
+// beim Spawn einer aus dem Pool gewaehlt (siehe _spawnSingleTestPeer). Wenn
+// Test-Peers gerade laufen, werden sie mit dem neuen Pool neu gespawnt.
+async function loadTestAudioBuffers(arrayBuffers) {
+  const ctx = ensureCtx();
+  const list = Array.isArray(arrayBuffers) ? arrayBuffers : [arrayBuffers];
+  const decoded = [];
+  for (const ab of list) {
+    if (!ab) continue;
+    try {
+      const buf = await ctx.decodeAudioData(ab.slice(0));
+      decoded.push(buf);
+    } catch (e) {
+      console.warn('[test] decodeAudioData failed for one file:', e);
+    }
+  }
+  _testPeerState.audioBuffers = decoded;
+  console.info('[test] audio pool loaded:', decoded.length, 'buffer(s)');
+  if (_testPeerState.peers.size > 0) applyTestPeers();
+  return decoded;
+}
+
+function clearTestAudioBuffers() {
+  _testPeerState.audioBuffers = [];
+  if (_testPeerState.peers.size > 0) applyTestPeers();
+  console.info('[test] audio pool cleared, back to sweep-tone default');
+}
+
+function getTestPeerStatus() {
+  const cfg = _testPeerState.config;
+  const bufs = _testPeerState.audioBuffers;
+  return {
+    walkerActive: cfg.walkerCount,
+    cockpitActive: cfg.cockpitCount,
+    walkerRadius: cfg.walkerRadius,
+    cockpitRadius: cfg.cockpitRadius,
+    audioBuffersCount: bufs.length,
+    audioBuffersDurations: bufs.map(b => b.duration),
+  };
+}
+
+
+// --- Sim-Spoofing (Debug-Build) --------------------------------------------
+// Erlaubt das Setzen einer fake Sim-Position fuer Tests ohne echten Flug.
+// Solange _spoofedSim != null ist, ignoriert der WS-Sim-Handler eingehende
+// Backend-Updates (siehe oben). setSpoofedSim(null) gibt die Kontrolle ans
+// Backend zurueck.
+let _spoofedSim = null;
+function setSpoofedSim(sim) {
+  _spoofedSim = sim || null;
+  if (_spoofedSim) state.mySim = { ..._spoofedSim };
+  try { renderSelf(); }            catch (_) {}
+  try { reconcileAudioStreams(); } catch (_) {}
+  try { renderRadar(); }           catch (_) {}
+  console.info('[spoof]', _spoofedSim ? 'on' : 'off',
+               _spoofedSim ? ('lat=' + _spoofedSim.lat.toFixed(4) +
+                              ' lon=' + _spoofedSim.lon.toFixed(4) +
+                              ' on_foot=' + !!_spoofedSim.on_foot) : '');
+}
+function getSpoofedSim() { return _spoofedSim ? { ..._spoofedSim } : null; }
 
 
 // --- Debug-Panel Bridge -----------------------------------------------------
@@ -3146,9 +3394,17 @@ window.__voicewalker = {
     renderMeshChip();
     console.info('[debug] all peers cleared');
   },
-  spawnTestPeer,
-  removeTestPeer,
+  // Test-Peer-System (alt + neu, debug.js nutzt jetzt applyTestPeers)
+  spawnTestPeer,            // legacy: 1 Walker spawnen
+  removeTestPeer,           // alle Test-Peers stoppen
+  applyTestPeers,           // multi-spawn mit { walkerCount, cockpitCount, walkerRadius, cockpitRadius, audioBuffers }
+  loadTestAudioBuffers,     // ArrayBuffer[] aus multi-File-Input → decoded → als Audio-Pool setzen
+  clearTestAudioBuffers,    // zurueck auf Default-Sweep-Tone
+  getTestPeerStatus,        // aktuelle Counts/Radien/AudioBuffer-Info
   get testPeerActive() { return state.rooms.has('__test__'); },
+  // Spoof: state.mySim mit fake-Daten ueberschreiben fuer Tests ohne Sim
+  setSpoofedSim,
+  getSpoofedSim,
   ensureCtx,
   ensureMic,
   reconcileAudioStreams,

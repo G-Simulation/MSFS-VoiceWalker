@@ -221,6 +221,19 @@
           SkipUnchangedFiles="true" />
     <Message Condition="Exists('$(BuiltMsfsPackage)\manifest.json')"
              Text="==&gt; html_ui/ aus PackageSources ins Paket gespiegelt." Importance="high" />
+
+    <!-- Public-Build: InGamePanel-Debug-Inject aus dem gespiegelten Package
+         strippen. panel.html und panel-efb.html bleiben in PackageSources
+         unveraendert — nur die Kopie im Build-Output wird gefiltert. Dadurch
+         enthaelt die ausgelieferte MSI weder die <script>-Inject-Zeile noch
+         den debug/-Subfolder. Im Debug-Build (VWDebugBuild=true) bleibt
+         alles drin. -->
+    <Exec Condition="'$(VWDebugBuild)' != 'true' And Exists('$(BuiltMsfsPackage)\manifest.json')"
+          Command="python &quot;$(MSBuildProjectDirectory)\strip-debug-inject.py&quot; &quot;$(BuiltMsfsPackage)&quot;"
+          WorkingDirectory="$(RepoRoot)" />
+    <Message Condition="'$(VWDebugBuild)' == 'true' And Exists('$(BuiltMsfsPackage)\manifest.json')"
+             Text="==&gt; Debug-Build: InGamePanel-Debug-Overlay AKTIV (debug/panel-debug.js wird mitgepackt)." Importance="high" />
+
     <!-- Sicherheits-Copy 3: EFB-App-dist deterministisch ins Paket
          spiegeln. fspackagetool macht das normalerweise via die
          efb_apps_voicewalker-AssetGroup, aber wenn er failed (oder die

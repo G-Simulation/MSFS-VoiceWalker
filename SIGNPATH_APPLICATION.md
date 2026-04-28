@@ -67,7 +67,7 @@ making the SignPath cloud-signing adapter a drop-in replacement.
 
 ## Links
 
-- **Repository:** https://github.com/G-Simulation/MSFS-VoiceWalker
+- **Repository:** https://github.com/G-Simulation/VoiceWalker
 - **Project homepage:** https://www.gsimulations.de/voicewalker
 - **License:** Apache-2.0
 - **Contact:** kontakt@gsimulations.com
