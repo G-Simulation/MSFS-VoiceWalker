@@ -46,8 +46,12 @@
          liefern 404 — End-User koennen keinen Backend-State pollen.
 
          Aktivieren via:  dotnet build /p:VWDebugBuild=true ...
-         oder via Env-Var: set VW_DEBUG_BUILD=1 vor dem Build. -->
+         oder via Env-Var: set VW_DEBUG_BUILD=1 vor dem Build.
+         Plus: VS Solution-Configuration "Debug" setzt VWDebugBuild
+         automatisch auf true — damit ein normaler "Debug-Build" in
+         VS auch Debug-Panel + /debug-Endpoints aktiviert. -->
     <VWDebugBuild Condition="'$(VWDebugBuild)' == '' And '$(VW_DEBUG_BUILD)' == '1'">true</VWDebugBuild>
+    <VWDebugBuild Condition="'$(VWDebugBuild)' == '' And '$(Configuration)' == 'Debug'">true</VWDebugBuild>
     <VWDebugBuild Condition="'$(VWDebugBuild)' == ''">false</VWDebugBuild>
     <_DebugBuildPy Condition="'$(VWDebugBuild)' == 'true'">True</_DebugBuildPy>
     <_DebugBuildPy Condition="'$(VWDebugBuild)' != 'true'">False</_DebugBuildPy>
