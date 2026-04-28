@@ -295,7 +295,7 @@
          pystray + PIL muessen mit collect-all rein damit das Windows-Tray-
          Backend in der gefrorenen EXE verfuegbar ist. tray + pynput + license_client
          als hidden-import weil sie nur dynamisch geladen werden. -->
-    <Exec Command="python -m PyInstaller --noconfirm --clean --name VoiceWalker --onefile --noconsole --icon &quot;packaging\app-icon.ico&quot; --add-data &quot;dist\web_for_build;web&quot; --collect-all SimConnect --collect-all pygame --collect-all websockets --collect-all pystray --collect-all PIL --collect-all webview --hidden-import ptt_backend --hidden-import debug --hidden-import tray --hidden-import pynput --hidden-import license_client --hidden-import build_config main.py"
+    <Exec Command="python -m PyInstaller --noconfirm --clean --name VoiceWalker --onefile --noconsole --icon &quot;packaging\app-icon.ico&quot; --add-data &quot;dist\web_for_build;web&quot; --collect-all SimConnect --collect-all pygame --collect-all websockets --collect-all pystray --collect-all PIL --hidden-import ptt_backend --hidden-import debug --hidden-import tray --hidden-import pynput --hidden-import license_client --hidden-import build_config main.py"
           WorkingDirectory="$(RepoRoot)" />
 
     <Error Condition="!Exists('$(AppExe)')"

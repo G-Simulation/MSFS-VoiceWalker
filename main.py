@@ -1898,6 +1898,8 @@ async def main():
             server.wait_closed(),
         )
     finally:
+        try: tray.stop_processes()
+        except Exception as e: log.debug("tray.stop_processes: %s", e)
         if tray_icon is not None:
             try: tray_icon.stop()
             except Exception as e: log.debug("tray.stop: %s", e)
