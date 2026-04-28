@@ -972,16 +972,21 @@ function connectBackendWs() {
         const box = document.getElementById('showFar');
         if (box) { box.checked = !box.checked; box.dispatchEvent(new Event('change')); }
       } else if (a === 'select-mic' && typeof m.deviceId === 'string') {
+        // Sim-Panel/EFB schickt deviceId = Friendly-Name (vom Backend
+        // sounddevice-Snapshot). Browser braucht aber MediaDeviceInfo.deviceId
+        // (Hash). Mapping ueber label-Match in state.audioInputs.
+        const realId = _resolveBrowserDeviceId('audioinput', m.deviceId);
         const inEl = document.getElementById('audioInput');
-        state.audioInputId = m.deviceId;
+        state.audioInputId = realId || '';
         try { localStorage.setItem('vw.audioInputId', state.audioInputId); } catch {}
-        if (inEl) inEl.value = m.deviceId;
+        if (inEl) inEl.value = state.audioInputId;
         ensureMic();
       } else if (a === 'select-speaker' && typeof m.deviceId === 'string') {
+        const realId = _resolveBrowserDeviceId('audiooutput', m.deviceId);
         const outEl = document.getElementById('audioOutput');
-        state.audioOutputId = m.deviceId;
+        state.audioOutputId = realId || '';
         try { localStorage.setItem('vw.audioOutputId', state.audioOutputId); } catch {}
-        if (outEl) outEl.value = m.deviceId;
+        if (outEl) outEl.value = state.audioOutputId;
         applyAudioOutput();
       } else if (a === 'set-master-volume' && typeof m.value === 'number') {
         // Slider im Panel ist 0..1.5; UI-Slider in index.html ist 0..150 %.
@@ -1325,6 +1330,31 @@ _appStartPromise.then(ok => {
 });
 
 // --- Audio Device Selection --------------------------------------------------
+// Resolve Friendly-Name (vom Backend sounddevice-Snapshot) auf die
+// Browser-interne MediaDeviceInfo.deviceId (Hash). Backend kennt nur
+// Geraete-Namen, Browser braucht die Hash-ID fuer getUserMedia/setSinkId.
+// Mapping: case-insensitive substring-match auf MediaDeviceInfo.label —
+// "Realtek Audio Mic (Hochwertig)" matched "Realtek Audio Mic". Wenn
+// kein Match: leerer String → Browser nimmt Default-Device.
+function _resolveBrowserDeviceId(kind, friendlyName) {
+  const list = (kind === 'audioinput')
+    ? (state.audioInputs || [])
+    : (state.audioOutputs || []);
+  if (!friendlyName) return '';
+  const needle = friendlyName.toLowerCase().trim();
+  // Exakter Match zuerst, dann Substring (eine Richtung), dann andere.
+  for (const d of list) {
+    if ((d.label || '').toLowerCase().trim() === needle) return d.deviceId;
+  }
+  for (const d of list) {
+    const lbl = (d.label || '').toLowerCase();
+    if (lbl && (lbl.includes(needle) || needle.includes(lbl))) return d.deviceId;
+  }
+  console.warn('[audio] Kein Browser-Device-Match fuer:', friendlyName,
+               '(verfuegbar:', list.map(d => d.label), ')');
+  return '';
+}
+
 async function populateAudioDevices() {
   try {
     if (!navigator.mediaDevices?.enumerateDevices) return;
