@@ -2534,11 +2534,21 @@ function renderRadar() {
     const bear = bearingDeg(state.mySim, p.sim);
     const rad  = bear * Math.PI / 180;
 
+    // Hold-Timer: Peer der gerade out-of-range geht bleibt 1.5 s sichtbar
+    // (sticky), bevor er als Edge-Dot verschwindet — verhindert Flackern
+    // an der Range-Grenze bei schneller Bewegung.
+    const _nowMs = performance.now();
+    if (d <= RADAR_RANGE_M) {
+      p._oorSince = 0;
+    } else if (!p._oorSince) {
+      p._oorSince = _nowMs;
+    }
+    const _oorEffective = (d > RADAR_RANGE_M) && (_nowMs - p._oorSince > 1500);
     // Out-of-Range: kleines Punkt-Symbol direkt am Radar-Rand in Bearing-
     // Richtung. Gibt Hinweis auf Peers ausserhalb der gewaehlten Range
     // (sonst verschwinden sie ganz, was bei Cockpit-Peers im Aviation-
     // Modus oft passiert). Farbe analog Hoerbarkeit.
-    if (d > RADAR_RANGE_M) {
+    if (_oorEffective) {
       const px = cx + Math.sin(rad) * (R - 6);
       const py = cy - Math.cos(rad) * (R - 6);
       const peerHearM = p.sim.hearRangeM || 1000;
@@ -2958,7 +2968,11 @@ function renderPeers() {
     // werden nicht als Symbol gezeichnet (nur als Edge-Dot am Rand). Dann
     // auch nicht in der nearby-Liste — sonst Mismatch zwischen Radar und Liste.
     const d = p.currentDistance ?? (state.mySim ? distMeters(state.mySim, sim) : Infinity);
-    if (Number.isFinite(d) && d > RADAR_RANGE_M) continue;
+    // Hold-Timer (siehe renderRadar): out-of-range Peer bleibt 1.5 s in
+    // der Liste, danach raus. Flag wird vom Radar-Render gesetzt.
+    const _now = performance.now();
+    const _holdActive = p._oorSince && (_now - p._oorSince <= 1500);
+    if (Number.isFinite(d) && d > RADAR_RANGE_M && !_holdActive) continue;
     all.push([id, p]);
   }
   const T = (k) => (window.i18n ? window.i18n.t(k) : k);

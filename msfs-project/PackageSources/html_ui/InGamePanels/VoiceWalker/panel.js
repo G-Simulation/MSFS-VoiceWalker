@@ -443,10 +443,20 @@
         const brg     = bearing(state.mySim, p.sim);
         const theta   = toRad(brg) - Math.PI / 2;
 
+        // Hold-Timer: Peer der out-of-range geht bleibt 1.5 s sichtbar
+        // (sticky), bevor er als Edge-Dot verschwindet — verhindert Flackern
+        // an der Range-Grenze bei schneller Bewegung.
+        const _nowMs = performance.now();
+        if (d <= radarRangeM) {
+          p._oorSince = 0;
+        } else if (!p._oorSince) {
+          p._oorSince = _nowMs;
+        }
+        const _oorEffective = (d > radarRangeM) && (_nowMs - p._oorSince > 1500);
         // Out-of-Range: kleiner farbiger Edge-Dot am Radar-Rand (analog Web-UI).
         // Statt vollem Peer-Symbol (Cone/Aircraft/Callsign) zeichnen wir nur
         // einen 3px Punkt in Hoer-Status-Farbe und springen zum naechsten Peer.
-        if (d > radarRangeM) {
+        if (_oorEffective) {
           const epx = cx + Math.cos(theta) * (R - 6);
           const epy = cy + Math.sin(theta) * (R - 6);
           const peerHearM_oor = +p.sim.hearRangeM || 1000;
@@ -693,7 +703,11 @@
         // Radar-Range-Filter: Peers ausserhalb des aktuell gewaehlten Radar-
         // Range nicht in der Liste anzeigen — sonst Mismatch zwischen Radar
         // (zeigt sie nicht/nur als Edge-Dot) und Liste (zeigt sie prominent).
-        if (d > radarRangeM) return;
+        // Hold-Timer (siehe Radar-Render): out-of-range Peer bleibt 1.5 s
+        // in der Liste — flag wird vom Radar-Render gepflegt.
+        const _now = performance.now();
+        const _holdActive = p._oorSince && (_now - p._oorSince <= 1500);
+        if (d > radarRangeM && !_holdActive) return;
         peers.push({ p: p, d: d });
       });
     }
@@ -913,8 +927,14 @@
         (m.peers || []).forEach(function (p) { state.peers.set(p.id, p); });
         if (m.myRange) state.myRange = +m.myRange;
         if (!state.mySim && m.mySim) state.mySim = m.mySim;
-        // Erweiterter UI-State (optional; nur im neuen overlay_state vorhanden)
-        if (m.ui) state.ui = m.ui;
+        // Erweiterter UI-State (optional; nur im neuen overlay_state vorhanden).
+        // MERGE statt REPLACE — Backend sendet `tracking_state` separat VOR
+        // overlay_state, ein Replace wuerde das `trackingEnabled`-Flag killen
+        // → Tracking-Button blieb dauerhaft inaktiv.
+        if (m.ui) {
+          if (!state.ui) state.ui = {};
+          Object.assign(state.ui, m.ui);
+        }
         applyWalkerAutoZoom();
       } else if (m.type === 'tracking_off') {
         state.trackingOff = true;
@@ -928,6 +948,14 @@
       } else if (m.type === 'version') {
         const vEl = $('vw-version');
         if (vEl && m.version) vEl.textContent = 'v' + m.version;
+      } else if (m.type === 'ptt_press') {
+        // Hardware-/Keyboard-PTT (Backend-Binding feuert) → Button visuell
+        // hervorheben, damit User sieht dass die Mic-Taste registriert wurde.
+        const _pttEl = $('vw-ptt');
+        if (_pttEl) _pttEl.classList.add('live');
+      } else if (m.type === 'ptt_release') {
+        const _pttEl = $('vw-ptt');
+        if (_pttEl) _pttEl.classList.remove('live');
       } else if (m.type === 'ptt_state') {
         // Backend meldet PTT-Bind-Fortschritt direkt — wichtig wenn nur das
         // Panel offen ist (kein Browser-UI das overlay_state.ui spiegelt).
