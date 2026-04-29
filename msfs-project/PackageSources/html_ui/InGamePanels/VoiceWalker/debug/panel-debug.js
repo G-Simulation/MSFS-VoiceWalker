@@ -96,22 +96,21 @@
         'background: #0f1a2f; border-top: 1px solid #233457;' +
         'color: #4a5b80; font-size: 9px; text-align: center;' +
       '}' +
-      /* Mini-Reopen-Knopf — bleibt sichtbar wenn das Panel geschlossen ist.
-         EFB-Tastatur-Fokus ist unzuverlaessig (Coherent leitet Strg+Shift+D
-         im Tablet nicht immer durch), deshalb braucht es einen klickbaren
-         Trigger. Knopf erscheint nur wenn .open NICHT gesetzt ist. */
+      /* Reopen-Knopf — Inline-Pille im Panel-Header, optisch konsistent zur
+         vw-version- und vw-zoom-Pille (gleiches Padding/Font/Border).
+         Sichtbarkeit wird via JS in toggle() geschaltet (overlay + FAB sind
+         nicht mehr DOM-Geschwister, daher kein CSS-`~`-Selector mehr). */
       '#vw-debug-fab {' +
-        'position: fixed; right: 6px; bottom: 6px; z-index: 99998;' +
-        'width: 28px; height: 28px; border-radius: 50%;' +
-        'background: rgba(11, 18, 32, 0.92);' +
+        'flex-shrink: 0; margin-left: 6px;' +
+        'padding: 2px 9px; border-radius: 999px;' +
+        'background: rgba(11, 18, 32, 0.6);' +
         'border: 1px solid #30456d; color: #6aa5ff;' +
-        'font: 700 10px/1 ui-monospace, "SF Mono", Consolas, monospace;' +
-        'letter-spacing: 0.05em; cursor: pointer;' +
-        'display: flex; align-items: center; justify-content: center;' +
-        'box-shadow: 0 2px 8px rgba(0,0,0,0.5); user-select: none;' +
+        'font: 700 9px/1.4 ui-monospace, "SF Mono", Consolas, monospace;' +
+        'letter-spacing: 0.08em; cursor: pointer;' +
+        'opacity: 0.6; transition: opacity 0.15s, background 0.15s, color 0.15s;' +
+        'user-select: none;' +
       '}' +
-      '#vw-debug-fab:hover { background: #15213a; color: #e9eefc; }' +
-      '#vw-debug-overlay.open ~ #vw-debug-fab { display: none; }' +
+      '#vw-debug-fab:hover { background: #15213a; color: #e9eefc; opacity: 1; }' +
     '</style>' +
     '<div class="vw-dbg-head">' +
       '<strong>VW DEBUG</strong>' +
@@ -137,11 +136,26 @@
       // INNERHALB des <ingame-ui>-Render-Targets. Direkt am document.body
       // angehaengte Elemente sind zwar visuell sichtbar, bekommen aber
       // keine Clicks (Hit-Test ist auf den Panel-Inhalt begrenzt). Daher:
-      // Overlay UND FAB als Kind des <ingame-ui> einhaengen. Im EFB-Tablet
-      // (kein <ingame-ui>) fallen wir auf body zurueck.
+      // Overlay als Kind des <ingame-ui> einhaengen (bzw. body als EFB-Fallback).
       const host = document.querySelector('ingame-ui') || document.body;
       host.appendChild(overlay);
-      host.appendChild(fab);
+      // FAB direkt in den Panel-Header (.vw-header) — visuell konsistent zu
+      // vw-zoom / vw-version. Falls der Header beim Boot noch nicht da ist
+      // (BaseInstrument-Inflate-Race), via MutationObserver nachreichen.
+      const placeFab = () => {
+        const header = document.querySelector('.vw-header');
+        if (header && !header.contains(fab)) { header.appendChild(fab); return true; }
+        return false;
+      };
+      if (!placeFab()) {
+        const obs = new MutationObserver(() => { if (placeFab()) obs.disconnect(); });
+        obs.observe(document.body, { childList: true, subtree: true });
+        // Fallback: wenn nach 5s kein Header existiert, FAB an host anhaengen
+        // damit er ueberhaupt klickbar ist (z.B. EFB ohne .vw-header).
+        setTimeout(() => {
+          if (!fab.parentElement) { obs.disconnect(); host.appendChild(fab); }
+        }, 5000);
+      }
     }
     if (document.body) {
       appendBoth();
@@ -178,6 +192,10 @@
   function toggle(force) {
     const open = force === undefined ? !overlay.classList.contains('open') : !!force;
     overlay.classList.toggle('open', open);
+    // Overlay + FAB sind nicht mehr DOM-Geschwister (FAB lebt im .vw-header,
+    // Overlay am host) — FAB-Sichtbarkeit deshalb hier explizit toggeln,
+    // statt per CSS-Sibling-Selector.
+    fab.style.display = open ? 'none' : '';
     if (open) renderLog();
   }
 

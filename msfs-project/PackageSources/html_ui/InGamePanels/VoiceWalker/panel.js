@@ -203,16 +203,15 @@
     const canvas = $('radar');
     const wrap   = $('vw-radar-wrap');
     if (!canvas || !wrap) return;
-    const w = wrap.clientWidth  || 340;
-    const h = wrap.clientHeight || 340;
-    const s = Math.max(120, Math.min(w, h) - 4);
-    if (_cssW === s && _cssH === s) return;
-    _cssW = s; _cssH = s;
+    const w = Math.max(120, wrap.clientWidth  || 340);
+    const h = Math.max(120, wrap.clientHeight || 340);
+    if (_cssW === w && _cssH === h) return;
+    _cssW = w; _cssH = h;
     const dpr = Math.max(1, window.devicePixelRatio || 1);
-    canvas.style.width  = s + 'px';
-    canvas.style.height = s + 'px';
-    canvas.width  = Math.round(s * dpr);
-    canvas.height = Math.round(s * dpr);
+    canvas.style.width  = w + 'px';
+    canvas.style.height = h + 'px';
+    canvas.width  = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
     const ctx = canvas.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     scheduleRender();
@@ -420,21 +419,31 @@
         const peerRelHead = peerHeading - selfHeading;
 
         if (peerOnFoot) {
-          const peerHearM   = +p.sim.hearRangeM || 1000;
+          const peerHearM   = +p.sim.hearRangeM || 10;
           const peerConeRaw = R * Math.min(1, peerHearM / radarRangeM);
           const peerConeR   = Math.max(peerConeRaw, 10);
           const peerConeHalf = 60 * Math.PI / 180;
           const peerConeCtr  = (peerRelHead * Math.PI / 180) - Math.PI / 2;
-          const fillCol = p.speaking
-            ? 'rgba(255,224,102,0.40)'
-            : color === '#6aa5ff' ? 'rgba(106,165,255,0.30)'
-            :                       'rgba(85,101,130,0.25)';
-          ctx.fillStyle = fillCol;
+          // Radial-Gradient ab Peer-Position (analog Self-Cone in Z.311–319) —
+          // im Zentrum opak, zum Cone-Rand hin transparent. Farbe = Speaker/
+          // In-Range/Out-Of-Range.
+          const coneRGB = p.speaking          ? '255,224,102'
+                       : color === '#6aa5ff'  ? '106,165,255'
+                       :                        '85,101,130';
+          const peerConeGrad = ctx.createRadialGradient(px, py, 0, px, py, peerConeR);
+          peerConeGrad.addColorStop(0, 'rgba(' + coneRGB + ',0.45)');
+          peerConeGrad.addColorStop(1, 'rgba(' + coneRGB + ',0.00)');
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(cx, cy, R, 0, Math.PI * 2);
+          ctx.clip();
+          ctx.fillStyle = peerConeGrad;
           ctx.beginPath();
           ctx.moveTo(px, py);
           ctx.arc(px, py, peerConeR, peerConeCtr - peerConeHalf, peerConeCtr + peerConeHalf);
           ctx.closePath();
           ctx.fill();
+          ctx.restore();
           ctx.fillStyle = color;
           ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1;
           ctx.beginPath(); ctx.arc(px, py, 3.3, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
@@ -751,7 +760,7 @@
     function bumpBackendHeartbeat() {
       clearTimeout(VW.heartbeatTimer);
       VW.heartbeatTimer = setTimeout(function () {
-        log.info && log.info('backend-heartbeat timeout — markiere offline');
+        L('backend-heartbeat timeout — markiere offline');
         setConn('offline', 'offline');
         try { if (VW.ws) VW.ws.close(); } catch (e) {}
       }, 5000);

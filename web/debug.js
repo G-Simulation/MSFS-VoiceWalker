@@ -734,8 +734,13 @@ function initDebugPanel() {
             // Header
             + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'
             +   '<input type="checkbox" data-peer="' + k + '" data-field="enabled" ' + enChecked + '>'
-            +   '<span style="font-weight:bold;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
-            +     cs + '</span>'
+            +   '<input type="text" data-peer="' + k + '" data-field="callsign" value="' + cs + '"'
+            +     ' maxlength="16" placeholder="Callsign"'
+            +     ' style="font-weight:bold;flex:1;min-width:0;font-size:11px;'
+            +     'background:transparent;border:1px solid transparent;border-radius:3px;'
+            +     'padding:1px 4px;color:#e9eefc;outline:none"'
+            +     ' onfocus="this.style.background=\'#1a2540\';this.style.borderColor=\'#30456d\'"'
+            +     ' onblur="this.style.background=\'transparent\';this.style.borderColor=\'transparent\'">'
             +   '<select data-peer="' + k + '" data-field="pathType" style="font-size:10px;color:#111;background:#d8e2f0">'
             +     '<option value="organic"'  + (pathType === 'organic'   ? ' selected' : '') + '>Organisch</option>'
             +     '<option value="recorded"' + (pathType === 'recorded'  ? ' selected' : '') + '>Aufgezeichnet</option>'
@@ -827,6 +832,10 @@ function initDebugPanel() {
 
     if (t.tagName === 'INPUT' && t.type === 'checkbox' && field === 'enabled') {
       window.__voicewalker?.setPeerOverride?.(peer, { enabled: t.checked });
+      return;
+    }
+    if (t.tagName === 'INPUT' && t.type === 'text' && field === 'callsign') {
+      window.__voicewalker?.renameTestPeer?.(peer, t.value);
       return;
     }
     if (t.tagName === 'INPUT' && t.type === 'range') {

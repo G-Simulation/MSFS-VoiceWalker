@@ -2517,13 +2517,17 @@ function renderRadar() {
       const peerConeCtr  = (peerRelHead * Math.PI / 180) - Math.PI / 2;
       const pcs = peerConeCtr - peerConeHalf;
       const pce = peerConeCtr + peerConeHalf;
-      const fillColor = isSpeaking
-        ? 'rgba(255, 224, 102, 0.40)'
-        : color === '#3fdc8a' ? 'rgba(63, 220, 138, 0.32)'
-        : color === '#6aa5ff' ? 'rgba(106, 165, 255, 0.30)'
-        : color === '#ffc857' ? 'rgba(255, 200, 87, 0.30)'
-        :                       'rgba(107, 120, 150, 0.25)';
-      ctx.fillStyle = fillColor;
+      // Radial-Gradient ab Peer-Position (analog Self-Cone) — innen opak,
+      // zum Cone-Rand hin transparent. Ergibt den weichen Trichter-Look.
+      const coneRGB = isSpeaking          ? '255, 224, 102'
+                    : color === '#3fdc8a' ? '63, 220, 138'
+                    : color === '#6aa5ff' ? '106, 165, 255'
+                    : color === '#ffc857' ? '255, 200, 87'
+                    :                       '107, 120, 150';
+      const peerConeGrad = ctx.createRadialGradient(px, py, 0, px, py, peerConeR);
+      peerConeGrad.addColorStop(0, 'rgba(' + coneRGB + ', 0.45)');
+      peerConeGrad.addColorStop(1, 'rgba(' + coneRGB + ', 0.00)');
+      ctx.fillStyle = peerConeGrad;
       ctx.beginPath();
       ctx.moveTo(px, py);
       ctx.arc(px, py, peerConeR, pcs, pce);
@@ -3555,7 +3559,8 @@ function _spawnSingleTestPeer(peerKey, kind, index, baseRadius, seed) {
   // Initial-Position direkt setzen — sonst filtert renderPeers (Filter auf
   // !sim) den frisch gespawnten Peer raus und das UI zeigt ihn erst beim
   // ersten Tick (~200ms spaeter), was als Flackern wahrnehmbar ist.
-  const callsign = 'TEST-' + (kind === 'walker' ? 'WALK' : 'COCK') + '-' + (index + 1);
+  const customCs = (typeof ov.customCallsign === 'string') ? ov.customCallsign.trim().slice(0, 16) : '';
+  const callsign = customCs || ('TEST-' + (kind === 'walker' ? 'WALK' : 'COCK') + '-' + (index + 1));
   if (state.mySim) {
     const east  = Math.cos(phaseStart) * radius;
     const north = Math.sin(phaseStart) * radius;
@@ -4005,6 +4010,23 @@ function setPeerOverride(peerKey, patch) {
   _testPeerState.overrides.set(peerKey, next);
 }
 
+// Test-Peer umbenennen (kein Respawn — Audio/Pfad/State bleiben unveraendert).
+// Leerstring/null setzt zurueck auf den Default ("TEST-WALK-N" / "TEST-COCK-N").
+function renameTestPeer(peerKey, name) {
+  if (!peerKey) return;
+  const trimmed = (name == null ? '' : String(name)).trim().slice(0, 16);
+  setPeerOverride(peerKey, { customCallsign: trimmed || null });
+  const item = _testPeerState.peers.get(peerKey);
+  if (!item) return;
+  const m = /^test-(walker|cockpit)-(\d+)$/.exec(peerKey);
+  const kind  = m ? m[1] : item.kind;
+  const index = m ? (parseInt(m[2], 10) - 1) : 0;
+  const fallback = 'TEST-' + (kind === 'walker' ? 'WALK' : 'COCK') + '-' + (index + 1);
+  const newCs = trimmed || fallback;
+  item.callsign = newCs;
+  if (item.peer && item.peer.sim) item.peer.sim.callsign = newCs;
+}
+
 // Nur EINEN Peer neu spawnen — sodass die anderen weiterlaufen mit ihrer
 // aktuellen Phase und Audio nicht aussetzt.
 function _respawnSinglePeer(peerKey) {
@@ -4147,6 +4169,7 @@ function saveTestPeerConfig(name) {
       speedFactor:      (typeof ov.speedFactor === 'number') ? ov.speedFactor : 1.0,
       pathType:         ov.pathType         || 'organic',
       recordedPathName: ov.recordedPathName || null,
+      customCallsign:   ov.customCallsign   || null,
     };
   });
   const config = {
@@ -4180,6 +4203,7 @@ function loadTestPeerConfig(name) {
     if (p.pathType)         patch.pathType         = p.pathType;
     if (p.recordedPathName) patch.recordedPathName = p.recordedPathName;
     if (Object.keys(patch).length) setPeerOverride(p.peerKey, patch);
+    if (p.customCallsign) renameTestPeer(p.peerKey, p.customCallsign);
   });
   return true;
 }
@@ -4294,6 +4318,7 @@ window.__voicewalker = {
   setPeerAudio,             // (peerKey, arrayBuffer, name) → decoded buffer
   clearPeerAudio,           // (peerKey) → zurueck auf Pool/Sweep-Default
   removeOnePeer,            // (peerKey) → einzelnen Peer entfernen
+  renameTestPeer,           // (peerKey, name) → Callsign live umbenennen (leer = Default)
   // Globale Ambient-Lautstaerken (Schritte/Prop/Jet/Heli)
   // setAmbientLevel ist no-op wenn isEventRangesActive() — schuetzt vor Trolling im Event.
   setAmbientLevel, getAmbientLevels, isEventRangesActive,
