@@ -577,13 +577,6 @@
       tb.classList.toggle('active', !!(state.ui && state.ui.trackingEnabled));
       tb.classList.toggle('disabled', inactiveSim);
     }
-    // Far-Button
-    const fb = $('vw-far');
-    if (fb) {
-      fb.classList.toggle('active', !!(state.ui && state.ui.showFar));
-      fb.classList.toggle('disabled', inactiveSim);
-    }
-
     // Peer-Liste
     renderPeerList();
 
@@ -657,13 +650,13 @@
         +   '<div class="vw-peers-empty-msg">' + T('panel.peers.empty') + '</div>'
         + '</div>';
     } else {
+      // ALLE Peers anzeigen die im Radar sichtbar sind — keinen Filter mehr
+      // auf "in range" + "+N weiter entfernt"-Footer. Out-of-Range bekommt
+      // visuelles Far-Styling (gedimmt) damit man auf einen Blick sieht
+      // welche hoerbar sind.
       peers.sort(function (a, b) { return a.d - b.d; });
-      const MAX = 5;
-      const inRange = peers.filter(function (x) { return x.d <= state.myRange; });
-      const farCount = peers.length - inRange.length;
-      const show = (inRange.length > 0 ? inRange : peers).slice(0, MAX);
       body = '';
-      show.forEach(function (row) {
+      peers.forEach(function (row) {
         const p = row.p;
         const name = esc(p.callsign || p.id.slice(0, 6));
         const badge = p.on_foot ? ' <svg class="vw-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1"/><path d="m9 20 3-6 3 6"/><path d="m6 8 6 2 6-2"/><path d="M12 10v4"/></svg>' : '';
@@ -674,9 +667,6 @@
              +   '<span class="pd">' + fmtRange(row.d) + '</span>'
              + '</div>';
       });
-      if (farCount > 0 && inRange.length > 0) {
-        body += '<div id="vw-peers-more">+' + farCount + ' weiter entfernt</div>';
-      }
     }
 
     host.innerHTML = header + body;
@@ -1090,16 +1080,6 @@
 
       // Action-Buttons (Radar-Pane)
       if (id === 'vw-track')      { sendAction('toggle-tracking'); return; }
-      if (id === 'vw-far')        {
-        // Optimistic toggle: visuelles Feedback sofort, ohne auf den
-        // Browser-Tab-Echo via overlay_state.ui.showFar zu warten (das
-        // kann verzoegert sein wenn der Tab off-screen suspended ist).
-        if (!state.ui) state.ui = {};
-        state.ui.showFar = !state.ui.showFar;
-        scheduleRender();
-        sendAction('toggle-far');
-        return;
-      }
 
       // Setup-Tab
       if (id === 'vw-mode-ptt') {

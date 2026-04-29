@@ -440,7 +440,6 @@ const state = {
   localVadAnalyser: null,
   _localVadBuf:     null,
   voxMode: false,
-  showFar: true,
   rooms: new Map(),   // cell → { room, peers:Map, posTimer }
   currentCell: null,
   ptt: { available: false, devices: [], binding: null, binding_mode: false },
@@ -874,6 +873,16 @@ function distMeters(a, b) {
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
 }
+// 3D-Distanz: lateralen Haversine + vertikalen Hoehenunterschied via Pythagoras.
+// Wird AUSSCHLIESSLICH fuer Audio-Lautstaerke verwendet (volumeForDistance).
+// Radar/Listen-UI nutzen weiter distMeters (2D), weil dort die Karten-Distanz
+// gemeint ist. Cockpit-Peer 100m lateral + 600m hoeher = 608m real fuer Audio,
+// aber bleibt 100m auf der Karte.
+function dist3DMeters(a, b) {
+  const flat = distMeters(a, b);
+  const dAlt = ((b.alt_ft || 0) - (a.alt_ft || 0)) * 0.3048;
+  return Math.hypot(flat, dAlt);
+}
 // Realistische Distanz-Lautstaerke: inverse-distance-Modell, wie echter Schall
 // sich im freien Feld ausbreitet. Doppelte Entfernung => grob halbe gefuehlte
 // Lautstaerke. Unterhalb FULL_VOLUME_M ist volle Lautstaerke (nahbereich),
@@ -994,9 +1003,6 @@ function connectBackendWs() {
         if (!state.voxMode) setTalking(true);
       } else if (a === 'ptt-up') {
         if (!state.voxMode) setTalking(false);
-      } else if (a === 'toggle-far') {
-        const box = document.getElementById('showFar');
-        if (box) { box.checked = !box.checked; box.dispatchEvent(new Event('change')); }
       } else if (a === 'select-mic' && typeof m.deviceId === 'string') {
         // Sim-Panel/EFB schickt deviceId = Friendly-Name (vom Backend
         // sounddevice-Snapshot). Browser braucht aber MediaDeviceInfo.deviceId
@@ -1901,8 +1907,14 @@ function updateAudioFor(p) {
   // Distanz IMMER pflegen (auch ohne Audio-Pipeline), sonst kann
   // reconcileAudioStreams() nie den initialen Stream starten und
   // die Peers-Liste zeigt dauerhaft "—" bei jedem Peer.
-  const d = distMeters(state.mySim, p.sim);
-  p.currentDistance = d;
+  //
+  // currentDistance bleibt 2D (lateral) — Radar und Peer-Liste sortieren
+  // nach Karten-Distanz, da macht 3D keinen Sinn (ein Peer 600m ueber dir
+  // ist auf der Karte 0m entfernt). Fuer die Audio-Lautstaerke nutzen wir
+  // direkt die 3D-Distanz unten als lokale Variable.
+  const d2D = distMeters(state.mySim, p.sim);
+  const d   = dist3DMeters(state.mySim, p.sim);
+  p.currentDistance = d2D;
 
   if (!p.gainNode) return;
 
@@ -2699,9 +2711,6 @@ document.getElementById('voxToggle').addEventListener('change', e => {
 document.getElementById('callsign').addEventListener('input', e => {
   state.callsign = sanitizeCallsign(e.target.value);
 });
-document.getElementById('showFar').addEventListener('change', e => {
-  state.showFar = e.target.checked; renderPeers();
-});
 
 // --- PTT binding UI ----------------------------------------------------------
 document.getElementById('pttBindBtn').addEventListener('click', () => {
@@ -2962,7 +2971,11 @@ function renderPeers() {
     html += section(label, otherMode.length);
     html += otherMode.map(e => row(e, 'far')).join('');
   }
-  if (state.showFar && far.length) {
+  // "Pilots Nearby" listet ALLE Peers die im Radar sichtbar sind — auch
+  // ausserhalb der Hoerweite (die werden im Radar als Edge-Dots gezeichnet).
+  // Frueher per state.showFar-Toggle gegated, jetzt immer sichtbar damit
+  // die Liste mit dem Radar konsistent bleibt.
+  if (far.length) {
     html += section(T('peers.section.out_range'), far.length);
     html += far.map(e => row(e, 'far')).join('');
   }
@@ -3069,7 +3082,6 @@ function publishOverlay() {
       privateRoom:      state.privateRoom ? state.privateRoom.passphrase : null,
       trackingEnabled:  !!state.trackingEnabled,
       voxMode:          !!state.voxMode,
-      showFar:          !!state.showFar,
       imSpeaking:       !!state.imSpeakingLocal,
       micRms:           micRms >= 0 ? micRms : 0,
       // Setup-Tab im Panel: Mic/Speaker-Auswahl, Master-Volume, PTT-Bind
@@ -3107,7 +3119,11 @@ setInterval(publishOverlay, 100);
 const _testPeerState = {
   config: {
     walkerCount: 0, cockpitCount: 0,
-    walkerRadius: 5, cockpitRadius: 2000,
+    // walkerRadius/cockpitRadius = Bewegungs-Radius der Test-Peers in m.
+    // Cockpit-Default niedrig (185m = 0.1 NM) damit man neu gespawnte Cockpit-
+    // Peers sofort in Hörweite hat — User musste den Slider sonst jedes Mal
+    // manuell extrem runterdrehen. Per Slider hochregelbar bis 10 NM.
+    walkerRadius: 5, cockpitRadius: 185,
   },
   // Audio-Quelle pro Peer wird in dieser Reihenfolge gewaehlt:
   //   1) overrides[peerKey].audioBuffer — explizite Zuweisung vom User
@@ -3267,11 +3283,27 @@ const _ambientBuffers = { footstep: null, propeller: null, jet: null, helicopter
 // FESTGELEGT — User koennen sie nicht aendern (kein localStorage, keine
 // User-UI). Im Event-Raum werden sie vom Veranstalter via WP-Backend
 // uebersteuert (siehe applyEventRanges).
+// File-Loudness-Kompensation. Gemessene RMS-Pegel der MP3s (mit librosa):
+//   footstep   −27.4 dBFS  (Baseline, am leisesten)
+//   propeller  −10.6 dBFS  (+16.8 dB lauter)
+//   jet        −15.5 dBFS  (+11.9 dB lauter)
+//   helicopter −15.2 dBFS  (+12.2 dB lauter)
+// Ziel: bei Slider-100% klingen alle vier auf gleicher Source-Lautheit
+// (~ −26 dBFS effective RMS), unabhaengig vom File-Pegel. So entscheidet
+// dann WIRKLICH nur die Distanz wie laut ein Peer im Mix landet — ohne
+// versteckten Source-Bias zugunsten Heli/Jet. Realismus-Hierarchie regelt
+// der User on top via UI-Slider.
+//
+// Berechnung: target_rms / file_rms = gain
+//   prop  0.05 / 0.296 = 0.169
+//   jet   0.05 / 0.168 = 0.298
+//   heli  0.05 / 0.173 = 0.289
+//   foot  0.05 / 0.0425 = 1.176 (boost — Peak nach Boost: 0.62, kein Clipping)
 const AMBIENT_DEFAULTS = Object.freeze({
-  footstep:   0.30,
-  propeller:  0.20,
-  jet:        0.20,
-  helicopter: 0.20,
+  footstep:   1.18,
+  propeller:  0.17,
+  jet:        0.30,
+  helicopter: 0.29,
 });
 const _ambientLevels = { ...AMBIENT_DEFAULTS };
 
@@ -3352,6 +3384,43 @@ async function _preloadAmbient(ctx) {
         raw.duration.toFixed(1) + 's →', buf.duration.toFixed(1) + 's (trimmed+looped)');
     } catch (e) { /* nicht vorhanden -> Synthese-Fallback */ }
   }
+  // Re-attach fuer alle bereits gespawnten Peers — sie haben beim Spawn die
+  // synthetischen / propeller-Fallback-Sources bekommen weil die echten MP3s
+  // noch nicht decoded waren. Jetzt sind sie da → Sources wegwerfen + neu
+  // bauen damit Jet/Heli/Prop wirklich unterschiedlich klingen.
+  for (const { peers } of state.rooms.values()) {
+    for (const p of peers.values()) {
+      if (p._ambient) _reattachAmbient(p, ctx);
+    }
+  }
+  console.info('[ambient] preload fertig, Peers re-attached');
+}
+
+// Existing peer ambient zerlegen + neu aufbauen mit aktuellen _ambientBuffers.
+// Notwendig nach _preloadAmbient damit Test-Peers die VOR dem Preload gespawnt
+// wurden nicht weiter den propeller-Fallback fuer Jet/Heli benutzen.
+function _reattachAmbient(p, ctx) {
+  const a = p._ambient;
+  if (!a) return;
+  // Alte Sources stoppen + Gains disconnecten
+  try { a.stepSrc.stop(); } catch (_) {}
+  try { a.propSrc.stop(); } catch (_) {}
+  try { a.jetSrc.stop();  } catch (_) {}
+  try { a.heliSrc.stop(); } catch (_) {}
+  try { a.stepGain.disconnect(); } catch (_) {}
+  try { a.propGain.disconnect(); } catch (_) {}
+  try { a.jetGain.disconnect();  } catch (_) {}
+  try { a.heliGain.disconnect(); } catch (_) {}
+  // Kind aus dem Peer-Marker rekonstruieren (test-walker-* / test-cockpit-*)
+  // oder fallback ueber on_foot. Echte Peers nutzen on_foot direkt.
+  let kind = 'cockpit';
+  if (p.isTestPeer && p.sim && p.sim.callsign) {
+    kind = (p.sim.on_foot) ? 'walker' : 'cockpit';
+  } else if (p.sim) {
+    kind = (p.sim.on_foot) ? 'walker' : 'cockpit';
+  }
+  p._ambient = null;
+  _attachAmbient(p, ctx, kind);
 }
 
 // Ambient-Layer fuer ALLE Peers (echte User + Test-Peers).
@@ -3793,20 +3862,21 @@ function _testPeerTick() {
       }
 
     } else {
-      // 'organic' (Walker/Cockpit) oder 'flight' (Cockpit-Aviation): Random-
-      // Walk mit ±5° Drift pro Tick + Auto-Turn bei >70% Radius. baseSpd:
-      //   organic + walker  = 0.5 m/s  (Gehen)
-      //   organic + cockpit = 10 m/s   (~20 kts, langsames Fliegen — sonst
-      //                                  steht das Flugzeug bei kleinem
-      //                                  walkSpd im grossen Radius praktisch)
-      //   flight  + cockpit = 30 m/s   (~60 kts Cessna-Cruise)
-      // Ueber speedFactor weiter skalierbar.
+      // 'organic' / 'flight': Random-Walk mit ±5° Drift pro Tick + Auto-Turn
+      // bei >70% Radius. baseSpd:
+      //   walker  = 0.5 m/s (fix — Gehen-Tempo)
+      //   cockpit = adaptiv (radius/30, geclampt 1..50 m/s) — egal ob Flug
+      //             oder Rollen, beide Modi identische Bewegungs-Logik.
+      //             Warum adaptiv: bei kleinem Radius (z.B. 185m) waeren
+      //             30 m/s ruckelig (3% Radius pro Tick = sichtbare Spruenge),
+      //             bei grossem Radius (5 km) waeren 5 m/s zu langsam. So
+      //             braucht der Peer ~30 Sek pro Radius-Durchquerung —
+      //             smooth wie Walker, unabhaengig von der Groesse.
       const sf = (typeof ov.speedFactor === 'number') ? Math.max(0, ov.speedFactor) : 1.0;
       const dt = 0.2;
-      let baseSpd;
-      if (pathType === 'flight') baseSpd = 30;
-      else if (pathType === 'organic' && item.kind === 'cockpit') baseSpd = 10;
-      else baseSpd = 0.5;
+      const baseSpd = (item.kind === 'cockpit')
+        ? Math.min(50, Math.max(1, radius / 30))
+        : 0.5;
       const walkSpd = baseSpd * sf;
 
       if (sf === 0) {
@@ -3870,17 +3940,29 @@ function _testPeerTick() {
     // on_foot nach Kind (walker=true, cockpit=false) — bestimmt das Radar-Icon.
     // Das Audio-Profil-Matching laeuft separat ueber p.isTestPeer in updateAudioFor.
     const peerOnFoot = (item.kind === 'walker');
+    // Cockpit-Sub-Mode: 'flight' = in der Luft (alt-Offset, agl 3000ft),
+    // 'organic' = Rollen am Boden (kein alt-Offset, agl 0). Andere pathTypes
+    // (line/circle/static/recorded) folgen dem flight-Default — wenn der User
+    // eine Pfad-Aufzeichnung in den Cockpit packt, ist's idR. eine Flug-Strecke.
+    const cockpitOnGround = (!peerOnFoot && pathType === 'organic');
     // Triebwerks-Typ-Override (nur Cockpit): user-konfigurierbar via Debug-UI.
     // undefined laesst den fallbackKind aus _attachAmbient greifen.
     const engineType = (!peerOnFoot && ov.engineKind === 'jet')  ? 1
                      : (!peerOnFoot && ov.engineKind === 'heli') ? 3
                      : (!peerOnFoot && ov.engineKind === 'prop') ? 0
                      : undefined;
+    // Höhen-Offset fuer Cockpit-Flug: User-Override (Slider) > Spawn-Zufallswert.
+    // ov.altitudeOffset in Fuss, kann live in der UI gesetzt werden.
+    const altOffsetEff = (typeof ov.altitudeOffset === 'number')
+      ? ov.altitudeOffset
+      : item.altOffset;
     item.peer.sim = {
       lat: state.mySim.lat + dLat,
       lon: state.mySim.lon + dLon,
-      alt_ft: (state.mySim.alt_ft || 0) + item.altOffset,
-      agl_ft: peerOnFoot ? 0 : 3000,
+      alt_ft: cockpitOnGround
+                ? (state.mySim.alt_ft || 0)
+                : (state.mySim.alt_ft || 0) + altOffsetEff,
+      agl_ft: (peerOnFoot || cockpitOnGround) ? 0 : 3000,
       heading_deg: heading,
       // Hoerweite (Trichter) kommt aus dem Audio-Range-Slider (audioConfig).
       // Walker → walker.maxRangeM, Cockpit → cockpit.maxRangeM. Slider in der
@@ -4027,6 +4109,9 @@ function listTestPeers() {
       // Triebwerks-Typ fuer Cockpit-Peers (prop/jet/heli). null = Auto-Fallback
       // aus _attachAmbient (Random prop/jet beim Spawn).
       engineKind:   ov.engineKind || null,
+      // Hoehen-Offset relativ zur Spieler-Hoehe (Fuss). Nur Cockpit/Flug
+      // relevant — wirkt auf 3D-Audio-Position UND Distanz-Daempfung.
+      altitudeOffset: (typeof ov.altitudeOffset === 'number') ? ov.altitudeOffset : null,
       recordedPathName: ov.recordedPathName || null,
     };
     if (kind === 'walker') walkers.push(entry);
@@ -4255,6 +4340,8 @@ function saveTestPeerConfig(name) {
       pathType:         ov.pathType         || null,
       recordedPathName: ov.recordedPathName || null,
       customCallsign:   ov.customCallsign   || null,
+      engineKind:       ov.engineKind       || null,
+      altitudeOffset:   (typeof ov.altitudeOffset === 'number') ? ov.altitudeOffset : null,
     };
   });
   const config = {
@@ -4287,6 +4374,8 @@ function loadTestPeerConfig(name) {
     if (typeof p.speedFactor === 'number') patch.speedFactor = p.speedFactor;
     if (p.pathType)         patch.pathType         = p.pathType;
     if (p.recordedPathName) patch.recordedPathName = p.recordedPathName;
+    if (p.engineKind)       patch.engineKind       = p.engineKind;
+    if (typeof p.altitudeOffset === 'number') patch.altitudeOffset = p.altitudeOffset;
     if (Object.keys(patch).length) setPeerOverride(p.peerKey, patch);
     if (p.customCallsign) renameTestPeer(p.peerKey, p.customCallsign);
   });

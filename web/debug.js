@@ -719,14 +719,17 @@ function initDebugPanel() {
       // Cockpit-Radius in NM, Walker in Meter. Slider speichert intern Meter.
       const NM = 1852;
       const isCockpit = (p.kind === 'cockpit');
-      const rMin  = isCockpit ? 0.1 : 0;
-      const rMax  = isCockpit ? 2   : 20;
-      const rStep = isCockpit ? 0.1 : 1;
-      const rVal  = isCockpit ? (p.radius / NM).toFixed(1) : (p.radius | 0);
+      const rMin  = 0;
+      const rMax  = isCockpit ? 2 : 10;   // Cockpit: 0–2 NM, Walker: 0–10 m
+      const rStep = isCockpit ? 0.01 : 1;
+      const rVal  = isCockpit ? (p.radius / NM).toFixed(2) : (p.radius | 0);
       const rRead = isCockpit ? `${rVal} NM` : `${rVal} m`;
       const spd = Math.round((p.speedFactor !== undefined ? p.speedFactor : 1.0) * 10) / 10;
       const audioLabel = p.audioName || 'Pool/Sweep';
+      // listTestPeers liefert pathType bereits kind-abhaengig (cockpit→flight,
+      // walker→organic), || 'organic' nur als Sicherheits-Fallback.
       const pathType = p.pathType || 'organic';
+      const engineKind = p.engineKind || '';   // '' = Auto-Fallback (Random prop/jet)
       const recName  = p.recordedPathName || '';
       const fileId = 'pf-' + k;
       html += '<div style="border:1px solid rgba(255,255,255,0.12);border-radius:4px;'
@@ -742,12 +745,28 @@ function initDebugPanel() {
             +     ' onfocus="this.style.background=\'#1a2540\';this.style.borderColor=\'#30456d\'"'
             +     ' onblur="this.style.background=\'transparent\';this.style.borderColor=\'transparent\'">'
             +   '<select data-peer="' + k + '" data-field="pathType" style="font-size:10px;color:#111;background:#d8e2f0">'
-            +     '<option value="organic"'  + (pathType === 'organic'   ? ' selected' : '') + '>Organisch</option>'
+            +     (isCockpit
+                  // Cockpit: 'flight' = in der Luft, 'organic' = Rollen am Boden.
+                  // Beides Aviation-Mode (AGL/ALT/Audio entsprechend), kein on_foot.
+                  ? '<option value="flight"'  + (pathType === 'flight'   ? ' selected' : '') + '>Flug</option>'
+                    + '<option value="organic"' + (pathType === 'organic' ? ' selected' : '') + '>Rollen</option>'
+                  // Walker: 'organic' = Gehen. Kein 'flight'-Option.
+                  : '<option value="organic"' + (pathType === 'organic'  ? ' selected' : '') + '>Gehen</option>'
+              )
             +     '<option value="recorded"' + (pathType === 'recorded'  ? ' selected' : '') + '>Aufgezeichnet</option>'
             +     '<option value="line"'     + (pathType === 'line'      ? ' selected' : '') + '>Linie</option>'
             +     '<option value="circle"'   + (pathType === 'circle'    ? ' selected' : '') + '>Kreis</option>'
             +     '<option value="static"'   + (pathType === 'static'    ? ' selected' : '') + '>Statisch</option>'
             +   '</select>'
+            // Triebwerks-Typ — nur fuer Cockpit-Peers. '' = Auto/Random aus _attachAmbient.
+            + (isCockpit
+                ? '<select data-peer="' + k + '" data-field="engineKind" style="font-size:10px;color:#111;background:#d8e2f0">'
+                  + '<option value=""'     + (engineKind === ''      ? ' selected' : '') + '>Auto</option>'
+                  + '<option value="prop"' + (engineKind === 'prop'  ? ' selected' : '') + '>Propeller</option>'
+                  + '<option value="jet"'  + (engineKind === 'jet'   ? ' selected' : '') + '>Jet</option>'
+                  + '<option value="heli"' + (engineKind === 'heli'  ? ' selected' : '') + '>Heli</option>'
+                  + '</select>'
+                : '')
             +   '<button data-peer="' + k + '" data-field="peer-delete"'
             +     ' style="font-size:10px;padding:1px 5px;color:#f88;border-color:#f88" title="Peer entfernen">×</button>'
             + '</div>'
@@ -794,6 +813,19 @@ function initDebugPanel() {
             +     ' style="width:100%;min-width:0">'
             +   '<span class="readout" style="text-align:right">' + rRead + '</span>'
             + '</div>'
+            // Höhen-Zeile (Cockpit + Flug-Mode): -6000ft bis +6000ft, Step 100ft.
+            // Wirkt direkt auf 3D-Audio-Position UND Distanz-Dämpfung.
+            + (isCockpit && pathType === 'flight'
+                ? (function() {
+                    const altFt = (typeof p.altitudeOffset === 'number') ? p.altitudeOffset : 3000;
+                    return '<div style="display:grid;grid-template-columns:32px 1fr 50px;gap:4px;align-items:center;margin-bottom:3px">'
+                      + '<span>Alt</span>'
+                      + '<input type="range" min="-6000" max="6000" step="100" value="' + altFt
+                      + '" data-peer="' + k + '" data-field="altitude" style="width:100%;min-width:0">'
+                      + '<span class="readout" style="text-align:right">' + (altFt >= 0 ? '+' : '') + altFt + ' ft</span>'
+                      + '</div>';
+                  })()
+                : '')
             // Speed-Zeile
             + '<div style="display:grid;grid-template-columns:32px 1fr 44px;gap:4px;align-items:center;margin-bottom:3px">'
             +   '<span>Spd</span>'
@@ -852,9 +884,18 @@ function initDebugPanel() {
         const isNM = t.dataset.unit === 'nm';
         const sv = parseFloat(t.value);
         const meters = isNM ? sv * 1852 : sv;
-        if (readout) readout.textContent = isNM ? `${sv.toFixed(1)} NM` : `${Math.round(sv)} m`;
+        if (readout) readout.textContent = isNM ? `${sv.toFixed(2)} NM` : `${Math.round(sv)} m`;
         window.__voicewalker?.setPeerOverride?.(peer, { radius: meters });
+      } else if (field === 'altitude') {
+        const ft = parseInt(t.value, 10);
+        if (readout) readout.textContent = (ft >= 0 ? '+' : '') + ft + ' ft';
+        window.__voicewalker?.setPeerOverride?.(peer, { altitudeOffset: ft });
       }
+      return;
+    }
+    if (t.tagName === 'SELECT' && field === 'engineKind') {
+      // Leere Auswahl ('Auto') → null setzen, sonst greift wieder fallbackKind.
+      window.__voicewalker?.setPeerOverride?.(peer, { engineKind: t.value || null });
       return;
     }
     if (t.tagName === 'SELECT' && field === 'pathType') {
