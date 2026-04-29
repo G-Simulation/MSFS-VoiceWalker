@@ -311,8 +311,8 @@
     let _dh = targetHead - VW._dispHead;
     while (_dh >  180) _dh -= 360;
     while (_dh < -180) _dh += 360;
-    // 0.20 = ~20 % pro Frame → bei 60 fps aufholt in ~5 Frames (~83 ms)
-    VW._dispHead = (VW._dispHead + _dh * 0.20 + 360) % 360;
+    // 0.35 = ~35 % pro Frame → bei 60 fps 90% nach ~80 ms
+    VW._dispHead = (VW._dispHead + _dh * 0.35 + 360) % 360;
     const selfHeading = VW._dispHead;
 
     // Compass-Marker N/O/S/W — Heading-Up: Labels rotieren mit Spieler-Heading.

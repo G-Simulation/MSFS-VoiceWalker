@@ -257,6 +257,17 @@
     <Message Condition="Exists('$(BuiltMsfsPackage)\manifest.json')"
              Text="==&gt; html_ui/ aus PackageSources ins Paket gespiegelt." Importance="high" />
 
+    <!-- layout.json regenerieren — kritisch wenn fspackagetool nicht lief
+         oder nach Sicherheits-Copys die File-Groessen nicht mehr matchen.
+         MSFS verweigert sonst stillschweigend Files zu laden (insbesondere
+         die .wasm), wenn die Groesse in layout.json nicht zur tatsaechlichen
+         Datei passt. -->
+    <Exec Condition="Exists('$(BuiltMsfsPackage)\manifest.json')"
+          Command="python &quot;$(RepoRoot)\tools\regenerate-layout-json.py&quot; &quot;$(BuiltMsfsPackage)&quot;"
+          WorkingDirectory="$(RepoRoot)" />
+    <Message Condition="Exists('$(BuiltMsfsPackage)\manifest.json')"
+             Text="==&gt; layout.json regeneriert (alle File-Groessen aktualisiert)." Importance="high" />
+
     <!-- Public-Build: InGamePanel-Debug-Inject aus dem gespiegelten Package
          strippen. panel.html und panel-efb.html bleiben in PackageSources
          unveraendert — nur die Kopie im Build-Output wird gefiltert. Dadurch

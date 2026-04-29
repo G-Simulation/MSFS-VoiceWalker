@@ -113,15 +113,14 @@ static void resolve_ids() {
     s_cameraState  = fsVarsGetAVarId("CAMERA STATE");
     s_engineType   = fsVarsGetAVarId("ENGINE TYPE");
     s_engCombust1  = fsVarsGetAVarId("GENERAL ENG COMBUSTION:1");
-    // Head-Pitch: MSFS 2024 expose-Name kann variieren. Wir versuchen die
-    // bekannten Kandidaten in Reihenfolge — erster der eine gueltige ID
-    // zurueckgibt, gewinnt. Wenn alle FS_VAR_INVALID_ID liefern, bleibt
-    // head_pitch auf 0 (kein Effekt im Audio, harmlos).
-    s_headPitch    = fsVarsGetAVarId("CAMERA HEADLOOK PITCH");
-    if (s_headPitch == FS_VAR_INVALID_ID)
-        s_headPitch = fsVarsGetAVarId("AVATAR PITCH");
-    if (s_headPitch == FS_VAR_INVALID_ID)
-        s_headPitch = fsVarsGetAVarId("CAMERA REQUEST ACTION");
+    // Head-Pitch: VERIFIZIERT in MSFS 2024 SDK Camera_Variables.htm:
+    //   Name:  "CAMERA GAMEPLAY PITCH YAW"
+    //   Index: [0] = Pitch, [1] = Yaw
+    //   Unit:  Radians
+    //   Desc:  "Returns either the pitch (index 0) or the yaw (index 1)
+    //          of the current gameplay camera."
+    // Funktioniert in allen Camera-Modi inkl. Walker.
+    s_headPitch    = fsVarsGetAVarId("CAMERA GAMEPLAY PITCH YAW");
     s_unitDegLat   = fsVarsGetUnitId("degrees latitude");
     s_unitDegLon   = fsVarsGetUnitId("degrees longitude");
     s_unitDegrees  = fsVarsGetUnitId("degrees");
@@ -208,8 +207,21 @@ static void fire_probe() {
     fsVarsAVarGet(s_engCombust1, s_unitEnum, noParams, &engRun,
                    FS_OBJECT_ID_USER_AIRCRAFT);
     if (s_headPitch != FS_VAR_INVALID_ID) {
-        fsVarsAVarGet(s_headPitch, s_unitDegrees, noParams, &headPitch,
+        // CAMERA GAMEPLAY PITCH YAW: Index-Param 0 = Pitch (1 waere Yaw),
+        // Unit Radians (laut MSFS-2024-SDK-Doku Camera_Variables.htm).
+        // Wir konvertieren in Grad weil Python/Web mit head_pitch in Grad
+        // arbeiten. Param-Array verwendet FsVarParamVariant (siehe
+        // MSFS_Core.h Z.88-105 — FsVarParamArray.array ist Variant*, nicht
+        // double*; deshalb Wrapper-Init mit Type+intValue).
+        FsVarParamVariant pitchIdxVar{};
+        pitchIdxVar.type = FsVarParamTypeInteger;
+        pitchIdxVar.intValue = 0;
+        FsVarParamArray pitchParams = { 1, &pitchIdxVar };
+        double headPitchRad = 0.0;
+        FsUnitId radId = fsVarsGetUnitId("radians");
+        fsVarsAVarGet(s_headPitch, radId, pitchParams, &headPitchRad,
                        FS_OBJECT_ID_USER_CURRENT);
+        headPitch = headPitchRad * 57.29577951308232;  // rad → deg
     }
 
     VoiceWalkerPos p{};
@@ -296,8 +308,9 @@ void CALLBACK MsfsVWDispatch(SIMCONNECT_RECV* pData, DWORD /*cb*/, void* /*ctx*/
         s_simobjDataCount++;
         s_periodicStarted = true;
         s_tickCount++;
-        // Alle ~30 Ticks (≈1 Hz bei 30 fps) einen Probe publizieren.
-        if ((s_tickCount % 30) == 0) fire_probe();
+        // Alle ~3 Ticks (≈10 Hz bei 30 fps) einen Probe publizieren.
+        // Niedriger geht nicht ohne sicht-/spürbare Verzögerung beim Drehen.
+        if ((s_tickCount % 3) == 0) fire_probe();
     }
 }
 

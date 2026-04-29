@@ -259,7 +259,7 @@ PORT_DEFAULT = _port_from_cli_or_env()
 PORT_SEARCH_RANGE = 10   # 7801..7810
 PORT = PORT_DEFAULT      # wird in main() ggf. ueberschrieben
 
-TICK_HZ = 10
+TICK_HZ = 20
 
 START_TIME = time.time()
 
@@ -407,7 +407,7 @@ _CD_DEF_ID    = 0x56574C4B
 _CD_NAME      = b"VoiceWalkerPos"
 _CD_REQ_ID    = 0x56574C4B
 _CD_PERIOD_ON_SET = 3
-_CD_STRUCT_SIZE   = 20 * 8  # 160 Bytes (mit head_pitch)
+_CD_STRUCT_SIZE   = 20 * 8  # 160 Bytes
 
 
 class _VoiceWalkerPos(ctypes.Structure):
@@ -426,7 +426,7 @@ class _VoiceWalkerPos(ctypes.Structure):
         ("cam_state",       ctypes.c_double),
         ("engine_type",     ctypes.c_double),
         ("engines_running", ctypes.c_double),
-        ("head_pitch",      ctypes.c_double),  # Grad: + nach oben, − nach unten
+        ("head_pitch",      ctypes.c_double),
         ("tick",            ctypes.c_double),
     ]
 
@@ -647,8 +647,8 @@ class AvatarReader:
                             "cam":            payload.cam_state,
                             "engineType":     payload.engine_type,
                             "enginesRunning": payload.engines_running,
-                            "headPitch":      payload.head_pitch,
                             "tick":           payload.tick,
+                            "headPitch":      payload.head_pitch,
                         }
                         STATE.wasm_pos_at = time.time()
 
@@ -886,6 +886,17 @@ class SimReader:
                         abs(cur_lat - ac_lat_w) > EPS
                         or abs(cur_lon - ac_lon_w) > EPS
                     )
+                # Fallback: MSFS 2024 pinnt USER_CURRENT nicht in jedem
+                # Frame atomar auf den Avatar — wenn cur≈ac, aber Avatar-
+                # Position separat (USER_AVATAR direkt) sich von Aircraft
+                # unterscheidet, sind wir trotzdem im Walker.
+                if not on_foot:
+                    have_av = abs(av_lat_w) > 0.001 and abs(av_lon_w) > 0.001
+                    if have_ac and have_av:
+                        on_foot = (
+                            abs(av_lat_w - ac_lat_w) > EPS
+                            or abs(av_lon_w - ac_lon_w) > EPS
+                        )
 
                 # Position kohaerent zum Flag waehlen.
                 if on_foot:
