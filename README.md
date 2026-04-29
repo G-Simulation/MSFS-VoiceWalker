@@ -32,6 +32,11 @@ und im Walker-/Zu-Fuß-Modus von MSFS 2024.
 
 ## Inhalt dieses Dokuments
 
+- 📘 **[Benutzeranleitung (USER_GUIDE.md)](USER_GUIDE.md)** — Installation,
+  erste Schritte, tägliche Nutzung, Troubleshooting.
+- 🎟️ **[Veranstalter-Anleitung (EVENT_ORGANIZER_GUIDE.md)](EVENT_ORGANIZER_GUIDE.md)** —
+  Private Rooms, Event-Ranges, WordPress-Plugin, PDF-Briefing.
+
 1. [Für Endnutzer — Installation](#für-endnutzer)
 2. [Funktionen (Free + Pro)](#funktionen)
 3. [Wie das Mesh funktioniert](#wie-das-mesh-funktioniert-einfach-erklärt)
@@ -87,6 +92,16 @@ Kein Account, kein Login, keine Registrierung.
   mit Distanz-Anzeige und Live-Sprech-Indikator.
 - **Sprech-Indikator am Bildschirmrand**: eine Leiste oben zeigt live, wer
   gerade redet, per Voice-Activity-Detection (VAD).
+- **Ambient-Audio-Layer**: Walker hörst du an Schritten, Cockpit-Peers an
+  Propeller-/Jet-/Heli-Sound — alles räumlich positioniert via HRTF, mit
+  Engine-Type-Detection aus dem Sim. Lautstärken pro Klangtyp einstellbar
+  (in privaten Räumen vom Veranstalter sperrbar).
+- **Heading-Up-Radar mit weichem Edge-Fade**: das Radar (Web-UI + Toolbar +
+  EFB) rotiert mit deinem Heading, fadet sanft ins Panel-Hintergrund,
+  zeigt Peer-Cones als Radial-Gradient mit Callsign-Labels und einer
+  Farb-Legende (beidseitig hörbar / nur du / nur er / außer Reichweite /
+  spricht gerade). Test-Peers spawn-, umbenenn- und konfigurier-/persistierbar
+  inklusive Pfad-Aufzeichnung.
 - **MSFS-Toolbar-Panel + EFB-App**: blendet eine kompakte Übersicht im Sim
   selbst ein (Radar, Peer-Liste, Setup, Pro-Tab) — wahlweise als Toolbar-Panel
   oder als App im Cabin-Crew-Tablet (EFB). Beide zeigen identischen Inhalt

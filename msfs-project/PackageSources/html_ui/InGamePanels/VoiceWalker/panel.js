@@ -34,26 +34,41 @@
   const HOSTS = ['localhost:7801', '127.0.0.1:7801'];
   const DEBUG = true;  // HTTP-Log-Forwarding an /debug/log — Endnutzer-Diagnostik
 
-  // Zoom: rastet auf RADAR_SNAP_VALUES ein. Clamp [2.5 m, 25 km].
-  const RADAR_RANGE_DEFAULT = 1000;
+  // Zoom rastet modus-abhaengig auf eine Snap-Liste ein:
+  //  - Walker (on_foot): metrische Stufen, Clamp [2.5 m, 25 km]
+  //  - Cockpit (Aviation): NM-Stufen 0.5, 1, 2, 5, 10, 20, 50, 100 NM,
+  //    Default = 5 NM (9260 m) — Aviation-Standard.
+  // RADAR_RANGE_MAX umfasst beide Modi (100 NM ~ 185 km).
+  const RADAR_RANGE_DEFAULT = 9260;
   const RADAR_RANGE_MIN = 2.5;
-  const RADAR_RANGE_MAX = 25000;
+  const RADAR_RANGE_MAX = 185200;
   let radarRangeM = RADAR_RANGE_DEFAULT;
-  // Identisch zu app.js + overlay.js, damit alle drei Radars konsistent zoomen.
-  const RADAR_SNAP_VALUES = [
+  // Hinweis: web/app.js + web/overlay.js haben eigene Snap-Listen — die
+  // Aviation-Variante (Cockpit) gibt es bewusst NUR im InGame-Panel.
+  const RADAR_SNAP_VALUES_WALKER = [
     2.5, 5, 10, 15, 25, 50, 75, 100, 150, 250,
     500, 750, 1000, 1500, 2500, 5000, 7500, 10000, 15000, 25000,
   ];
+  // 0.5/1/2/5/10/20/50/100 NM in Metern (1 NM = 1852 m).
+  const RADAR_SNAP_VALUES_COCKPIT = [
+    926, 1852, 3704, 9260, 18520, 37040, 92600, 185200,
+  ];
+  function _activeSnapValues() {
+    return (state && state.mySim && !state.mySim.on_foot)
+      ? RADAR_SNAP_VALUES_COCKPIT
+      : RADAR_SNAP_VALUES_WALKER;
+  }
   function snapRange(currentM, zoomOut) {
+    var values = _activeSnapValues();
     var bestIdx = 0, bestDist = Infinity;
-    for (var i = 0; i < RADAR_SNAP_VALUES.length; i++) {
-      var d = Math.abs(RADAR_SNAP_VALUES[i] - currentM);
+    for (var i = 0; i < values.length; i++) {
+      var d = Math.abs(values[i] - currentM);
       if (d < bestDist) { bestDist = d; bestIdx = i; }
     }
     var targetIdx = zoomOut
-      ? Math.min(bestIdx + 1, RADAR_SNAP_VALUES.length - 1)
+      ? Math.min(bestIdx + 1, values.length - 1)
       : Math.max(bestIdx - 1, 0);
-    return RADAR_SNAP_VALUES[targetIdx];
+    return values[targetIdx];
   }
 
   function fmtRange(m) {
@@ -225,17 +240,23 @@
     const ctx = canvas.getContext('2d');
     const W = _cssW, H = _cssH;
     const cx = W / 2, cy = H / 2;
-    const R  = Math.min(W, H) / 2 - 14;
+    // 32 px innerer Buffer zwischen Radar-Kreis und Canvas-Rand — Platz fuer
+    // N/O/S/W-Compass-Marker AUSSERHALB des Kreises (analog Web-UI).
+    const R  = Math.min(W, H) / 2 - 32;
 
     ctx.clearRect(0, 0, W, H);
 
-    // Dunkle Scheibe mit radialem Glow
-    const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
-    bg.addColorStop(0,   'rgba(23, 41, 74, 0.9)');
-    bg.addColorStop(0.7, 'rgba(15, 25, 48, 0.9)');
-    bg.addColorStop(1,   'rgba(11, 18, 32, 0.9)');
+    // Dunkle Scheibe mit weichem Edge-Fade analog Web-UI: in der Mitte
+    // Akzent-Glow, bis 95% R volle Fuell-Farbe, von 95% bis ~108% R Alpha
+    // ausblenden → Kreis verschmilzt sauber mit dem Panel-Hintergrund.
+    const padR = R * 1.08;
+    const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, padR);
+    bg.addColorStop(0,                  'rgba(23, 41, 74, 0.9)');
+    bg.addColorStop((R * 0.95) / padR,  'rgba(11, 18, 32, 0.9)');
+    bg.addColorStop((R * 1.00) / padR,  'rgba(11, 18, 32, 0.5)');
+    bg.addColorStop(1,                  'rgba(11, 18, 32, 0.0)');
     ctx.fillStyle = bg;
-    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx, cy, padR, 0, Math.PI * 2); ctx.fill();
 
     // Scheiben-Rand
     ctx.strokeStyle = 'rgba(106,165,255,0.4)';
@@ -272,7 +293,7 @@
     ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     {
-      const labelR  = R - 12;
+      const labelR  = R + 14;
       const headRad = toRad(selfHeading);
       const dirs = [
         { lbl: 'N', ang: 0 },
@@ -317,13 +338,6 @@
         ctx.arc(cx, cy, rAudio, coneStart, coneEnd);
         ctx.closePath();
         ctx.fill();
-        ctx.strokeStyle = 'rgba(63,220,138,0.7)';
-        ctx.lineWidth = 1.2;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.arc(cx, cy, rAudio, coneStart, coneEnd);
-        ctx.closePath();
-        ctx.stroke();
       }
 
       // Audio-Bubble-Label — unten links
@@ -341,10 +355,13 @@
 
     // DU im Zentrum — North-Up: das Symbol rotiert mit dem Heading,
     // damit der User sieht in welche Richtung er gerade schaut/fliegt.
+    // Fallback: wenn KEIN state.mySim vorhanden (Web-App nicht gestartet,
+    // keine Sim-Daten), Walker statt Aircraft zeigen — visuelle Default-
+    // Annahme: nicht im Cockpit.
     ctx.save();
     ctx.translate(cx, cy);
     ctx.rotate(toRad(selfHeading));
-    if (state.mySim && state.mySim.on_foot) {
+    if (!state.mySim || state.mySim.on_foot) {
       ctx.fillStyle = '#3fdc8a';
       ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1.2;
       ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2);
@@ -690,9 +707,17 @@
   function applyWalkerAutoZoom() {
     const onFoot = !!(state.mySim && state.mySim.on_foot);
     if (prevOnFoot === null) {
-      // Erstes Sim-Update nach UI-Boot: nur Modus merken, NICHT zoomen.
+      // Erstes Sim-Update nach UI-Boot. Initialwert von radarRangeM
+      // ist RADAR_RANGE_DEFAULT (Cockpit-Standard 5 NM ~9 km) — im Walker-
+      // Modus also viel zu weit. Deshalb hier sofort den Walker-Range
+      // anwenden, damit das Radar nicht in km steht waehrend man laeuft.
       prevOnFoot = onFoot;
-      if (!onFoot) lastCockpitRangeM = radarRangeM;
+      if (onFoot) {
+        radarRangeM = WALKER_AUTO_RANGE_M;
+        scheduleRender();
+      } else {
+        lastCockpitRangeM = radarRangeM;
+      }
       return;
     }
     if (onFoot === prevOnFoot) return;

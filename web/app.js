@@ -2098,57 +2098,52 @@ setInterval(() => {
 
 // --- Radar -------------------------------------------------------------------
 const RADAR_RANGE_DEFAULT_WALKER  = 10;     // 10 m — Walker-Default
-const RADAR_RANGE_DEFAULT_COCKPIT = 46300; // 25 NM (1 NM = 1852 m) — Cockpit-Standard
+const RADAR_RANGE_DEFAULT_COCKPIT = 9260;   // 5 NM (1 NM = 1852 m) — Aviation-Standard
 const RADAR_RANGE_DEFAULT = RADAR_RANGE_DEFAULT_COCKPIT;
-// Zoomable: via Mausrad aendern. Min 100 m (sehr nah) bis 20 km (Uebersicht).
-// Persistiert in localStorage. Doppelklick aufs Radar = Reset auf Default.
+// Zoomable: via Mausrad aendern. Doppelklick aufs Radar = Reset auf Default.
+// KEIN localStorage — Range wird bei jedem UI-Reload und Modus-Wechsel auf
+// den jeweiligen Modus-Default zurueckgesetzt.
 function _loadRadarRange(mode /* 'walker' | 'cockpit' */) {
-  try {
-    const saved = +localStorage.getItem('vw.radarRangeM.' + mode);
-    const maxM = (mode === 'walker') ? RADAR_RANGE_MAX_WALKER : RADAR_RANGE_MAX_COCKPIT;
-    // Migrations-Guard: alte Walker-Werte > 20 m kommen aus der Zeit als
-    // RADAR_RANGE_DEFAULT_WALKER noch 50 m war → cachebust auf neuen Default.
-    const valid = Number.isFinite(saved) && saved >= RADAR_RANGE_MIN && saved <= maxM
-                  && !(mode === 'walker' && saved > 20);
-    if (valid) return saved;
-    if (Number.isFinite(saved)) {
-      try { localStorage.removeItem('vw.radarRangeM.' + mode); } catch {}
-    }
-  } catch {}
   return mode === 'walker' ? RADAR_RANGE_DEFAULT_WALKER : RADAR_RANGE_DEFAULT_COCKPIT;
 }
 // Beim Start noch kein Sim-Modus bekannt → Cockpit-Default.
 let RADAR_RANGE_M = _loadRadarRange('cockpit');
 let _radarModeTracked = null;  // 'walker' | 'cockpit' | null
 const RADAR_RANGE_MIN         = 2.5;
-const RADAR_RANGE_MAX_WALKER  = 50;      // Walker: max 50 m — Vorfeld-Nahbereich
-const RADAR_RANGE_MAX_COCKPIT = 92600;   // Cockpit: max 50 NM
+const RADAR_RANGE_MAX_WALKER  = 25000;   // Walker: bis 25 km zoombar
+const RADAR_RANGE_MAX_COCKPIT = 185200;  // Cockpit: max 100 NM
 const RADAR_RANGE_MAX = RADAR_RANGE_MAX_COCKPIT; // globaler Fallback
-// Diskrete Zoom-Stufen — Mausrad rastet ein. 1-1.5-2-2.5-5-7.5er Pattern,
-// passt zu klassischer ATC-Range-Ring-Skala (siehe EuroScope/VATSIM).
-const RADAR_SNAP_VALUES = [
+// Diskrete Zoom-Stufen — Mausrad rastet ein. Modus-abhaengig:
+//  - Walker: metrische Stufen 2.5 m … 25 km
+//  - Cockpit: Aviation-NM-Stufen (0.5, 1, 2, 5, 10, 20, 50, 100 NM)
+const RADAR_SNAP_VALUES_WALKER = [
   2.5, 5, 10, 15, 25, 50, 75, 100, 150, 250,
   500, 750, 1000, 1500, 2500, 5000, 7500, 10000, 15000, 25000,
-  // NM-Stufen (1 NM = 1852 m): 5/10/15/20/25/30/40/50/75/100 NM
-  9260, 18520, 27780, 37040, 46300, 55560, 74080, 92600, 138900, 185200,
 ];
+const RADAR_SNAP_VALUES_COCKPIT = [
+  926, 1852, 3704, 9260, 18520, 37040, 92600, 185200,
+];
+function _activeSnapValues() {
+  return (_radarModeTracked === 'walker')
+    ? RADAR_SNAP_VALUES_WALKER
+    : RADAR_SNAP_VALUES_COCKPIT;
+}
 function snapRange(currentM, zoomOut) {
+  const values = _activeSnapValues();
   let bestIdx = 0, bestDist = Infinity;
-  for (let i = 0; i < RADAR_SNAP_VALUES.length; i++) {
-    const d = Math.abs(RADAR_SNAP_VALUES[i] - currentM);
+  for (let i = 0; i < values.length; i++) {
+    const d = Math.abs(values[i] - currentM);
     if (d < bestDist) { bestDist = d; bestIdx = i; }
   }
   const targetIdx = zoomOut
-    ? Math.min(bestIdx + 1, RADAR_SNAP_VALUES.length - 1)
+    ? Math.min(bestIdx + 1, values.length - 1)
     : Math.max(bestIdx - 1, 0);
-  return RADAR_SNAP_VALUES[targetIdx];
+  return values[targetIdx];
 }
 function setRadarRange(m) {
   const maxM = (_radarModeTracked === 'walker') ? RADAR_RANGE_MAX_WALKER : RADAR_RANGE_MAX_COCKPIT;
   RADAR_RANGE_M = Math.max(RADAR_RANGE_MIN, Math.min(maxM, m));
-  // Pro Modus speichern
-  const mode = (_radarModeTracked === 'walker') ? 'walker' : 'cockpit';
-  try { localStorage.setItem('vw.radarRangeM.' + mode, String(RADAR_RANGE_M)); } catch {}
+  // KEIN localStorage — siehe _loadRadarRange().
   // Header-Label updaten + sofort neu zeichnen
   const lab = document.getElementById('radarRangeLabel');
   if (lab) {
@@ -2233,15 +2228,27 @@ function renderRadar() {
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
   const cx = W / 2, cy = H / 2;
-  const R  = Math.min(W, H) / 2 - 18;
+  // 32 px innerer Buffer zwischen Radar-Kreis und Canvas-Rand — reserviert
+  // Platz fuer den weichen Edge-Fade (padR = R * 1.10) UND den Drop-Shadow-
+  // Blur, ohne dass beides am Canvas-Rand abgeschnitten wird.
+  const R  = Math.min(W, H) / 2 - 32;
 
-  // Hintergrund mit Radial-Gradient (weicher Glow zur Mitte)
-  const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.1);
-  bg.addColorStop(0, '#17294a');
-  bg.addColorStop(1, '#0b1220');
-  ctx.fillStyle = '#0b1220';
-  ctx.fillRect(0, 0, W, H);
-  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.closePath();
+  // Canvas transparent leeren — nur der Radar-Kreis bekommt Hintergrund,
+  // der Rest der Canvas-Flaeche bleibt durchsichtig (kein "Quadrat" hinter
+  // dem Kreis sichtbar).
+  ctx.clearRect(0, 0, W, H);
+  // Radar-Kreis mit Radial-Gradient: in der Mitte heller Akzent-Glow, bis
+  // 95% des Radius volle Fuell-Farbe, dann von 95% bis ~108% R die Alpha
+  // ausblenden → weicher Fade-Out zum Panel-Hintergrund statt harter Kreis-
+  // Kante. Der Fade-Bereich liegt ausserhalb von R, deswegen muss auch der
+  // gefuellte Path leicht groesser als R sein.
+  const padR = R * 1.08;
+  const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, padR);
+  bg.addColorStop(0,                  'rgba(23, 41, 74, 1)');   // #17294a center glow
+  bg.addColorStop((R * 0.95) / padR,  'rgba(11, 18, 32, 1)');   // #0b1220 just inside edge
+  bg.addColorStop((R * 1.00) / padR,  'rgba(11, 18, 32, 0.6)'); // start fade at edge
+  bg.addColorStop(1,                  'rgba(11, 18, 32, 0)');   // transparent past edge
+  ctx.beginPath(); ctx.arc(cx, cy, padR, 0, Math.PI * 2); ctx.closePath();
   ctx.fillStyle = bg; ctx.fill();
 
   // --- Range-Ringe: adaptiv gleichmaessig verteilt ------------------------
@@ -2385,13 +2392,6 @@ function renderRadar() {
       ctx.arc(cx, cy, rRangePx, coneStart, coneEnd);
       ctx.closePath();
       ctx.fill();
-      ctx.strokeStyle = 'rgba(63, 220, 138, 0.7)';
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, rRangePx, coneStart, coneEnd);
-      ctx.closePath();
-      ctx.stroke();
     }
   }
 
@@ -2465,12 +2465,39 @@ function renderRadar() {
   for (const [id, p] of iterAllPeersDeduped()) {
     if (!p.sim) continue;
     const d = p.currentDistance ?? distMeters(state.mySim, p.sim);
-    if (d > RADAR_RANGE_M) continue;
 
     // Bearing nach Heading-Up transformieren
     const bear = bearingDeg(state.mySim, p.sim);
     const rel  = ((bear - myHead) + 360) % 360;
     const rad  = rel * Math.PI / 180;
+
+    // Out-of-Range: kleines Punkt-Symbol direkt am Radar-Rand in Bearing-
+    // Richtung. Gibt Hinweis auf Peers ausserhalb der gewaehlten Range
+    // (sonst verschwinden sie ganz, was bei Cockpit-Peers im Aviation-
+    // Modus oft passiert). Farbe analog Hoerbarkeit.
+    if (d > RADAR_RANGE_M) {
+      const px = cx + Math.sin(rad) * (R - 6);
+      const py = cy - Math.cos(rad) * (R - 6);
+      const peerHearM = p.sim.hearRangeM || 1000;
+      const theyHearMe = d < peerHearM;
+      const iHearThem  = p.isTestPeer
+        ? d < (p.testRadius || peerHearM || myRange) * 1.25
+        : d < myRange;
+      let edgeColor;
+      if (theyHearMe && iHearThem) edgeColor = '#3fdc8a';
+      else if (iHearThem)          edgeColor = '#6aa5ff';
+      else if (theyHearMe)         edgeColor = '#ffc857';
+      else                         edgeColor = '#6b7896';
+      ctx.save();
+      ctx.fillStyle = edgeColor;
+      ctx.globalAlpha = 0.6;
+      ctx.beginPath();
+      ctx.arc(px, py, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      continue;
+    }
+
     const r    = (d / RADAR_RANGE_M) * R;
     const px   = cx + Math.sin(rad) * r;
     const py   = cy - Math.cos(rad) * r;
@@ -2527,12 +2554,20 @@ function renderRadar() {
       const peerConeGrad = ctx.createRadialGradient(px, py, 0, px, py, peerConeR);
       peerConeGrad.addColorStop(0, 'rgba(' + coneRGB + ', 0.45)');
       peerConeGrad.addColorStop(1, 'rgba(' + coneRGB + ', 0.00)');
+      // Auf den Radar-Kreis clippen (analog panel.js) — Cone zeichnet nicht
+      // ueber den Range-Ring hinaus, auch wenn peerConeR groesser als der
+      // Abstand des Peers vom Zentrum ist.
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx.clip();
       ctx.fillStyle = peerConeGrad;
       ctx.beginPath();
       ctx.moveTo(px, py);
       ctx.arc(px, py, peerConeR, pcs, pce);
       ctx.closePath();
       ctx.fill();
+      ctx.restore();
 
       // Walker-Punkt im Zentrum
       ctx.fillStyle = isSpeaking ? '#ffe066' : color;
@@ -3686,7 +3721,9 @@ function _testPeerTick() {
     const ov = _testPeerState.overrides.get(peerKey) || {};
     // Live-Override fuer Radius (slider in UI) — wirkt sofort, ohne re-spawn.
     const radius = (typeof ov.radius === 'number' && ov.radius > 0) ? ov.radius : item.radius;
-    const pathType = ov.pathType || 'organic';
+    // Default-pathType je nach Kind: Cockpit-Peers fliegen organisch
+    // (= 'flight', Aviation-Speed), Walker laufen organisch (= 'organic').
+    const pathType = ov.pathType || (item.kind === 'cockpit' ? 'flight' : 'organic');
 
     let east, north, heading;
     if (pathType === 'static') {
@@ -3756,12 +3793,21 @@ function _testPeerTick() {
       }
 
     } else {
-      // 'organic': Laufender Peer. Konstante Geschwindigkeit, Richtung driftet
-      // ±5° pro Tick (smooth, kein Zittern). Bei >70% des Radius biegt der
-      // Peer automatisch Richtung Zentrum.
+      // 'organic' (Walker/Cockpit) oder 'flight' (Cockpit-Aviation): Random-
+      // Walk mit ±5° Drift pro Tick + Auto-Turn bei >70% Radius. baseSpd:
+      //   organic + walker  = 0.5 m/s  (Gehen)
+      //   organic + cockpit = 10 m/s   (~20 kts, langsames Fliegen — sonst
+      //                                  steht das Flugzeug bei kleinem
+      //                                  walkSpd im grossen Radius praktisch)
+      //   flight  + cockpit = 30 m/s   (~60 kts Cessna-Cruise)
+      // Ueber speedFactor weiter skalierbar.
       const sf = (typeof ov.speedFactor === 'number') ? Math.max(0, ov.speedFactor) : 1.0;
       const dt = 0.2;
-      const walkSpd = 0.5 * sf; // 1x=0.5 m/s; sf=5x=2.5 m/s (echtes Gehen)
+      let baseSpd;
+      if (pathType === 'flight') baseSpd = 30;
+      else if (pathType === 'organic' && item.kind === 'cockpit') baseSpd = 10;
+      else baseSpd = 0.5;
+      const walkSpd = baseSpd * sf;
 
       if (sf === 0) {
         item.velX = 0; item.velY = 0;
@@ -3790,12 +3836,24 @@ function _testPeerTick() {
 
       item.posX = (item.posX || 0) + item.velX * dt;
       item.posY = (item.posY || 0) + item.velY * dt;
+      // Hard-Cap: wenn der Peer den Radius ueberschritten hat (kann bei
+      // hohem walkSpd passieren — der sanfte Auto-Turn schafft's nicht
+      // immer), Position auf den Kreis-Rand klampfen und Laufrichtung
+      // sofort Richtung Zentrum drehen. So bleibt der Peer garantiert
+      // im konfigurierten Radius.
+      const distNow = Math.sqrt(item.posX * item.posX + item.posY * item.posY);
+      if (distNow > radius && distNow > 0) {
+        const scale = radius / distNow;
+        item.posX *= scale;
+        item.posY *= scale;
+        item.walkAngle = Math.atan2(-item.posX, -item.posY);
+      }
       east  = item.posX;
       north = item.posY;
     }
     // Heading: 'recorded' setzt es bereits oben. Alle anderen PathTypes hier.
     if (heading === undefined) {
-    if (pathType === 'organic' && (Math.abs(item.velX || 0) > 0.05 || Math.abs(item.velY || 0) > 0.05)) {
+    if ((pathType === 'organic' || pathType === 'flight') && (Math.abs(item.velX || 0) > 0.05 || Math.abs(item.velY || 0) > 0.05)) {
       const target = Math.atan2(item.velX || 0, item.velY || 0);
       let delta = target - (item.headingAngle || 0);
       while (delta >  Math.PI) delta -= 2 * Math.PI;
@@ -3812,6 +3870,12 @@ function _testPeerTick() {
     // on_foot nach Kind (walker=true, cockpit=false) — bestimmt das Radar-Icon.
     // Das Audio-Profil-Matching laeuft separat ueber p.isTestPeer in updateAudioFor.
     const peerOnFoot = (item.kind === 'walker');
+    // Triebwerks-Typ-Override (nur Cockpit): user-konfigurierbar via Debug-UI.
+    // undefined laesst den fallbackKind aus _attachAmbient greifen.
+    const engineType = (!peerOnFoot && ov.engineKind === 'jet')  ? 1
+                     : (!peerOnFoot && ov.engineKind === 'heli') ? 3
+                     : (!peerOnFoot && ov.engineKind === 'prop') ? 0
+                     : undefined;
     item.peer.sim = {
       lat: state.mySim.lat + dLat,
       lon: state.mySim.lon + dLon,
@@ -3826,6 +3890,7 @@ function _testPeerTick() {
       on_foot: peerOnFoot,
       camera_state: peerOnFoot ? 26 : 2,
       callsign: item.callsign,
+      engine_type: engineType,
     };
     item.peer.lastSeen = Date.now();
     // testRadius = Audio-Hoerweite (Trichter), modusabhaengig — NICHT der Slider-Radius.
@@ -3956,8 +4021,12 @@ function listTestPeers() {
       volume:       (typeof ov.volume      === 'number') ? ov.volume      : 0.5,
       radius:       (typeof ov.radius      === 'number') ? ov.radius      : (kind === 'walker' ? cfg.walkerRadius : cfg.cockpitRadius),
       audioName:    ov.audioName || null,
-      pathType:     ov.pathType  || 'organic',
+      // Default-pathType kind-abhaengig: Cockpit→flight, Walker→organic.
+      pathType:     ov.pathType  || (kind === 'cockpit' ? 'flight' : 'organic'),
       speedFactor:  (typeof ov.speedFactor === 'number') ? ov.speedFactor : 1.0,
+      // Triebwerks-Typ fuer Cockpit-Peers (prop/jet/heli). null = Auto-Fallback
+      // aus _attachAmbient (Random prop/jet beim Spawn).
+      engineKind:   ov.engineKind || null,
       recordedPathName: ov.recordedPathName || null,
     };
     if (kind === 'walker') walkers.push(entry);
@@ -4006,6 +4075,20 @@ function removeOnePeer(peerKey) {
 function setPeerOverride(peerKey, patch) {
   if (!peerKey || !patch) return;
   const cur = _testPeerState.overrides.get(peerKey) || {};
+  // Bei Radius-Aenderung: Peer-Position proportional skalieren, damit er
+  // sofort im neuen Radius sichtbar ist, statt erst langsam reinzuwandern
+  // (kann sonst bei pathType='flight' mit 30 m/s lange dauern).
+  if (typeof patch.radius === 'number' && patch.radius > 0) {
+    const item = _testPeerState.peers.get(peerKey);
+    if (item) {
+      const oldR = (typeof cur.radius === 'number' && cur.radius > 0) ? cur.radius : item.radius;
+      if (oldR > 0 && oldR !== patch.radius) {
+        const scale = patch.radius / oldR;
+        item.posX = (item.posX || 0) * scale;
+        item.posY = (item.posY || 0) * scale;
+      }
+    }
+  }
   const next = { ...cur, ...patch };
   _testPeerState.overrides.set(peerKey, next);
 }
@@ -4167,7 +4250,9 @@ function saveTestPeerConfig(name) {
       volume:           (typeof ov.volume      === 'number') ? ov.volume      : 0.5,
       radius:           (typeof ov.radius      === 'number') ? ov.radius      : null,
       speedFactor:      (typeof ov.speedFactor === 'number') ? ov.speedFactor : 1.0,
-      pathType:         ov.pathType         || 'organic',
+      // pathType nur speichern wenn explizit gesetzt — sonst beim Reload
+      // greift der kind-abhaengige Default (cockpit→flight, walker→organic).
+      pathType:         ov.pathType         || null,
       recordedPathName: ov.recordedPathName || null,
       customCallsign:   ov.customCallsign   || null,
     };
