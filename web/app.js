@@ -2153,8 +2153,9 @@ const RADAR_SNAP_VALUES_WALKER = [
   2.5, 5, 10, 15, 25, 50, 75, 100, 150, 250,
   500, 750, 1000, 1500, 2500, 5000, 7500, 10000, 15000, 25000,
 ];
+// NM-Werte runter bis 5 m für Boden-Manöver / Vorfeld / Pushback.
 const RADAR_SNAP_VALUES_COCKPIT = [
-  926, 1852, 3704, 9260, 18520, 37040, 92600, 185200,
+  5, 10, 25, 50, 100, 185, 463, 926, 1852, 3704, 9260, 18520, 37040, 92600, 185200,
 ];
 function _activeSnapValues() {
   return (_radarModeTracked === 'walker')
@@ -2180,7 +2181,7 @@ function setRadarRange(m) {
   // Header-Label updaten + sofort neu zeichnen
   const lab = document.getElementById('radarRangeLabel');
   if (lab) {
-    // Walker → IMMER m/km. Cockpit (Aviation) → NM ab >= 1 km.
+    // Walker → IMMER m/km. Cockpit → IMMER NM (User-Wunsch).
     const isWalker = !!(state.mySim && state.mySim.on_foot);
     if (isWalker) {
       lab.textContent = RADAR_RANGE_M < 1000
@@ -2188,11 +2189,11 @@ function setRadarRange(m) {
         : `${(RADAR_RANGE_M / 1000).toFixed(2)} km`;
     } else {
       const nm = RADAR_RANGE_M / 1852;
-      lab.textContent = RADAR_RANGE_M < 1000
-        ? `${RADAR_RANGE_M.toFixed(0)} m`
-        : nm >= 4.9
-          ? `${nm.toFixed(0)} NM`
-          : `${(RADAR_RANGE_M / 1000).toFixed(2)} km`;
+      lab.textContent = nm < 0.01 ? `${nm.toFixed(4)} NM`
+                      : nm < 0.1  ? `${nm.toFixed(3)} NM`
+                      : nm < 1    ? `${nm.toFixed(2)} NM`
+                      : nm < 10   ? `${nm.toFixed(1)} NM`
+                      :             `${Math.round(nm)} NM`;
     }
   }
   renderRadar();
@@ -2315,7 +2316,7 @@ function renderRadar() {
   };
   const ringStep = niceStep(RADAR_RANGE_M);
   const rings    = [];
-  for (let d = ringStep; d <= RADAR_RANGE_M + 1; d += ringStep) rings.push(d);
+  for (let d = ringStep; d <= RADAR_RANGE_M * 1.0001; d += ringStep) rings.push(d);
 
   // Ringe zeichnen — aeusserer Ring heller hervorgehoben
   ctx.lineWidth = 1;
@@ -2354,7 +2355,15 @@ function renderRadar() {
   ctx.font = '600 10px ui-monospace, "SF Mono", Menlo, monospace';
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
 
+  // Cockpit-Modus: NM (Aviation-Standard). Walker: m/km.
   const fmtRing = (m) => {
+    const isCockpit = !(state.mySim && state.mySim.on_foot);
+    if (isCockpit) {
+      const nm = m / 1852;
+      if (nm < 1)  return `${nm.toFixed(2).replace(/\.?0+$/, '')} NM`;
+      if (nm < 10) return `${nm.toFixed(1).replace(/\.0$/, '')} NM`;
+      return `${Math.round(nm)} NM`;
+    }
     if (m < 1000) return `${Math.round(m)} m`;
     const km = m / 1000;
     if (Math.abs(km - Math.round(km)) < 0.01) return `${Math.round(km)} km`;
@@ -2423,7 +2432,8 @@ function renderRadar() {
       // NORTH-UP: Cone-Center = mein Heading in Welt-Koordinaten. Heading 0
       // → cone zeigt nach Norden (= oben). Heading 90 → cone zeigt nach
       // Osten (= rechts). bearingToCanvasAngle: rad = (deg) * π/180 - π/2.
-      const coneCenter  = (myHead * Math.PI / 180) - Math.PI / 2;
+      // myHead wird erst weiter unten deklariert — hier direkt aus state.
+      const coneCenter  = ((state.mySim.heading_deg || 0) * Math.PI / 180) - Math.PI / 2;
       const coneStart   = coneCenter - coneHalfRad;
       const coneEnd     = coneCenter + coneHalfRad;
       const coneGrad    = ctx.createRadialGradient(cx, cy, 0, cx, cy, rRangePx);
@@ -2944,6 +2954,11 @@ function renderPeers() {
     const lon = +sim.lon;
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
     if (Math.abs(lat) < 0.0001 && Math.abs(lon) < 0.0001) continue;
+    // Radar-Range-Filter: Peers außerhalb des aktuell gewählten Radar-Range
+    // werden nicht als Symbol gezeichnet (nur als Edge-Dot am Rand). Dann
+    // auch nicht in der nearby-Liste — sonst Mismatch zwischen Radar und Liste.
+    const d = p.currentDistance ?? (state.mySim ? distMeters(state.mySim, sim) : Infinity);
+    if (Number.isFinite(d) && d > RADAR_RANGE_M) continue;
     all.push([id, p]);
   }
   const T = (k) => (window.i18n ? window.i18n.t(k) : k);
@@ -3708,6 +3723,16 @@ function _spawnSingleTestPeer(peerKey, kind, index, baseRadius, seed) {
   const phaseStart = rng() * Math.PI * 2;
   const altOffset = (kind === 'cockpit') ? (2000 + rng() * 4000) : 0; // ft, fuer Cockpit 2000-6000ft Versatz
 
+  // Welt-Anker: einmaliger Snapshot der mySim-Position zum Spawn-Zeitpunkt.
+  // Tick rechnet ab jetzt gegen diesen Anker, NICHT gegen die Live-mySim —
+  // sonst wandert peer.sim.lat bei schnellem Flug zwischen den Ticks (Render
+  // 60 Hz, mySim 60 Hz, Tick 30 Hz → Versatz = sichtbares Flackern).
+  // Side effect: wegfliegen lässt Peers in der Welt zurück (gewollt).
+  const anchorLat = state.mySim ? state.mySim.lat : 0;
+  const anchorLon = state.mySim ? state.mySim.lon : 0;
+  const anchorAlt = state.mySim ? (state.mySim.alt_ft || 0) : 0;
+  const cosAnchor = Math.cos(anchorLat * Math.PI / 180);
+
   // Initial-Position direkt setzen — sonst filtert renderPeers (Filter auf
   // !sim) den frisch gespawnten Peer raus und das UI zeigt ihn erst beim
   // ersten Tick (~200ms spaeter), was als Flackern wahrnehmbar ist.
@@ -3717,16 +3742,15 @@ function _spawnSingleTestPeer(peerKey, kind, index, baseRadius, seed) {
     const east  = Math.cos(phaseStart) * radius;
     const north = Math.sin(phaseStart) * radius;
     const R = 6371000;
-    const cosLat = Math.cos(state.mySim.lat * Math.PI / 180);
     const dLat = (north / R) * 180 / Math.PI;
-    const dLon = (east  / (R * cosLat)) * 180 / Math.PI;
+    const dLon = (east  / (R * cosAnchor)) * 180 / Math.PI;
     const vx = -Math.sin(phaseStart) * direction;
     const vy =  Math.cos(phaseStart) * direction;
     const heading = (Math.atan2(vx, vy) * 180 / Math.PI + 360) % 360;
     p.sim = {
-      lat: state.mySim.lat + dLat,
-      lon: state.mySim.lon + dLon,
-      alt_ft: (state.mySim.alt_ft || 0) + altOffset,
+      lat: anchorLat + dLat,
+      lon: anchorLon + dLon,
+      alt_ft: anchorAlt + altOffset,
       agl_ft: (kind === 'cockpit') ? 3000 : 0,
       heading_deg: heading,
       hearRangeM: (kind === 'walker') ? audioConfig.walker.maxRangeM : audioConfig.cockpit.maxRangeM,
@@ -3762,6 +3786,8 @@ function _spawnSingleTestPeer(peerKey, kind, index, baseRadius, seed) {
     // Organischer Walk
     posX: posX0, posY: posY0,
     velX: velX0, velY: velY0,
+    // Welt-Anker (Spawn-Snapshot der mySim-Position) — siehe oben.
+    anchorLat, anchorLon, anchorAlt, cosAnchor,
   };
 }
 
@@ -3815,7 +3841,10 @@ function applyTestPeers(config) {
     clearInterval(_testPeerState.walkTimer);
     _testPeerState.walkTimer = null;
   } else if (total > 0 && !_testPeerState.walkTimer) {
-    _testPeerState.walkTimer = setInterval(_testPeerTick, 200);
+    // 33 ms = ~30 Hz: bei schnellem Flug bleibt die Peer-Welt-Position
+    // mit state.mySim synchron, sonst sichtbares Flackern (Render läuft 60 Hz,
+    // peer.sim.lat war beim alten Tick eingefroren während mySim weitergewandert ist).
+    _testPeerState.walkTimer = setInterval(_testPeerTick, 33);
   }
 
   renderPeers();
@@ -3832,8 +3861,27 @@ function _testPeerTick() {
   const now = Date.now();
   for (const [, item] of _testPeerState.peers) item.peer.lastSeen = now;
   if (!state.mySim) return;
+  // Teleport-Detection: bei Position-Sprung > 1 km in einem Tick (33 ms) ist
+  // das keine Flugbewegung mehr (=> ~30 km/s, jenseits Mach 90), sondern Slew/
+  // Spawn-Menü/Sim-Restart. Test-Peers wandern dann am alten Anker zurück und
+  // sind weit weg — also komplett neu am neuen mySim spawnen.
+  const lastLat = _testPeerState._lastMySimLat;
+  const lastLon = _testPeerState._lastMySimLon;
+  if (Number.isFinite(lastLat) && Number.isFinite(lastLon)) {
+    const jump = distMeters({ lat: lastLat, lon: lastLon }, state.mySim);
+    if (jump > 1000) {
+      console.info('[test] teleport detected (' + Math.round(jump/1000) + ' km) — respawning peers');
+      _stopAllTestPeers();
+      _testPeerState._lastMySimLat = state.mySim.lat;
+      _testPeerState._lastMySimLon = state.mySim.lon;
+      // Re-Apply mit aktueller Config (spawnt am neuen Anker).
+      try { applyTestPeers(); } catch (_) {}
+      return;
+    }
+  }
+  _testPeerState._lastMySimLat = state.mySim.lat;
+  _testPeerState._lastMySimLon = state.mySim.lon;
   const R = 6371000;
-  const cosLat = Math.cos(state.mySim.lat * Math.PI / 180);
   for (const [peerKey, item] of _testPeerState.peers) {
     const ov = _testPeerState.overrides.get(peerKey) || {};
     // Live-Override fuer Radius (slider in UI) — wirkt sofort, ohne re-spawn.
@@ -3851,7 +3899,8 @@ function _testPeerTick() {
     } else if (pathType === 'line') {
       // Linear hin und her auf einer fixen Achse (Strecke).
       const sfL = (typeof ov.speedFactor === 'number') ? Math.max(0, ov.speedFactor) : 1.0;
-      item.phase += item.speed * sfL * 0.2;
+      // 0.033 = 33 ms Tick (war 0.2 bei 200 ms Tick — gleicher Effekt pro Sekunde).
+      item.phase += item.speed * sfL * 0.033;
       const offset    = Math.sin(item.phase) * radius;
       const axisAngle = item.startPhase || 0;
       east  = Math.cos(axisAngle) * offset;
@@ -3860,7 +3909,7 @@ function _testPeerTick() {
     } else if (pathType === 'circle') {
       // Starrer Kreis.
       const sfC = (typeof ov.speedFactor === 'number') ? Math.max(0, ov.speedFactor) : 1.0;
-      item.phase += item.speed * sfC * 0.2;
+      item.phase += item.speed * sfC * 0.033;
       east  = Math.cos(item.phase) * radius;
       north = Math.sin(item.phase) * radius;
 
@@ -3884,8 +3933,8 @@ function _testPeerTick() {
         const cum = pathData._cum;
         const sf = (typeof ov.speedFactor === 'number') ? Math.max(0.1, ov.speedFactor) : 1.0;
         if (item.recIdx === undefined) item.recIdx = 0;
-        // Aufnahme: 1 Punkt/s. Tick: 200ms → 0.2 Punkte/Tick bei sf=1 = Echtzeit.
-        item.recIdx += 0.2 * sf;
+        // Aufnahme: 1 Punkt/s. Tick: 33ms → 0.033 Punkte/Tick bei sf=1 = Echtzeit.
+        item.recIdx += 0.033 * sf;
         const len  = cum.length;
         const idxF = item.recIdx % len;
         const idx0 = Math.floor(idxF);
@@ -3905,7 +3954,7 @@ function _testPeerTick() {
       } else {
         east  = Math.cos(item.phase) * radius;
         north = Math.sin(item.phase) * radius;
-        item.headingAngle = (item.headingAngle || 0) + item.headingSpeed * 0.2;
+        item.headingAngle = (item.headingAngle || 0) + item.headingSpeed * 0.033;
         heading = ((item.headingAngle * 180 / Math.PI) % 360 + 360) % 360;
       }
 
@@ -3921,11 +3970,18 @@ function _testPeerTick() {
       //             braucht der Peer ~30 Sek pro Radius-Durchquerung —
       //             smooth wie Walker, unabhaengig von der Groesse.
       const sf = (typeof ov.speedFactor === 'number') ? Math.max(0, ov.speedFactor) : 1.0;
-      const dt = 0.2;
+      const dt = 0.033;
       const baseSpd = (item.kind === 'cockpit')
         ? Math.min(50, Math.max(1, radius / 30))
         : 0.5;
       const walkSpd = baseSpd * sf;
+
+      // Erst-Init posX/posY aus dem Spawn-Phasenwinkel — sonst startet der
+      // Peer im Zentrum (0,0) statt auf seiner Spawn-Bahn.
+      if (item.posX === undefined || item.posY === undefined) {
+        item.posX = Math.cos(item.startPhase || 0) * radius;
+        item.posY = Math.sin(item.startPhase || 0) * radius;
+      }
 
       if (sf === 0) {
         item.velX = 0; item.velY = 0;
@@ -3934,8 +3990,9 @@ function _testPeerTick() {
         if (item.walkAngle === undefined)
           item.walkAngle = (item.startPhase || 0) + Math.PI * 0.5;
 
-        // Richtung langsam drehen: ±5° pro Tick = natürliches Wandern.
-        item.walkAngle += (Math.random() - 0.5) * 0.175;
+        // Richtung langsam drehen: ±5° pro 200ms = natürliches Wandern.
+        // Tick ist 33ms (~6× häufiger), also ±0.029 rad statt ±0.175.
+        item.walkAngle += (Math.random() - 0.5) * 0.029;
 
         // Wenn ausserhalb 70% des Radius: Richtung sanft Richtung Zentrum biegen.
         const dist = Math.sqrt(item.posX * item.posX + item.posY * item.posY) || 0.001;
@@ -3976,15 +4033,15 @@ function _testPeerTick() {
       let delta = target - (item.headingAngle || 0);
       while (delta >  Math.PI) delta -= 2 * Math.PI;
       while (delta < -Math.PI) delta += 2 * Math.PI;
-      item.headingAngle = (item.headingAngle || 0) + Math.max(-0.25, Math.min(0.25, delta));
+      item.headingAngle = (item.headingAngle || 0) + Math.max(-0.042, Math.min(0.042, delta));
       heading = ((item.headingAngle * 180 / Math.PI) % 360 + 360) % 360;
     } else {
-      item.headingAngle = (item.headingAngle || 0) + item.headingSpeed * 0.2;
+      item.headingAngle = (item.headingAngle || 0) + item.headingSpeed * 0.033;
       heading = ((item.headingAngle * 180 / Math.PI) % 360 + 360) % 360;
     }
     } // end if (heading === undefined)
     const dLat = (north / R) * 180 / Math.PI;
-    const dLon = (east  / (R * cosLat)) * 180 / Math.PI;
+    const dLon = (east  / (R * item.cosAnchor)) * 180 / Math.PI;
     // on_foot nach Kind (walker=true, cockpit=false) — bestimmt das Radar-Icon.
     // Das Audio-Profil-Matching laeuft separat ueber p.isTestPeer in updateAudioFor.
     const peerOnFoot = (item.kind === 'walker');
@@ -4005,11 +4062,11 @@ function _testPeerTick() {
       ? ov.altitudeOffset
       : item.altOffset;
     item.peer.sim = {
-      lat: state.mySim.lat + dLat,
-      lon: state.mySim.lon + dLon,
+      lat: item.anchorLat + dLat,
+      lon: item.anchorLon + dLon,
       alt_ft: cockpitOnGround
-                ? (state.mySim.alt_ft || 0)
-                : (state.mySim.alt_ft || 0) + altOffsetEff,
+                ? item.anchorAlt
+                : item.anchorAlt + altOffsetEff,
       agl_ft: (peerOnFoot || cockpitOnGround) ? 0 : 3000,
       heading_deg: heading,
       // Hoerweite (Trichter) kommt aus dem Audio-Range-Slider (audioConfig).
@@ -4062,13 +4119,25 @@ function _testPeerTick() {
 }
 
 function _stopAllTestPeers() {
-  // Sources stoppen ABER Room erst nach dem Aufruf raeumen — Caller der
-  // sofort neue Peers spawnt sollte danach _testPeerState.peers.clear()
-  // und state.rooms.delete() selbst aufrufen wenn fertig.
+  // Sources stoppen UND Audio-Graph disconnecten — sonst laufen ambient-
+  // Loops (Footsteps, Helicopter, Jet, Prop) weiter und Gain/Panner-Nodes
+  // bleiben connected. Symmetrisch zu removeOnePeer.
   for (const [, item] of _testPeerState.peers) {
-    try { item.src.stop(); } catch (_) {}
+    try { item.src && item.src.stop(); } catch (_) {}
+    if (item.peer && item.peer._ambient) {
+      const a = item.peer._ambient;
+      try { a.stepSrc.stop(); } catch (_) {}
+      try { a.propSrc.stop(); } catch (_) {}
+      try { a.jetSrc.stop();  } catch (_) {}
+      try { a.heliSrc.stop(); } catch (_) {}
+    }
+    try { item.peer && item.peer.gainNode   && item.peer.gainNode.disconnect();   } catch (_) {}
+    try { item.peer && item.peer.pannerNode && item.peer.pannerNode.disconnect(); } catch (_) {}
   }
   _testPeerState.peers.clear();
+  _testPeerState.overrides.clear();
+  _testPeerState._lastMySimLat = undefined;
+  _testPeerState._lastMySimLon = undefined;
   state.rooms.delete('__test__');
 }
 

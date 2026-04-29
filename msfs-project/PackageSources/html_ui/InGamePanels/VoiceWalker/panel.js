@@ -49,9 +49,10 @@
     2.5, 5, 10, 15, 25, 50, 75, 100, 150, 250,
     500, 750, 1000, 1500, 2500, 5000, 7500, 10000, 15000, 25000,
   ];
-  // 0.5/1/2/5/10/20/50/100 NM in Metern (1 NM = 1852 m).
+  // Cockpit runter bis 5 m für Vorfeld/Pushback, dann NM-Stufen
+  // (0.1/0.25/0.5/1/2/5/10/20/50/100 NM, 1 NM = 1852 m).
   const RADAR_SNAP_VALUES_COCKPIT = [
-    926, 1852, 3704, 9260, 18520, 37040, 92600, 185200,
+    5, 10, 25, 50, 100, 185, 463, 926, 1852, 3704, 9260, 18520, 37040, 92600, 185200,
   ];
   function _activeSnapValues() {
     return (state && state.mySim && !state.mySim.on_foot)
@@ -72,7 +73,8 @@
   }
 
   function fmtRange(m) {
-    // Walker (on_foot ODER kein mySim) → IMMER m/km. Cockpit → NM.
+    // Walker (on_foot ODER kein mySim) → IMMER m/km. Cockpit → IMMER NM,
+    // auch bei kleinen Werten (mehr Nachkommastellen statt m-Switch).
     const isWalker = !state.mySim || !!state.mySim.on_foot;
     if (isWalker) {
       if (m < 1000) return Math.round(m) + ' m';
@@ -80,9 +82,13 @@
       if (Math.abs(km - Math.round(km)) < 0.01) return Math.round(km) + ' km';
       return km.toFixed(2).replace(/\.?0+$/, '') + ' km';
     }
+    // Cockpit IMMER NM (User-Wunsch: Cockpit=NM, Walker=m). Bei kleinen
+    // Werten mehr Nachkommastellen statt m-Switch.
     const nm = m / 1852;
-    if (nm < 1)  return nm.toFixed(2) + ' NM';
-    if (nm < 10) return nm.toFixed(1) + ' NM';
+    if (nm < 0.01) return nm.toFixed(4) + ' NM';
+    if (nm < 0.1)  return nm.toFixed(3) + ' NM';
+    if (nm < 1)    return nm.toFixed(2) + ' NM';
+    if (nm < 10)   return nm.toFixed(1) + ' NM';
     return Math.round(nm) + ' NM';
   }
 
@@ -284,7 +290,7 @@
     // Adaptive Range-Ringe (1/2/5 * 10^n)
     const step  = niceStep(radarRangeM);
     const rings = [];
-    for (let d = step; d <= radarRangeM + 1; d += step) rings.push(d);
+    for (let d = step; d <= radarRangeM * 1.0001; d += step) rings.push(d);
     rings.forEach(function (m, i) {
       const frac    = m / radarRangeM;
       const isOuter = i === rings.length - 1;
@@ -684,6 +690,10 @@
         if (!p.sim) return;
         const d = dist(state.mySim, p.sim);
         if (!Number.isFinite(d)) return;
+        // Radar-Range-Filter: Peers ausserhalb des aktuell gewaehlten Radar-
+        // Range nicht in der Liste anzeigen — sonst Mismatch zwischen Radar
+        // (zeigt sie nicht/nur als Edge-Dot) und Liste (zeigt sie prominent).
+        if (d > radarRangeM) return;
         peers.push({ p: p, d: d });
       });
     }

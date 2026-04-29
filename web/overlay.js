@@ -29,23 +29,33 @@
 
   const RADAR_RANGE_DEFAULT = 1000;
   const RADAR_RANGE_MIN = 2.5;
-  const RADAR_RANGE_MAX = 25000;
-  // Diskrete Zoom-Stufen — Mausrad rastet ein. Identisch zu app.js und
-  // panel.js, damit alle drei Radars konsistent zoomen.
-  const RADAR_SNAP_VALUES = [
+  const RADAR_RANGE_MAX = 185200;
+  // Diskrete Zoom-Stufen — Mausrad rastet ein. Mode-abhaengig wie panel.js:
+  //  - Walker: metrische Stufen 2.5 m … 25 km
+  //  - Cockpit: Aviation-NM-Stufen runter bis 5 m fuer Vorfeld/Pushback
+  const RADAR_SNAP_VALUES_WALKER = [
     2.5, 5, 10, 15, 25, 50, 75, 100, 150, 250,
     500, 750, 1000, 1500, 2500, 5000, 7500, 10000, 15000, 25000,
   ];
+  const RADAR_SNAP_VALUES_COCKPIT = [
+    5, 10, 25, 50, 100, 185, 463, 926, 1852, 3704, 9260, 18520, 37040, 92600, 185200,
+  ];
+  function _activeSnapValues() {
+    return (state && state.mySim && !state.mySim.on_foot)
+      ? RADAR_SNAP_VALUES_COCKPIT
+      : RADAR_SNAP_VALUES_WALKER;
+  }
   function snapRange(currentM, zoomOut) {
+    const values = _activeSnapValues();
     let bestIdx = 0, bestDist = Infinity;
-    for (let i = 0; i < RADAR_SNAP_VALUES.length; i++) {
-      const d = Math.abs(RADAR_SNAP_VALUES[i] - currentM);
+    for (let i = 0; i < values.length; i++) {
+      const d = Math.abs(values[i] - currentM);
       if (d < bestDist) { bestDist = d; bestIdx = i; }
     }
     const targetIdx = zoomOut
-      ? Math.min(bestIdx + 1, RADAR_SNAP_VALUES.length - 1)
+      ? Math.min(bestIdx + 1, values.length - 1)
       : Math.max(bestIdx - 1, 0);
-    return RADAR_SNAP_VALUES[targetIdx];
+    return values[targetIdx];
   }
 
   // Zoom-Level aus localStorage (oder Fallback auf Default).
@@ -94,9 +104,13 @@
     // Cockpit-Modus → NM, Walker → m/km
     const asNm = state && state.mySim && !state.mySim.on_foot;
     if (asNm) {
+      // Cockpit IMMER NM (User-Wunsch), Walker IMMER m/km — bei kleinen
+      // Werten mehr Nachkommastellen statt m-Switch.
       const nm = m / 1852;
-      if (nm < 1)  return `${nm.toFixed(2)} NM`;
-      if (nm < 10) return `${nm.toFixed(1)} NM`;
+      if (nm < 0.01) return `${nm.toFixed(4)} NM`;
+      if (nm < 0.1)  return `${nm.toFixed(3)} NM`;
+      if (nm < 1)    return `${nm.toFixed(2)} NM`;
+      if (nm < 10)   return `${nm.toFixed(1)} NM`;
       return `${Math.round(nm)} NM`;
     }
     return m < 1000 ? `${m.toFixed(0)} m` : `${(m/1000).toFixed(2)} km`;
@@ -258,7 +272,7 @@
     // --- Adaptive Range-Ringe (1/2/5 * 10^n) ---------------------------
     const step  = niceStep(radarRangeM);
     const rings = [];
-    for (let d = step; d <= radarRangeM + 1; d += step) rings.push(d);
+    for (let d = step; d <= radarRangeM * 1.0001; d += step) rings.push(d);
     rings.forEach((m, i) => {
       const frac    = m / radarRangeM;
       const isOuter = i === rings.length - 1;
