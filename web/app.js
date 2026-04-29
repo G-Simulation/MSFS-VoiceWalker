@@ -2055,15 +2055,27 @@ function updateAudioFor(p) {
 function updateListenerOrientation() {
   if (!audioCtx) return;
   const L = audioCtx.listener;
+  // Head-Pitch (rauf/runter schauen) kippt forward + up. Positive Pitch =
+  // nach oben schauen → forward zeigt nach oben (+Y), up nach hinten (+Z).
+  // Default-Listener (forward = -Z, up = +Y) entspricht pitch=0.
+  // pitch in Grad → rad. cos/sin rotieren forward+up gemeinsam um die X-Achse.
+  const pitchDeg = (state.mySim && Number.isFinite(+state.mySim.head_pitch))
+    ? +state.mySim.head_pitch : 0;
+  const p = pitchDeg * Math.PI / 180;
+  const cosP = Math.cos(p), sinP = Math.sin(p);
+  // forward: war (0, 0, -1). Nach Pitch-Rotation um X: (0, sin(p), -cos(p))
+  const fX = 0, fY = sinP, fZ = -cosP;
+  // up: war (0, 1, 0). Nach Pitch-Rotation um X: (0, cos(p), sin(p))
+  const uX = 0, uY = cosP, uZ = sinP;
   if (L.forwardX) {
-    L.forwardX.value = 0;
-    L.forwardY.value = 0;
-    L.forwardZ.value = -1;
-    L.upX.value = 0;
-    L.upY.value = 1;
-    L.upZ.value = 0;
+    L.forwardX.value = fX;
+    L.forwardY.value = fY;
+    L.forwardZ.value = fZ;
+    L.upX.value = uX;
+    L.upY.value = uY;
+    L.upZ.value = uZ;
   } else if (L.setOrientation) {
-    L.setOrientation(0, 0, -1, 0, 1, 0);
+    L.setOrientation(fX, fY, fZ, uX, uY, uZ);
   }
 }
 
@@ -2107,6 +2119,15 @@ setInterval(() => {
   renderSpeakingBar();
   renderRadar();
 }, 200);
+
+// Continuous rAF nur fuer renderRadar — sorgt fuer smoothe Heading-
+// Interpolation (siehe renderRadar._dispHead). Alle anderen Render-
+// Funktionen (renderPeers, renderSpeakingBar) bleiben event-driven via
+// dem 200-ms-Loop oben, weil sie nicht jeden Frame brauchen.
+(function _radarRaf() {
+  try { renderRadar(); } catch (_) {}
+  requestAnimationFrame(_radarRaf);
+})();
 
 // --- Radar -------------------------------------------------------------------
 const RADAR_RANGE_DEFAULT_WALKER  = 10;     // 10 m — Walker-Default
@@ -2159,12 +2180,20 @@ function setRadarRange(m) {
   // Header-Label updaten + sofort neu zeichnen
   const lab = document.getElementById('radarRangeLabel');
   if (lab) {
-    const nm = RADAR_RANGE_M / 1852;
-    lab.textContent = RADAR_RANGE_M < 1000
-      ? `${RADAR_RANGE_M.toFixed(0)} m`
-      : nm >= 4.9
-        ? `${nm.toFixed(0)} NM`
+    // Walker → IMMER m/km. Cockpit (Aviation) → NM ab >= 1 km.
+    const isWalker = !!(state.mySim && state.mySim.on_foot);
+    if (isWalker) {
+      lab.textContent = RADAR_RANGE_M < 1000
+        ? `${RADAR_RANGE_M.toFixed(0)} m`
         : `${(RADAR_RANGE_M / 1000).toFixed(2)} km`;
+    } else {
+      const nm = RADAR_RANGE_M / 1852;
+      lab.textContent = RADAR_RANGE_M < 1000
+        ? `${RADAR_RANGE_M.toFixed(0)} m`
+        : nm >= 4.9
+          ? `${nm.toFixed(0)} NM`
+          : `${(RADAR_RANGE_M / 1000).toFixed(2)} km`;
+    }
   }
   renderRadar();
 }
@@ -2391,7 +2420,10 @@ function renderRadar() {
     // also ist auch visuell der Vollkreis ohne Front-Cone korrekt.
     if (state.mySim && state.mySim.on_foot) {
       const coneHalfRad = 60 * Math.PI / 180;
-      const coneCenter  = -Math.PI / 2;            // Heading-Up: oben = vorne
+      // NORTH-UP: Cone-Center = mein Heading in Welt-Koordinaten. Heading 0
+      // → cone zeigt nach Norden (= oben). Heading 90 → cone zeigt nach
+      // Osten (= rechts). bearingToCanvasAngle: rad = (deg) * π/180 - π/2.
+      const coneCenter  = (myHead * Math.PI / 180) - Math.PI / 2;
       const coneStart   = coneCenter - coneHalfRad;
       const coneEnd     = coneCenter + coneHalfRad;
       const coneGrad    = ctx.createRadialGradient(cx, cy, 0, cx, cy, rRangePx);
@@ -2407,21 +2439,20 @@ function renderRadar() {
     }
   }
 
-  // Eigenes Icon im Zentrum — Top-Down-Flugzeug oder Walker-Kreis.
-  // Immer Heading-Up orientiert (Nase oben).
+  // Eigenes Icon im Zentrum — rotiert mit dem eigenen Heading.
+  // NORTH-UP-Konvention: Icon-Nase zeigt in Welt-Heading-Richtung
+  // (heading=0 → Nase nach oben/N, heading=90 → Nase nach rechts/O).
   ctx.save();
   ctx.translate(cx, cy);
+  ctx.rotate((state.mySim?.heading_deg || 0) * Math.PI / 180);
   if (state.mySim && state.mySim.on_foot) {
-    // Walker: gelb-gruener Kreis mit Helper-Dot fuer Richtungsanzeige.
+    // Walker: gelb-gruener Kreis mit Helper-Dot in Blickrichtung.
     ctx.fillStyle = '#3fdc8a';
     ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    // Blickrichtungs-Dot (oben)
     ctx.fillStyle = '#0b1220';
     ctx.beginPath(); ctx.arc(0, -3, 1.5, 0, Math.PI * 2); ctx.fill();
   } else {
-    // Top-Down-Flugzeug (Cessna-artig): Rumpf, Hauptfluegel, Heckfluegel.
-    // Groesse ca. 22 px breit × 24 px hoch, klar erkennbar auf 340 px Radar.
     drawAircraftIcon(ctx, {
       fill:   '#6aa5ff',
       stroke: '#0b1220',
@@ -2471,17 +2502,27 @@ function renderRadar() {
 
   // Peers
   if (!state.mySim) return;
-  const myHead  = state.mySim.heading_deg || 0;
+  // Heading-Interpolation für smoothes Drehen — sonst springt der Radar
+  // in den 100-200 ms Sim-Tick-Schritten. _dispHead wandert pro rAF-Frame
+  // (60 fps) Richtung target, Sprünge >180° nehmen den kürzeren Weg.
+  const _targetHead = state.mySim.heading_deg || 0;
+  if (renderRadar._dispHead === undefined) renderRadar._dispHead = _targetHead;
+  let _dh = _targetHead - renderRadar._dispHead;
+  while (_dh >  180) _dh -= 360;
+  while (_dh < -180) _dh += 360;
+  renderRadar._dispHead = (renderRadar._dispHead + _dh * 0.20 + 360) % 360;
+  const myHead  = renderRadar._dispHead;
   const myRange = audioConfig.maxRangeM;
 
   for (const [id, p] of iterAllPeersDeduped()) {
     if (!p.sim) continue;
     const d = p.currentDistance ?? distMeters(state.mySim, p.sim);
 
-    // Bearing nach Heading-Up transformieren
+    // NORTH-UP: bearing ist die absolute Welt-Richtung. N-Label oben =
+    // realer Norden. Peer ostwaerts (bearing 90) liegt IMMER rechts auf
+    // dem Radar, egal welche Heading der Pilot gerade hat.
     const bear = bearingDeg(state.mySim, p.sim);
-    const rel  = ((bear - myHead) + 360) % 360;
-    const rad  = rel * Math.PI / 180;
+    const rad  = bear * Math.PI / 180;
 
     // Out-of-Range: kleines Punkt-Symbol direkt am Radar-Rand in Bearing-
     // Richtung. Gibt Hinweis auf Peers ausserhalb der gewaehlten Range
@@ -2542,7 +2583,8 @@ function renderRadar() {
     // hoert rundum). Heading-Up: relHead = peerHeading - meinHeading.
     const peerOnFoot = !!p.sim.on_foot;
     const peerHeading = +p.sim.heading_deg || 0;
-    const peerRelHead = peerHeading - myHead;
+    // NORTH-UP: Cone-Richtung = absolutes Peer-Heading. Heading 0 = nach Norden.
+    const peerRelHead = peerHeading;
 
     if (peerOnFoot) {
       // Walker: Cone in Peer-Heading-Richtung. Radius proportional zur
@@ -2871,16 +2913,17 @@ function renderMeshChip() {
 }
 
 function fmtDist(m) {
-  // Cockpit-Modus → Aviation-Konvention NM. Walker → m/km.
-  const asNm = state && state.mySim && !state.mySim.on_foot;
-  if (asNm) {
-    const nm = m / 1852;
-    if (nm < 1)  return `${nm.toFixed(2)} NM`;
-    if (nm < 10) return `${nm.toFixed(1)} NM`;
-    return `${Math.round(nm)} NM`;
+  // Walker (on_foot) → IMMER Meter/km. Cockpit → Aviation-NM.
+  // Default ohne mySim: Meter (sicherer Fallback fuer den Walker-Case).
+  const isWalker = !state.mySim || !!state.mySim.on_foot;
+  if (isWalker) {
+    if (m < 1000) return `${m.toFixed(0)} m`;
+    return `${(m / 1000).toFixed(2)} km`;
   }
-  if (m < 1000) return `${m.toFixed(0)} m`;
-  return `${(m / 1000).toFixed(2)} km`;
+  const nm = m / 1852;
+  if (nm < 1)  return `${nm.toFixed(2)} NM`;
+  if (nm < 10) return `${nm.toFixed(1)} NM`;
+  return `${Math.round(nm)} NM`;
 }
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g,
@@ -2944,7 +2987,12 @@ function renderPeers() {
     const cs = p.sim?.callsign || id.slice(0, 8);
     const d  = p.currentDistance != null ? fmtDist(p.currentDistance) : '—';
     const v  = Math.max(0, Math.min(1, p.currentVolume ?? 0));
-    const modeTag = p.sim?.on_foot ? `<span class="badge walker">${T('peer.badge.foot')}</span>` : '';
+    // Mode-Badge mit SVG-Icon: Walker → Person, Cockpit → Flieger.
+    // Visuelle Trennung Walker (gelb-orange) / Cockpit (blau) analog zur
+    // Audio-Welten-Trennung im Mesh.
+    const modeTag = p.sim?.on_foot
+      ? `<span class="badge walker"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-2px;margin-right:3px"><circle cx="12" cy="5" r="1"/><path d="m9 20 3-6 3 6"/><path d="m6 8 6 2 6-2"/><path d="M12 10v4"/></svg>${T('peer.badge.foot')}</span>`
+      : `<span class="badge cockpit"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="vertical-align:-2px;margin-right:3px"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg>Cockpit</span>`;
     const speakingCls = p.speaking && (p.currentVolume > 0.05 || p.isTestPeer) ? ' speaking' : '';
     return `
       <div class="peer-row ${cls}${speakingCls}">

@@ -38,6 +38,12 @@ static FsAVarId s_altAboveGnd  = FS_VAR_INVALID_ID;
 static FsAVarId s_cameraState  = FS_VAR_INVALID_ID;
 static FsAVarId s_engineType   = FS_VAR_INVALID_ID;
 static FsAVarId s_engCombust1  = FS_VAR_INVALID_ID;
+// Head-Pitch fuer Walker-Mode (rauf/runter schauen). Wirkt auf 3D-Audio-
+// Listener-Tilt: schaut der Spieler nach unten, klingt ein Peer der seitlich
+// neben ihm steht relativ "ueber" ihm. Im Cockpit-Mode sollte der Wert
+// idealerweise auch funktionieren (Headlook-Tracker), kostet uns aber nichts
+// das ueberall mitzulesen.
+static FsAVarId s_headPitch    = FS_VAR_INVALID_ID;
 
 static FsUnitId s_unitDegLat   = FS_INVALID_UNIT;
 static FsUnitId s_unitDegLon   = FS_INVALID_UNIT;
@@ -85,11 +91,12 @@ struct VoiceWalkerPos {
     double cam_state;
     double engine_type;       // 0=piston, 1=jet, 2=none, 3=heli, 4=unsupported, 5=turboprop
     double engines_running;   // 0=aus, 1=an (ENG COMBUSTION:1)
+    double head_pitch;        // Grad: positiv = nach oben, negativ = nach unten (Walker-Mode)
     double tick;
 };
 #pragma pack(pop)
-static_assert(sizeof(VoiceWalkerPos) == 19 * 8,
-              "VoiceWalkerPos must be exactly 152 bytes (19 doubles, packed)");
+static_assert(sizeof(VoiceWalkerPos) == 20 * 8,
+              "VoiceWalkerPos must be exactly 160 bytes (20 doubles, packed)");
 
 // ----------------------------------------------------------------------------
 struct TargetPos { double lat=0, lon=0, alt=0, hdg=0, agl=0; };
@@ -106,6 +113,15 @@ static void resolve_ids() {
     s_cameraState  = fsVarsGetAVarId("CAMERA STATE");
     s_engineType   = fsVarsGetAVarId("ENGINE TYPE");
     s_engCombust1  = fsVarsGetAVarId("GENERAL ENG COMBUSTION:1");
+    // Head-Pitch: MSFS 2024 expose-Name kann variieren. Wir versuchen die
+    // bekannten Kandidaten in Reihenfolge — erster der eine gueltige ID
+    // zurueckgibt, gewinnt. Wenn alle FS_VAR_INVALID_ID liefern, bleibt
+    // head_pitch auf 0 (kein Effekt im Audio, harmlos).
+    s_headPitch    = fsVarsGetAVarId("CAMERA HEADLOOK PITCH");
+    if (s_headPitch == FS_VAR_INVALID_ID)
+        s_headPitch = fsVarsGetAVarId("AVATAR PITCH");
+    if (s_headPitch == FS_VAR_INVALID_ID)
+        s_headPitch = fsVarsGetAVarId("CAMERA REQUEST ACTION");
     s_unitDegLat   = fsVarsGetUnitId("degrees latitude");
     s_unitDegLon   = fsVarsGetUnitId("degrees longitude");
     s_unitDegrees  = fsVarsGetUnitId("degrees");
@@ -186,11 +202,15 @@ static void fire_probe() {
     fsVarsAVarGet(s_cameraState, s_unitEnum, noParams, &camState,
                    FS_OBJECT_ID_USER_CURRENT);
 
-    double engType = 0.0, engRun = 0.0;
+    double engType = 0.0, engRun = 0.0, headPitch = 0.0;
     fsVarsAVarGet(s_engineType,  s_unitEnum, noParams, &engType,
                    FS_OBJECT_ID_USER_AIRCRAFT);
     fsVarsAVarGet(s_engCombust1, s_unitEnum, noParams, &engRun,
                    FS_OBJECT_ID_USER_AIRCRAFT);
+    if (s_headPitch != FS_VAR_INVALID_ID) {
+        fsVarsAVarGet(s_headPitch, s_unitDegrees, noParams, &headPitch,
+                       FS_OBJECT_ID_USER_CURRENT);
+    }
 
     VoiceWalkerPos p{};
     p.ac_lat  = ac.lat;  p.ac_lon  = ac.lon;  p.ac_alt  = ac.alt;
@@ -202,6 +222,7 @@ static void fire_probe() {
     p.cam_state = camState;
     p.engine_type     = engType;
     p.engines_running = engRun;
+    p.head_pitch      = headPitch;
     p.tick = (double)(++s_tickCount);
 
     HRESULT hr = SimConnect_SetClientData(

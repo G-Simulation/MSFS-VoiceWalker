@@ -407,7 +407,7 @@ _CD_DEF_ID    = 0x56574C4B
 _CD_NAME      = b"VoiceWalkerPos"
 _CD_REQ_ID    = 0x56574C4B
 _CD_PERIOD_ON_SET = 3
-_CD_STRUCT_SIZE   = 19 * 8  # 152 Bytes
+_CD_STRUCT_SIZE   = 20 * 8  # 160 Bytes (mit head_pitch)
 
 
 class _VoiceWalkerPos(ctypes.Structure):
@@ -426,6 +426,7 @@ class _VoiceWalkerPos(ctypes.Structure):
         ("cam_state",       ctypes.c_double),
         ("engine_type",     ctypes.c_double),
         ("engines_running", ctypes.c_double),
+        ("head_pitch",      ctypes.c_double),  # Grad: + nach oben, − nach unten
         ("tick",            ctypes.c_double),
     ]
 
@@ -646,6 +647,7 @@ class AvatarReader:
                             "cam":            payload.cam_state,
                             "engineType":     payload.engine_type,
                             "enginesRunning": payload.engines_running,
+                            "headPitch":      payload.head_pitch,
                             "tick":           payload.tick,
                         }
                         STATE.wasm_pos_at = time.time()
@@ -972,6 +974,9 @@ class SimReader:
             # Engine-Info aus WASM (0 wenn WASM nicht verfuegbar).
             "engine_type":     int(wp.get("engineType", 0)) if wasm_fresh else 0,
             "engines_running": bool(wp.get("enginesRunning", 0) >= 0.5) if wasm_fresh else False,
+            # Head-Pitch (Walker-Mode rauf/runter schauen, in Grad).
+            # 0.0 wenn WASM nicht aktiv oder SimVar nicht aufgeloest.
+            "head_pitch":      float(wp.get("headPitch", 0.0)) if wasm_fresh else 0.0,
             # "wasm"-Flag im UI bedeutet "wir haben getrennte Aircraft+Avatar-
             # Positionen" — WASM-Modul ODER Avatar-Reader erfuellen das.
             "wasm": bool(wasm_fresh or ar_fresh),

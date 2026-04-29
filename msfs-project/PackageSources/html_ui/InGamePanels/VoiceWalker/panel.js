@@ -72,18 +72,18 @@
   }
 
   function fmtRange(m) {
-    // Cockpit-Modus → Aviation-Konvention NM. Walker → m/km.
-    const asNm = state && state.mySim && !state.mySim.on_foot;
-    if (asNm) {
-      const nm = m / 1852;
-      if (nm < 1)  return nm.toFixed(2) + ' NM';
-      if (nm < 10) return nm.toFixed(1) + ' NM';
-      return Math.round(nm) + ' NM';
+    // Walker (on_foot ODER kein mySim) → IMMER m/km. Cockpit → NM.
+    const isWalker = !state.mySim || !!state.mySim.on_foot;
+    if (isWalker) {
+      if (m < 1000) return Math.round(m) + ' m';
+      const km = m / 1000;
+      if (Math.abs(km - Math.round(km)) < 0.01) return Math.round(km) + ' km';
+      return km.toFixed(2).replace(/\.?0+$/, '') + ' km';
     }
-    if (m < 1000) return Math.round(m) + ' m';
-    const km = m / 1000;
-    if (Math.abs(km - Math.round(km)) < 0.01) return Math.round(km) + ' km';
-    return km.toFixed(2).replace(/\.?0+$/, '') + ' km';
+    const nm = m / 1852;
+    if (nm < 1)  return nm.toFixed(2) + ' NM';
+    if (nm < 10) return nm.toFixed(1) + ' NM';
+    return Math.round(nm) + ' NM';
   }
 
   const state = {
@@ -197,6 +197,7 @@
     // koennten 2-Hz sim-Messages eine flackernde Klassen-Animation
     // ausloesen. Nur bei echtem Wechsel updaten.
     if (VW._lastConnKind === kind && VW._lastConnLabel === label) return;
+    const wentOffline = (kind === 'offline' && VW._lastConnKind !== 'offline');
     VW._lastConnKind = kind;
     VW._lastConnLabel = label;
     const dot = $('vw-conn');
@@ -207,6 +208,13 @@
       else if (kind === 'retry') dot.classList.add('warn');
     }
     if (lbl) lbl.textContent = label;
+    // Beim Wechsel auf 'offline' alles leeren — Radar + Peer-Liste sollen
+    // nichts mehr zeigen statt eingefrorene letzte-Position-Geister.
+    if (wentOffline) {
+      state.peers.clear();
+      state.mySim = null;
+      try { scheduleRender(); } catch (_) {}
+    }
   }
 
   // --- HiDPI-Canvas-Setup ----------------------------------------------
@@ -232,6 +240,16 @@
     scheduleRender();
   }
   VW.resizeTimer = setInterval(resizeCanvas, 500);
+  // Boot-Phase: in den ersten ~2 Sekunden alle 16 ms (60 fps) resizen,
+  // damit der Canvas dem Layout-Settle direkt folgt statt erst beim
+  // 500-ms-Tick auf "richtige Groesse" zu springen. Kostet quasi nichts
+  // (resizeCanvas hat eine equality-Guard und macht nur DOM-Writes bei
+  // echtem Size-Wechsel).
+  let _bootTicks = 0;
+  const _bootResize = setInterval(() => {
+    resizeCanvas();
+    if (++_bootTicks > 120) clearInterval(_bootResize);
+  }, 16);
 
   // --- Radar-Rendering -------------------------------------------------
   function renderRadar() {
@@ -284,8 +302,18 @@
     ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy);
     ctx.stroke();
 
-    const selfHeading = (state.mySim && Number.isFinite(+state.mySim.heading_deg))
+    // Heading-Interpolation: target = aktuellster Sim-Heading, displayed
+     // wandert per Frame zum target. Smoother bei 60 fps Continuous-rAF
+     // statt sprunghaft alle 100 ms.
+    const targetHead = (state.mySim && Number.isFinite(+state.mySim.heading_deg))
       ? +state.mySim.heading_deg : 0;
+    if (VW._dispHead === undefined) VW._dispHead = targetHead;
+    let _dh = targetHead - VW._dispHead;
+    while (_dh >  180) _dh -= 360;
+    while (_dh < -180) _dh += 360;
+    // 0.20 = ~20 % pro Frame → bei 60 fps aufholt in ~5 Frames (~83 ms)
+    VW._dispHead = (VW._dispHead + _dh * 0.20 + 360) % 360;
+    const selfHeading = VW._dispHead;
 
     // Compass-Marker N/O/S/W — Heading-Up: Labels rotieren mit Spieler-Heading.
     // Wenn Pilot nach Osten fliegt, ist "N" links, "O" oben, "S" rechts, "W" unten.
@@ -293,18 +321,14 @@
     ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     {
-      const labelR  = R + 14;
-      const headRad = toRad(selfHeading);
-      const dirs = [
-        { lbl: 'N', ang: 0 },
-        { lbl: 'O', ang: 90 },
-        { lbl: 'S', ang: 180 },
-        { lbl: 'W', ang: 270 },
-      ];
-      dirs.forEach(d => {
-        const rel = (d.ang * Math.PI / 180) - headRad - Math.PI / 2;
-        ctx.fillText(d.lbl, cx + Math.cos(rel) * labelR, cy + Math.sin(rel) * labelR);
-      });
+      // Compass-Marker fix wie in Web-UI: N oben, S unten, O rechts, W links.
+      // Auch wenn die Peer-Positionen heading-up rotieren — Labels bleiben
+      // statisch, identisch zur Web-UI-Konvention.
+      const labelR = R + 14;
+      ctx.fillText('N', cx,          cy - labelR);
+      ctx.fillText('S', cx,          cy + labelR);
+      ctx.fillText('O', cx + labelR, cy);
+      ctx.fillText('W', cx - labelR, cy);
     }
 
     // Audio-Bubble (Hoerbarkeits-Kreis) + Front-Cone. Cone zeigt in
@@ -409,10 +433,34 @@
         if (Math.abs(lat) < 0.0001 && Math.abs(lon) < 0.0001) return;
         const d = dist(state.mySim, p.sim);
         if (!Number.isFinite(d)) return;
-        // Heading-Up: bearing relativ zur Spieler-Heading (analog Web-UI).
+        // NORTH-UP: bearing absolut. Peer ostwaerts → immer rechts auf Radar.
         const brg     = bearing(state.mySim, p.sim);
-        const relBrg  = ((brg - selfHeading) + 360) % 360;
-        const theta   = toRad(relBrg) - Math.PI / 2;
+        const theta   = toRad(brg) - Math.PI / 2;
+
+        // Out-of-Range: kleiner farbiger Edge-Dot am Radar-Rand (analog Web-UI).
+        // Statt vollem Peer-Symbol (Cone/Aircraft/Callsign) zeichnen wir nur
+        // einen 3px Punkt in Hoer-Status-Farbe und springen zum naechsten Peer.
+        if (d > radarRangeM) {
+          const epx = cx + Math.cos(theta) * (R - 6);
+          const epy = cy + Math.sin(theta) * (R - 6);
+          const peerHearM_oor = +p.sim.hearRangeM || 1000;
+          const theyHearMe_oor = d < peerHearM_oor;
+          const iHearThem_oor  = d < state.myRange;
+          let edgeColor;
+          if (theyHearMe_oor && iHearThem_oor) edgeColor = '#3fdc8a';
+          else if (iHearThem_oor)              edgeColor = '#6aa5ff';
+          else if (theyHearMe_oor)             edgeColor = '#ffc857';
+          else                                 edgeColor = '#6b7896';
+          ctx.save();
+          ctx.fillStyle = edgeColor;
+          ctx.globalAlpha = 0.6;
+          ctx.beginPath();
+          ctx.arc(epx, epy, 3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          return;
+        }
+
         const scale   = Math.min(1, d / radarRangeM);
         const px      = cx + Math.cos(theta) * (R * scale);
         const py      = cy + Math.sin(theta) * (R * scale);
@@ -426,14 +474,27 @@
           ctx.beginPath(); ctx.arc(px, py, 12, 0, Math.PI * 2); ctx.fill();
         }
 
-        const color = p.speaking ? '#ffe066'
-                    : d <= state.myRange ? '#6aa5ff' : '#556582';
+        // 4-Farben-Hör-Status analog Web-UI (siehe Legende):
+        //   #3fdc8a grün   — beidseitig hoerbar
+        //   #6aa5ff blau   — nur du hoerst ihn
+        //   #ffc857 orange — nur er hoert dich
+        //   #6b7896 grau   — ausser Reichweite
+        // + Speaking-Override (#ffe066 gelb).
+        const peerHearM_st = +p.sim.hearRangeM || 1000;
+        const theyHearMe   = d < peerHearM_st;
+        const iHearThem    = d < state.myRange;
+        const color = p.speaking          ? '#ffe066'
+                    : theyHearMe && iHearThem ? '#3fdc8a'
+                    : iHearThem               ? '#6aa5ff'
+                    : theyHearMe              ? '#ffc857'
+                    :                           '#6b7896';
 
         // Walker = Punkt + Cone in Peer-Heading. Cockpit = Aircraft-Icon.
         // Heading-Up: Peer-Heading relativ zu Spieler-Heading (analog Web-UI).
         const peerOnFoot = !!p.sim.on_foot;
         const peerHeading = +p.sim.heading_deg || 0;
-        const peerRelHead = peerHeading - selfHeading;
+        // NORTH-UP: Cone-Richtung absolut; heading 90 → Peer-Cone zeigt nach Osten.
+        const peerRelHead = peerHeading;
 
         if (peerOnFoot) {
           const peerHearM   = +p.sim.hearRangeM || 10;
@@ -441,12 +502,13 @@
           const peerConeR   = Math.max(peerConeRaw, 10);
           const peerConeHalf = 60 * Math.PI / 180;
           const peerConeCtr  = (peerRelHead * Math.PI / 180) - Math.PI / 2;
-          // Radial-Gradient ab Peer-Position (analog Self-Cone in Z.311–319) —
-          // im Zentrum opak, zum Cone-Rand hin transparent. Farbe = Speaker/
-          // In-Range/Out-Of-Range.
+          // Radial-Gradient ab Peer-Position. Farbe matcht den 4-stufigen
+          // Hoer-Status-Color-Code (analog Web-UI / Legende).
           const coneRGB = p.speaking          ? '255,224,102'
-                       : color === '#6aa5ff'  ? '106,165,255'
-                       :                        '85,101,130';
+                       : color === '#3fdc8a' ? '63,220,138'
+                       : color === '#6aa5ff' ? '106,165,255'
+                       : color === '#ffc857' ? '255,200,87'
+                       :                       '107,120,150';
           const peerConeGrad = ctx.createRadialGradient(px, py, 0, px, py, peerConeR);
           peerConeGrad.addColorStop(0, 'rgba(' + coneRGB + ',0.45)');
           peerConeGrad.addColorStop(1, 'rgba(' + coneRGB + ',0.00)');
@@ -534,16 +596,17 @@
       if (rb) rb.classList.remove('visible');
     }
 
-    // Speaking-Banner: welcher Peer spricht gerade laut
+    // Speaking-Banner: ALLE aktuell sprechenden Peers als komma-separierte
+    // Liste — sonst sieht man nicht wenn 4 gleichzeitig reden.
     const sp = $('vw-speaking');
     const spn = $('vw-speaking-name');
-    let speakingPeer = null;
+    const speakingNames = [];
     state.peers.forEach(function (p) {
-      if (p.speaking && !speakingPeer) speakingPeer = p;
+      if (p.speaking) speakingNames.push(p.callsign || p.id.slice(0, 6));
     });
-    if (speakingPeer && sp && spn) {
+    if (speakingNames.length && sp && spn) {
       sp.classList.add('visible');
-      spn.textContent = speakingPeer.callsign || speakingPeer.id.slice(0, 6);
+      spn.textContent = speakingNames.join(', ');
     } else if (sp) {
       sp.classList.remove('visible');
     }
@@ -659,7 +722,10 @@
       peers.forEach(function (row) {
         const p = row.p;
         const name = esc(p.callsign || p.id.slice(0, 6));
-        const badge = p.on_foot ? ' <svg class="vw-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1"/><path d="m9 20 3-6 3 6"/><path d="m6 8 6 2 6-2"/><path d="M12 10v4"/></svg>' : '';
+        // Mode-Icon: Walker → Person (gelb-orange), Cockpit → Flieger (blau).
+        const badge = p.on_foot
+          ? ' <svg class="vw-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#ffc857" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1"/><path d="m9 20 3-6 3 6"/><path d="m6 8 6 2 6-2"/><path d="M12 10v4"/></svg>'
+          : ' <svg class="vw-icon" width="11" height="11" viewBox="0 0 24 24" fill="#6aa5ff" aria-hidden="true"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg>';
         const far = row.d > state.myRange;
         const cls = 'vw-peer' + (p.speaking ? ' speaking' : '') + (far ? ' far' : '');
         body += '<div class="' + cls + '">'
@@ -685,6 +751,16 @@
       try { render(); } catch (e) { E('render: ' + e.message); }
     });
   }
+
+  // Continuous rAF — rendert ~60 fps. Sonst wartet das Panel auf Events
+  // (sim @10 Hz, overlay @10 Hz) und Rotationen ruckeln in 100-ms-Stufen.
+  // Mit Heading-Interpolation (siehe smoothedHeading() in render()) wird
+  // die Drehung weichgezogen zwischen den Sim-Updates.
+  function _continuousLoop() {
+    try { render(); } catch (e) { /* render-Fehler werden in render() geloggt */ }
+    VW.contRafId = requestAnimationFrame(_continuousLoop);
+  }
+  VW.contRafId = requestAnimationFrame(_continuousLoop);
 
   // --- Walker-Auto-Zoom -------------------------------------------------
   // Walker-Reichweite ist nur 10 m. Beim Aussteigen (Cockpit→Walker) springt
