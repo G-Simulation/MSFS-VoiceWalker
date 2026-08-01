@@ -1243,6 +1243,20 @@ def read_lang_packs() -> dict:
     return packs
 
 
+def build_mailto_url(subject: str, body: str) -> str:
+    """Baut die mailto:-URL fuer die Raum-Einladung.
+
+    Beides wird vollstaendig prozent-kodiert. quote(safe="") laesst nur
+    [A-Za-z0-9_.~-] stehen und kodiert alles andere — auch ':', '/', '?', '&'
+    und '#'. Damit kann aus dem von der UI gelieferten Text weder ein anderes
+    Schema noch ein zusaetzlicher Query-Parameter werden, bevor die URL an
+    os.startfile und damit an die Windows-Shell geht.
+    """
+    from urllib.parse import quote
+    return ("mailto:?subject=" + quote(subject, safe="")
+            + "&body=" + quote(body, safe=""))
+
+
 async def http_handler(connection, request):
     """
     process_request-Hook fuer websockets v13+.
@@ -1368,6 +1382,53 @@ async def http_handler(connection, request):
             [("Content-Type", "text/plain"), ("Cache-Control", "no-store")],
             b"ok",
         )
+
+    # /api/invite — oeffnet den Standard-Mailclient mit einer vorbereiteten
+    # Einladung in den privaten Raum.
+    #
+    # Warum ueber das Backend und nicht per mailto:-Link in der UI: das
+    # App-Fenster ist ein WebView2 ohne Handler fuer fremde Schemata, eine
+    # Navigation auf mailto: passiert dort schlicht nicht. os.startfile
+    # reicht die URL an die Shell weiter, die den registrierten Mailclient
+    # oeffnet.
+    #
+    # Betreff und Text kommen aus der UI, damit sie in der eingestellten
+    # Sprache ankommen. Beide werden vollstaendig prozent-kodiert, bevor sie
+    # in die URL gehen — nach quote(safe="") bleiben nur [A-Za-z0-9_.~-] und
+    # Prozentzeichen uebrig, es kann also weder ein anderes Schema noch ein
+    # zweiter Parameter untergeschoben werden.
+    if path.split("?", 1)[0].rstrip("/") == "/api/invite":
+        from urllib.parse import urlparse, parse_qs
+        try:
+            qs = parse_qs(urlparse(path).query)
+            subject = (qs.get("subject") or [""])[0][:200]
+            body    = (qs.get("body") or [""])[0][:1500]
+            if not subject and not body:
+                return _make_response(
+                    HTTPStatus.BAD_REQUEST, [],
+                    b"subject oder body noetig", origin=_origin,
+                )
+            url = build_mailto_url(subject, body)
+            try:
+                os.startfile(url)             # nur Windows, App ist Windows-only
+            except AttributeError:
+                log.info("invite: os.startfile gibt es hier nicht")
+                return _make_response(
+                    HTTPStatus.NOT_IMPLEMENTED, [],
+                    b"kein Mailclient-Aufruf auf dieser Plattform",
+                    origin=_origin,
+                )
+            return _make_response(
+                HTTPStatus.OK,
+                [("Content-Type", "text/plain"), ("Cache-Control", "no-store")],
+                b"ok", origin=_origin,
+            )
+        except Exception as e:
+            log.warning("invite: Mailclient konnte nicht geoeffnet werden: %s", e)
+            return _make_response(
+                HTTPStatus.INTERNAL_SERVER_ERROR, [],
+                str(e).encode("utf-8"), origin=_origin,
+            )
 
     # /api/lang — nutzereigene Sprachpakete aus <data_dir>/lang/.
     # Kein DEBUG_BUILD-Gate und kein Origin-Gate: das sind reine UI-Texte,

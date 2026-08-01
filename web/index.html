@@ -703,7 +703,7 @@
           </p>
           <div class="flex gap-2 items-center">
             <input id="privateRoomPass" type="text" maxlength="80"
-                   placeholder="Passphrase (mind. 6 Zeichen)"
+                   placeholder="Raum-ID oder Passphrase"
                    data-i18n-attr="placeholder:mesh.private.placeholder"
                    class="flex-1 min-w-0 bg-[color:var(--color-bg-soft)] border border-[color:var(--color-border)]
                           rounded-lg px-3 py-1.5 text-xs font-mono
@@ -721,11 +721,65 @@
               Abbrechen
             </button>
           </div>
+          <!-- Erzeugt einen Raum mit Code aus fuenf ICAO-Woertern. Verhindert,
+               dass zwei Gruppen ueber eine naheliegende Passphrase ("test")
+               versehentlich im selben Raum landen. Der Name ist optional und
+               wird dem Code vorangestellt. -->
+          <div class="pt-1 border-t border-[color:var(--color-border)] space-y-2">
+            <div class="flex gap-2 items-center">
+              <input id="privateRoomName" type="text" maxlength="32"
+                     placeholder="Raumname (optional)"
+                     data-i18n-attr="placeholder:mesh.private.name_placeholder"
+                     class="flex-1 min-w-0 bg-[color:var(--color-bg-soft)] border border-[color:var(--color-border)]
+                            rounded-lg px-3 py-1.5 text-xs
+                            focus:outline-none focus:ring-2 focus:ring-[color:var(--color-ring)] transition">
+              <button id="privateRoomNewBtn" type="button"
+                      class="px-3 py-1.5 rounded-lg border border-[color:var(--color-border)]
+                             text-[color:var(--color-fg)] text-xs font-semibold
+                             hover:bg-white/5 transition whitespace-nowrap"
+                      data-i18n="mesh.private.new">
+                Raum erstellen
+              </button>
+            </div>
+            <p class="text-[10px] text-[color:var(--color-muted)] leading-relaxed"
+               data-i18n="mesh.private.new_help">
+              Der Code besteht aus fünf Wörtern des Funkalphabets und lässt sich
+              so am Funk durchgeben.
+            </p>
+          </div>
         </div>
 
-        <!-- Hidden: bleibt fuers bestehende app.js renderPrivateRoomUi() kompatibel.
-             Wird nicht mehr angezeigt, aber DOM-Ref darf nicht null sein. -->
-        <p id="privateRoomJoined" class="hidden"></p>
+        <!-- Aktiver Raum: ID zum Weitergeben, mit Kopieren und Einladung. -->
+        <div id="privateRoomJoined" class="hidden mb-3 space-y-2">
+          <p class="text-[10px] text-[color:var(--color-muted)] leading-relaxed"
+             data-i18n="mesh.private.share">
+            Diese ID an deine Mitflieger weitergeben — wer sie eingibt, landet
+            in genau diesem Raum.
+          </p>
+          <div class="flex gap-2 items-center">
+            <code id="privateRoomId"
+                  class="flex-1 min-w-0 truncate bg-[color:var(--color-bg-soft)]
+                         border border-[color:var(--color-border)] rounded-lg
+                         px-3 py-1.5 text-xs font-mono select-all">—</code>
+            <button id="privateRoomCopyBtn" type="button"
+                    class="px-3 py-1.5 rounded-lg bg-[color:var(--color-accent)] text-[#0b1220]
+                           font-semibold text-xs hover:bg-blue-300 transition whitespace-nowrap"
+                    data-i18n="mesh.private.copy">
+              Kopieren
+            </button>
+            <button id="privateRoomInviteBtn" type="button"
+                    class="px-3 py-1.5 rounded-lg border border-[color:var(--color-border)]
+                           text-xs font-semibold hover:bg-white/5 transition whitespace-nowrap"
+                    data-i18n="mesh.private.invite">
+              Einladen
+            </button>
+          </div>
+          <p id="privateRoomHint"
+             class="hidden text-[10px] text-[color:var(--color-muted)]"></p>
+        </div>
+
+        <!-- Hidden: bleibt fuers bestehende app.js kompatibel (Leave laeuft
+             ueber den Action-Button im Pill). -->
         <button id="privateRoomLeaveBtn" type="button" class="hidden"></button>
 
         <!-- Filter: weit entfernte Peers einblenden -->

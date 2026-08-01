@@ -933,6 +933,163 @@ function restoreRangeDefaults() {
 function isEventRangesActive() { return _eventRangesActive; }
 let _eventRangesActive = false;
 
+// ---------------------------------------------------------------------------
+// Raum-IDs
+//
+// Bis hierher war der Raumname eine frei gewaehlte Passphrase. Das ist bequem,
+// aber zwei Gruppen, die unabhaengig voneinander "test" oder "fly-in" waehlen,
+// landen im selben Mesh und hoeren sich gegenseitig. Der erzeugte Zufallsteil
+// schliesst das aus: 12 Zeichen aus einem 30er-Alphabet sind rund 59 Bit.
+//
+// Aufbau:  [name.]wort-wort-wort-wort-wort
+//
+//   ohne Namen:  alpha-bravo-charlie-delta-echo
+//   mit Namen:   fly-in-frankfurt.papa-tango-zulu-mike-oscar
+//
+// Der Code besteht aus fuenf Woertern des ICAO-Alphabets. Das ist genau das,
+// was Piloten ohnehin buchstabieren — er laesst sich ueber Funk, Discord oder
+// Telefon durchgeben, ohne dass jemand nach "war das ein I oder ein L?" fragt.
+//
+// Der Name ist optional und wird vorangestellt, statt getrennt uebertragen zu
+// werden. Damit bleibt es ein einziger Wert zum Weitergeben, jeder Teilnehmer
+// sieht denselben Namen, und es braucht keine zusaetzliche Mesh-Nachricht.
+// Wer nur den Code durchgeben will, legt den Raum ohne Namen an.
+//
+// Ein Lizenzschluessel sieht mit ABCDE-12345-FGHIJ-67890 voellig anders aus,
+// niemand tippt also das eine ins Feld fuer das andere.
+//
+// Zur Groessenordnung: fuenf aus 26 Woertern sind 26^5 = 11,9 Millionen
+// Kombinationen, rund 23,5 Bit. Fuer zwei zufaellig gleiche Codes braucht es
+// mehrere tausend gleichzeitig bestehende Raeume — und wenn ein Name vergeben
+// ist, muesste der auch noch uebereinstimmen. Frei gewaehlte Passphrasen wie
+// "test" kollidieren um Groessenordnungen leichter, genau darum geht es hier.
+//
+// Selbst gewaehlte Passphrasen bleiben moeglich, damit bestehende Raeume und
+// Event-Links weiter funktionieren.
+// ---------------------------------------------------------------------------
+const ICAO_WORDS = [
+  'alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel',
+  'india', 'juliett', 'kilo', 'lima', 'mike', 'november', 'oscar', 'papa',
+  'quebec', 'romeo', 'sierra', 'tango', 'uniform', 'victor', 'whiskey',
+  'xray', 'yankee', 'zulu',
+];
+const ROOM_CODE_WORDS = 5;
+
+function randomIndex(max) {
+  // Rejection Sampling: 256 ist kein Vielfaches von 30, ein blankes Modulo
+  // wuerde die ersten Zeichen des Alphabets bevorzugen.
+  const grenze = 256 - (256 % max);
+  const buf = new Uint8Array(1);
+  let v;
+  do { crypto.getRandomValues(buf); v = buf[0]; } while (v >= grenze);
+  return v % max;
+}
+
+/**
+ * Macht aus einer freien Eingabe einen Namensteil, der sich unfallfrei
+ * vorlesen, tippen und in eine mailto-URL packen laesst.
+ * Umlaute werden ausgeschrieben, bevor der Rest zerlegt wird — sonst wuerde
+ * aus "Köln" ein "kln".
+ */
+function slugifyRoomName(name) {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')   // restliche Akzente ablegen
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 24)
+    .replace(/-+$/, '');
+}
+
+function generateRoomCode() {
+  const w = [];
+  for (let i = 0; i < ROOM_CODE_WORDS; i++) w.push(ICAO_WORDS[randomIndex(ICAO_WORDS.length)]);
+  return w.join('-');
+}
+
+function generateRoomId(name) {
+  const code = generateRoomCode();
+  const slug = slugifyRoomName(name);
+  return slug ? `${slug}.${code}` : code;
+}
+
+/** Der Name, wenn einer vergeben wurde — sonst der Code selbst. */
+function roomDisplayName(id) {
+  const s = String(id || '');
+  const i = s.lastIndexOf('.');
+  if (i > 0) return s.slice(0, i);
+  return s.length > 32 ? s.slice(0, 30) + '…' : s;
+}
+
+async function copyToClipboard(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* faellt unten auf execCommand zurueck */ }
+  // Fallback: WebView2 und Coherent GT liefern die Clipboard-API nicht
+  // durchgaengig aus. Das unsichtbare Textarea funktioniert dort noch.
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Kurze Rueckmeldung unter der Raum-ID, verschwindet von selbst. */
+let _roomHintTimer = null;
+function showRoomHint(key) {
+  const el = document.getElementById('privateRoomHint');
+  if (!el) return;
+  el.textContent = window.i18n ? window.i18n.t(key) : key;
+  el.classList.remove('hidden');
+  clearTimeout(_roomHintTimer);
+  _roomHintTimer = setTimeout(() => el.classList.add('hidden'), 4000);
+}
+
+/**
+ * Oeffnet den Standard-Mailclient mit einer vorbereiteten Einladung.
+ *
+ * Der Umweg ueber das Backend ist noetig, weil das App-Fenster ein WebView2
+ * ohne Handler fuer externe Schemata ist — eine Navigation auf mailto: laeuft
+ * dort ins Leere. Im normalen Browser greift der Fallback darunter.
+ */
+async function inviteToPrivateRoom() {
+  if (!state.privateRoom) return;
+  const id = state.privateRoom.passphrase;
+  const T  = (k) => (window.i18n ? window.i18n.t(k, { id }) : k);
+  const subject = T('mesh.private.mail_subject');
+  const body    = T('mesh.private.mail_body');
+
+  try {
+    const url = `/api/invite?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    const res = await fetch(url);
+    if (res.ok) return;
+    console.warn('[private-room] /api/invite:', res.status);
+  } catch (e) {
+    console.warn('[private-room] /api/invite nicht erreichbar:', e);
+  }
+  // Fallback fuer den Fall, dass die UI im echten Browser laeuft.
+  try {
+    window.location.href =
+      `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  } catch {
+    showRoomHint('mesh.private.mail_failed');
+  }
+}
+
 async function joinPrivateRoom(passphrase, { forceAllow = false } = {}) {
   const pass = (passphrase || '').trim();
   if (!pass) return;
@@ -993,28 +1150,37 @@ function renderPrivateRoomUi() {
   const actionBtn  = document.getElementById('peersModeAction');
   const form       = document.getElementById('privateRoomForm');
   const passInput  = document.getElementById('privateRoomPass');
+  const joinedBox  = document.getElementById('privateRoomJoined');
+  const idEl       = document.getElementById('privateRoomId');
+  // Die Beschriftungen kamen hier frueher hartkodiert auf Deutsch — bei
+  // Sprache Englisch/Niederlaendisch sprang das Pill nach jedem Raumwechsel
+  // zurueck auf Deutsch, weil applyDOM() nur data-i18n-Elemente anfasst.
+  const T = (k, p) => (window.i18n ? window.i18n.t(k, p) : k);
 
   if (state.privateRoom) {
+    const id = state.privateRoom.passphrase;
     if (pillIcon)  pillIcon.textContent  = '🔒';
-    if (pillLabel) pillLabel.textContent =
-      `Raum: ${state.privateRoom.passphrase.length > 24
-        ? state.privateRoom.passphrase.slice(0, 22) + '…'
-        : state.privateRoom.passphrase}`;
+    if (pillLabel) pillLabel.textContent = T('mesh.private.room', {
+      id: roomDisplayName(id),
+    });
     if (actionBtn) {
-      actionBtn.textContent = 'Verlassen';
+      actionBtn.textContent = T('mesh.private.leave');
       actionBtn.dataset.mode = 'leave';
       actionBtn.style.color = 'var(--color-bad)';
     }
     if (form) form.classList.add('hidden');
     if (passInput) passInput.value = '';
+    if (idEl) idEl.textContent = id;
+    if (joinedBox) joinedBox.classList.remove('hidden');
   } else {
     if (pillIcon)  pillIcon.textContent  = '📡';
-    if (pillLabel) pillLabel.textContent = 'Öffentliches Mesh';
+    if (pillLabel) pillLabel.textContent = T('mesh.public');
     if (actionBtn) {
-      actionBtn.textContent = 'Privater Raum…';
+      actionBtn.textContent = T('mesh.private.btn');
       actionBtn.dataset.mode = 'open-form';
       actionBtn.style.color = '';
     }
+    if (joinedBox) joinedBox.classList.add('hidden');
     // Formular-Sichtbarkeit wird nicht hier umgeschaltet — das macht der Handler
     // beim Klick. Hier nur sicherstellen, dass das Input leer ist wenn wir
     // frisch rauskommen aus einem Room.
@@ -1856,6 +2022,31 @@ document.addEventListener('DOMContentLoaded', () => {
     if (form) form.classList.add('hidden');
     if (pass) pass.value = '';
   });
+
+  // Neuen Raum erzeugen: optionaler Name plus Zufallsteil, dann direkt rein.
+  const privNewBtn  = document.getElementById('privateRoomNewBtn');
+  const privNameEl  = document.getElementById('privateRoomName');
+  const neuenRaum = () => {
+    const id = generateRoomId(privNameEl?.value);
+    const passEl = document.getElementById('privateRoomPass');
+    if (passEl) passEl.value = id;
+    if (privNameEl) privNameEl.value = '';
+    joinPrivateRoom(id);
+  };
+  privNewBtn?.addEventListener('click', neuenRaum);
+  privNameEl?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') neuenRaum();
+  });
+
+  const privCopyBtn = document.getElementById('privateRoomCopyBtn');
+  privCopyBtn?.addEventListener('click', async () => {
+    if (!state.privateRoom) return;
+    const ok = await copyToClipboard(state.privateRoom.passphrase);
+    showRoomHint(ok ? 'mesh.private.copied' : 'mesh.private.copy_failed');
+  });
+
+  const privInviteBtn = document.getElementById('privateRoomInviteBtn');
+  privInviteBtn?.addEventListener('click', inviteToPrivateRoom);
 
   // Legacy-Leave-Button (im DOM noch als hidden Element — fuer Rueckwaertskompat)
   const privLeaveBtn = document.getElementById('privateRoomLeaveBtn');

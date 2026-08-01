@@ -68,14 +68,24 @@ Technik [README.md](README.md).
 
 ## Privaten Raum ohne WordPress-Plugin nutzen
 
-Der einfachste Weg: Passphrase auswählen, Teilnehmern mitteilen, alle
-joinen.
+Der einfachste Weg: Raum eröffnen, ID an die Teilnehmer geben, alle treten
+bei.
 
-1. **Du als Veranstalter**: Web-UI → **Pro & Events**-Tab → "Privater Raum"
-   → Passphrase eingeben (z.B. `vfr-fly-in-frankfurt-2026`) → **Joinen**.
-2. **Teilnehmer**: Selber Tab, **selbe Passphrase**, Joinen.
-3. Alle landen im selben Mesh, unabhängig von ihrer Position. Audio und
+1. **Du als Veranstalter**: Web-UI → Bereich **Piloten** → "Privater Raum…"
+   → Raumnamen eintragen (optional) → **"Raum erstellen"**. Du bekommst einen
+   Code aus fünf Wörtern des Funkalphabets und bist sofort drin:
+   `fly-in-frankfurt.echo-xray-hotel-zulu-victor`.
+2. **Code verteilen**: **Kopieren** legt ihn in die Zwischenablage, **Einladen**
+   öffnet dein Mailprogramm mit einer fertigen Einladung samt Anleitung. Am
+   Funk oder im Voice-Channel lässt er sich direkt vorlesen.
+3. **Teilnehmer**: gleiche Stelle, Code eingeben, **Betreten**.
+4. Alle landen im selben Mesh, unabhängig von ihrer Position. Audio und
    Position werden nur innerhalb des Raums geteilt.
+
+Eine selbst gewählte Passphrase (etwa `vfr-fly-in-frankfurt-2026`) geht
+weiterhin, wenn du etwas Merkbares ankündigen willst. Bedenke nur: eine
+naheliegende Zeichenfolge kann eine fremde Gruppe zufällig genauso wählen —
+dann sitzt ihr gemeinsam im Raum. Der gewürfelte Code schließt das aus.
 
 > *📷 Bild-Vorschlag:* **Raum-Beitritt-Detail** — Web-UI Pro-Tab mit
 > hervorgehobener Passphrase-Eingabe und "Joinen"-Button. Veranstalter

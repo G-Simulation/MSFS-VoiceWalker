@@ -269,14 +269,41 @@ falls der Server mal weg ist, läuft Pro für 7 Tage weiter.
 ## Private Rooms beitreten
 
 Private Rooms sind das Pro-Feature für Fly-Ins, Trainings, geschlossene
-Gruppen. Statt Geo-Mesh wird ein **passphrase-basierter Raum** verwendet —
-alle mit derselben Passphrase landen weltweit im selben Mesh.
+Gruppen. Statt Geo-Mesh wird ein **Raum mit festem Code** verwendet — alle mit
+demselben Code landen weltweit im selben Mesh, egal wo sie fliegen.
+
+**Raum eröffnen:**
+
+1. Web-UI → Bereich **Piloten** → "Privater Raum…"
+2. Optional einen **Raumnamen** eintragen
+3. **"Raum erstellen"** klicken
+
+Du bekommst einen Code aus fünf Wörtern des Funkalphabets und bist sofort
+drin:
+
+```
+ohne Namen   hotel-quebec-hotel-papa-sierra
+mit Namen    fly-in-frankfurt.echo-xray-hotel-zulu-victor
+```
+
+Der Code lässt sich am Funk oder im Discord durchgeben, ohne dass jemand
+nachfragen muss, ob das ein I oder ein L war. Er wird zufällig gewürfelt —
+zwei Gruppen landen also nicht versehentlich im selben Raum, was bei frei
+gewählten Passphrasen wie „test" durchaus passiert.
+
+**Code weitergeben:** Darunter stehen zwei Schaltflächen. **Kopieren** legt
+ihn in die Zwischenablage, **Einladen** öffnet dein Mailprogramm mit einer
+fertigen Einladung samt Anleitung — Empfänger eintragen, abschicken.
 
 **Beitreten:**
 
-1. Web-UI → **Pro & Events**-Tab → "Privater Raum"-Sektion
-2. **Passphrase** vom Veranstalter eingeben
-3. **Joinen** klicken — du bist drin
+1. Web-UI → Bereich **Piloten** → "Privater Raum…"
+2. **Raum-Code** eingeben, den du bekommen hast
+3. **Betreten** klicken — du bist drin
+
+Eine selbst gewählte Passphrase funktioniert weiterhin, etwa wenn ein
+Veranstalter eine gemerkte Zeichenfolge vorgibt. Sie ist nur eben nicht
+kollisionssicher.
 
 > *📷 Bild-Vorschlag:* **Privater-Raum-Beitritt** — Pro-Tab mit
 > Passphrase-Eingabefeld + "Joinen"-Button, danach Room-Badge mit
