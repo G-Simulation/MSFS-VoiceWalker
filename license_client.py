@@ -40,15 +40,60 @@ try:
 except Exception:
     _DEBUG_BUILD = False
 
-CACHE_FILENAME   = "license_cache.json"
-GRACE_SECONDS    = 7 * 24 * 3600       # offline grace
-DEV_PRO_SECONDS  = 30 * 24 * 3600      # dev keys last 30 days each validate
-HTTP_TIMEOUT     = 6.0
+CACHE_FILENAME    = "license_cache.json"
+MACHINE_ID_FILE   = ".machine_id"          # neben license_cache.json, persistiert
+GRACE_SECONDS     = 7 * 24 * 3600          # offline grace
+DEV_PRO_SECONDS   = 30 * 24 * 3600         # dev keys last 30 days each validate
+HTTP_TIMEOUT      = 6.0
 
-# Our own plugin endpoint — no credentials needed. The server-side plugin runs
-# in-process with LMFWC and looks up the license key directly via repository.
-# Override moeglich via echter env-var oder .secrets/license.env (Dev).
-DEFAULT_API_URL = "https://www.gsimulations.de/wp-json/gsim-events/v1/license/validate"
+# Our own plugin endpoints — keine Credentials noetig.
+# /activate setzt timesActivatedMax echt durch (Device-Tracking), /validate
+# bleibt als Fallback fuer Server-Versionen ohne /activate (Migrations-Phase).
+DEFAULT_ACTIVATE_URL = "https://www.gsimulations.de/wp-json/gsim-events/v1/license/activate"
+DEFAULT_VALIDATE_URL = "https://www.gsimulations.de/wp-json/gsim-events/v1/license/validate"
+# Backwards-compat-Alias — alter Code nutzte DEFAULT_API_URL.
+DEFAULT_API_URL      = DEFAULT_VALIDATE_URL
+
+
+def _machine_id_path(config_dir: pathlib.Path) -> pathlib.Path:
+    return config_dir / MACHINE_ID_FILE
+
+
+def _load_or_create_machine_id(config_dir: pathlib.Path) -> str:
+    """Stable per-installation device identifier. Wird einmal beim ersten
+    Start generiert und in config_dir/.machine_id persistiert. Format:
+    UUID4 ohne Bindestriche (32 hex chars) → matched die Server-Validierung
+    (8-64 chars, [A-Za-z0-9._-])."""
+    p = _machine_id_path(config_dir)
+    try:
+        if p.is_file():
+            mid = p.read_text(encoding="utf-8").strip()
+            # Sanity: passt zur Server-Regex? Sonst neu erzeugen.
+            if 8 <= len(mid) <= 64 and all(
+                c.isalnum() or c in "._-" for c in mid
+            ):
+                return mid
+    except Exception as e:
+        log.warning("machine_id read failed: %s", e)
+    # Neu erzeugen
+    import uuid
+    mid = uuid.uuid4().hex
+    try:
+        config_dir.mkdir(parents=True, exist_ok=True)
+        p.write_text(mid, encoding="utf-8")
+    except Exception as e:
+        log.warning("machine_id save failed: %s", e)
+    return mid
+
+
+def _machine_label() -> str:
+    """User-friendly Geraete-Label fuer ERPNext-UI ("Aktivierte Geraete").
+    Hostname ist gut genug, fallback auf 'PC'. Truncated auf 64 Zeichen."""
+    try:
+        import socket
+        return (socket.gethostname() or "PC")[:64]
+    except Exception:
+        return "PC"
 
 
 def _cache_path(config_dir: pathlib.Path) -> pathlib.Path:
@@ -99,32 +144,31 @@ def _dev_validate(key: str) -> dict:
     }
 
 
-def _gsim_validate(key: str, api_url: str) -> dict:
-    """Our own gsim-events plugin endpoint. POST JSON body {"key": "..."},
-    response matches LMFWC v2 shape (timesActivated / timesActivatedMax /
-    remainingActivations / expires_at) plus a top-level ``is_pro`` flag.
-
-    Reason-Codes: ok, not_found, inactive, expired, limit_reached."""
-    now = time.time()
-    payload = json.dumps({"key": key}).encode("utf-8")
-    req = urllib.request.Request(api_url, data=payload, method="POST")
+def _post_json(url: str, body: dict) -> tuple[int, dict | None]:
+    """Helper: POST JSON, return (http_status, parsed_json_or_None).
+    Raises on connection errors (caller faengt fuer cache-fallback)."""
+    payload = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, method="POST")
     req.add_header("Content-Type", "application/json")
     req.add_header("Accept", "application/json")
     try:
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
-            body = resp.read().decode("utf-8", errors="ignore")
-            data = json.loads(body)
+            txt = resp.read().decode("utf-8", errors="ignore")
+            return resp.getcode(), (json.loads(txt) if txt else None)
     except urllib.error.HTTPError as e:
-        return {
-            "is_pro": False, "key": key, "reason": f"http {e.code}",
-            "mode": "backend", "validated_at": now, "expires_at": 0,
-            "license_expires": 0.0,
-        }
-    except Exception:
-        raise  # let caller fall back to cache
+        # 4xx/5xx — Body kann trotzdem JSON sein (z.B. "limit_reached").
+        try:
+            txt = e.read().decode("utf-8", errors="ignore")
+            return e.code, (json.loads(txt) if txt else None)
+        except Exception:
+            return e.code, None
 
-    is_pro = bool(data.get("is_pro"))
-    reason = str(data.get("reason") or ("ok" if is_pro else "invalid"))
+
+def _build_result(data: dict, key: str, mode: str) -> dict:
+    """Server-Response in unser Cache-Format konvertieren."""
+    now = time.time()
+    is_pro  = bool(data.get("is_pro"))
+    reason  = str(data.get("reason") or ("ok" if is_pro else "invalid"))
     act_max = int(data.get("timesActivatedMax") or 0)
     act_now = int(data.get("timesActivated") or 0)
     exp_raw = data.get("expires_at")
@@ -139,11 +183,11 @@ def _gsim_validate(key: str, api_url: str) -> dict:
     cache_until = now + GRACE_SECONDS
     if license_expires:
         cache_until = min(cache_until, license_expires)
-    return {
+    out = {
         "is_pro":             is_pro,
         "key":                key,
         "reason":             reason,
-        "mode":               "backend",
+        "mode":               mode,
         "validated_at":       now,
         # expires_at = Cache-Gueltigkeit fuer Offline-Grace. UI zeigt dagegen
         # license_expires an (0 = lifetime).
@@ -152,6 +196,59 @@ def _gsim_validate(key: str, api_url: str) -> dict:
         "timesActivated":     act_now,
         "timesActivatedMax":  act_max,
     }
+    # Bei limit_reached liefert der Server eine Liste der registrierten
+    # Devices — UI rendert "Du hast den Key auf folgenden Geraeten aktiviert".
+    if isinstance(data.get("devices"), list):
+        out["devices"] = data["devices"]
+    return out
+
+
+def _gsim_activate(key: str, machine_id: str, machine_label: str,
+                    activate_url: str, validate_url: str) -> dict:
+    """Bevorzugt /activate (durchsetzbares Device-Tracking).
+    Fallback auf /validate wenn der Server /activate noch nicht hat (404)
+    oder mit Method-Not-Allowed antwortet — Migrations-Phase, bis das
+    gsim-events Plugin auf gsimulations.de auf die neue Version reaktiviert
+    ist. Ist /validate auch tot oder Connection-Fehler: Exception → caller
+    faellt auf Cache zurueck."""
+    body = {
+        "key":           key,
+        "machine_id":    machine_id,
+        "machine_label": machine_label,
+    }
+    code, data = _post_json(activate_url, body)
+    # 404 / 405 / 501 → Endpoint existiert noch nicht, Legacy-Pfad versuchen.
+    if code in (404, 405, 501):
+        log.info("license: /activate nicht verfuegbar (http %d) — nutze /validate-Fallback", code)
+        code2, data2 = _post_json(validate_url, {"key": key})
+        if data2 is None:
+            return {
+                "is_pro": False, "key": key,
+                "reason": f"http {code2} (validate fallback)",
+                "mode": "backend", "validated_at": time.time(),
+                "expires_at": 0, "license_expires": 0.0,
+            }
+        return _build_result(data2, key, mode="backend-legacy")
+
+    if data is None:
+        return {
+            "is_pro": False, "key": key, "reason": f"http {code}",
+            "mode": "backend", "validated_at": time.time(),
+            "expires_at": 0, "license_expires": 0.0,
+        }
+    return _build_result(data, key, mode="backend")
+
+
+# Backwards-compat: alter Name bleibt callable falls jemand extern import'd.
+def _gsim_validate(key: str, api_url: str) -> dict:
+    code, data = _post_json(api_url, {"key": key})
+    if data is None:
+        return {
+            "is_pro": False, "key": key, "reason": f"http {code}",
+            "mode": "backend", "validated_at": time.time(),
+            "expires_at": 0, "license_expires": 0.0,
+        }
+    return _build_result(data, key, mode="backend")
 
 
 def _purge_legacy_lmfwc_url() -> None:
@@ -195,17 +292,23 @@ def _reload_env_from_secrets(config_dir: pathlib.Path) -> None:
 
 
 def validate(key: str, config_dir: pathlib.Path) -> dict:
-    """Validate a license key. Returns dict with at least:
-       is_pro, key, reason, mode, validated_at, expires_at."""
+    """Validate (eigentlich activate) a license key.
+    Returns dict with at least: is_pro, key, reason, mode, validated_at,
+    expires_at. Bei limit_reached zusaetzlich 'devices' (Liste der bereits
+    registrierten Geraete)."""
     now = time.time()
     if _DEBUG_BUILD:
         # Nur in Dev-Builds: env-Datei nachladen + LICENSE_API_URL-Override
-        # erlaubt. Im Public-Build laeuft alles strikt gegen DEFAULT_API_URL.
+        # erlaubt. Im Public-Build laeuft alles strikt gegen die Defaults.
         _reload_env_from_secrets(config_dir)
         _purge_legacy_lmfwc_url()
-        api_url = os.environ.get("LICENSE_API_URL", "").strip() or DEFAULT_API_URL
+        # Override-Konvention: LICENSE_API_URL setzt /validate, neu
+        # LICENSE_ACTIVATE_URL setzt /activate. Beide unabhaengig overridable.
+        validate_url = os.environ.get("LICENSE_API_URL", "").strip() or DEFAULT_VALIDATE_URL
+        activate_url = os.environ.get("LICENSE_ACTIVATE_URL", "").strip() or DEFAULT_ACTIVATE_URL
     else:
-        api_url = DEFAULT_API_URL
+        validate_url = DEFAULT_VALIDATE_URL
+        activate_url = DEFAULT_ACTIVATE_URL
 
     # Dev-keys (DEV-PRO-* / DEV-FREE) umgehen den Backend-Call — nur in Dev-
     # Builds! Im Public-Build wuerde sich sonst jeder mit Source-Zugang einen
@@ -224,32 +327,55 @@ def validate(key: str, config_dir: pathlib.Path) -> dict:
         _save_cache(config_dir, result)
         return result
 
-    if api_url:
-        try:
-            result = _gsim_validate(key, api_url)
-            _save_cache(config_dir, result)
-            return result
-        except Exception as e:
-            log.warning("license backend unreachable (%s); trying cache", e)
-            cached = load_cache(config_dir)
-            if cached and cached.get("key") == key and cached.get("expires_at", 0) > now:
-                cached = {**cached, "reason": f"offline grace ({cached.get('reason', '?')})"}
-                return cached
-            return {
-                "is_pro": False, "key": key,
-                "reason": f"backend unreachable: {e}",
-                "mode": "backend", "validated_at": now, "expires_at": 0,
-            }
+    machine_id    = _load_or_create_machine_id(config_dir)
+    machine_label = _machine_label()
 
-    # No backend configured (kann nur im Debug-Build passieren, weil Public
-    # immer DEFAULT_API_URL hat) → dev-mode fallback. Im Public-Build koennen
-    # wir hier nicht ankommen, aber falls doch: hart als not-pro ablehnen.
-    if _DEBUG_BUILD:
-        result = _dev_validate(key)
-    else:
-        result = {
-            "is_pro": False, "key": key, "reason": "no api configured",
-            "mode": "none", "validated_at": now, "expires_at": 0,
+    try:
+        result = _gsim_activate(key, machine_id, machine_label,
+                                activate_url, validate_url)
+        # machine_id im Cache mit ablegen — falls wir spaeter mal
+        # /deactivate beim Uninstall callen wollen.
+        result["machine_id"] = machine_id
+        _save_cache(config_dir, result)
+        return result
+    except Exception as e:
+        log.warning("license backend unreachable (%s); trying cache", e)
+        cached = load_cache(config_dir)
+        if cached and cached.get("key") == key and cached.get("expires_at", 0) > now:
+            cached = {**cached, "reason": f"offline grace ({cached.get('reason', '?')})"}
+            return cached
+        return {
+            "is_pro": False, "key": key,
+            "reason": f"backend unreachable: {e}",
+            "mode": "backend", "validated_at": now, "expires_at": 0,
         }
-    _save_cache(config_dir, result)
-    return result
+
+
+def deactivate(key: str, config_dir: pathlib.Path) -> dict:
+    """Slot freigeben — best-effort. Wird vom MSI-Uninstaller (oder manuell)
+    aufgerufen damit der User auf einem neuen PC reinstallieren kann ohne im
+    timesActivatedMax-Cap zu landen.
+
+    Returns: {success: bool, reason: str}. Best-effort — Fehler werden geloggt
+    aber nicht propagiert; ein Uninstall darf am Backend-Outage nicht
+    scheitern."""
+    if not (key or "").strip():
+        return {"success": False, "reason": "no key"}
+    machine_id = _load_or_create_machine_id(config_dir)
+    if _DEBUG_BUILD:
+        _reload_env_from_secrets(config_dir)
+        url = os.environ.get("LICENSE_DEACTIVATE_URL", "").strip() or \
+              DEFAULT_ACTIVATE_URL.rsplit("/", 1)[0] + "/deactivate"
+    else:
+        url = DEFAULT_ACTIVATE_URL.rsplit("/", 1)[0] + "/deactivate"
+    try:
+        code, data = _post_json(url, {"key": key, "machine_id": machine_id})
+    except Exception as e:
+        log.warning("license deactivate unreachable: %s", e)
+        return {"success": False, "reason": f"unreachable: {e}"}
+    if data is None:
+        return {"success": False, "reason": f"http {code}"}
+    return {
+        "success": bool(data.get("success")),
+        "reason":  str(data.get("reason") or ""),
+    }

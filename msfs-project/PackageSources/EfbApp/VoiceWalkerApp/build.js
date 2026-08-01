@@ -13,6 +13,53 @@ const env = {
   typechecking: process.env.TYPECHECKING === "true",
   sourcemaps: process.env.SOURCE_MAPS === "true",
   minify: process.env.MINIFY === "true",
+  // Public-Release: VW_DEBUG_BUILD nicht "true" → debug.js wird nach
+  // copyStaticFiles aus dist/web/ entfernt und der zugehoerige <script>-Tag
+  // aus dist/web/index.html gestrippt. wixproj setzt diese Env-Var
+  // explizit basierend auf $(VWDebugBuild).
+  debugBuild: process.env.VW_DEBUG_BUILD === "true",
+};
+
+// Plugin: nach copyStaticFiles laeuft, im Public-Build dist/web/debug.js
+// loeschen und den <script ... /debug.js>-Tag aus dist/web/index.html
+// strippen. Sonst landet das Strg+Shift+D-Overlay im EFB-Bundle.
+const stripWebDebugPlugin = {
+  name: "strip-web-debug",
+  setup(build) {
+    build.onEnd(() => {
+      if (env.debugBuild) {
+        console.log("[strip-web-debug] VW_DEBUG_BUILD=true — debug.js bleibt im EFB-Bundle.");
+        return;
+      }
+      const fs = require("fs");
+      const path = require("path");
+      const debugJs = path.join(__dirname, "dist", "web", "debug.js");
+      const indexHtml = path.join(__dirname, "dist", "web", "index.html");
+      try {
+        if (fs.existsSync(debugJs)) {
+          fs.unlinkSync(debugJs);
+          console.log("[strip-web-debug] geloescht: dist/web/debug.js");
+        }
+      } catch (e) {
+        console.warn("[strip-web-debug] konnte debug.js nicht loeschen:", e.message);
+      }
+      try {
+        if (fs.existsSync(indexHtml)) {
+          const before = fs.readFileSync(indexHtml, "utf8");
+          const after = before.replace(
+            /[ \t]*<script\b[^>]*\bsrc=["']\/?debug\.js["'][^>]*><\/script>\s*\n?/g,
+            ""
+          );
+          if (after !== before) {
+            fs.writeFileSync(indexHtml, after);
+            console.log("[strip-web-debug] <script src=debug.js> aus index.html entfernt");
+          }
+        }
+      } catch (e) {
+        console.warn("[strip-web-debug] konnte index.html nicht patchen:", e.message);
+      }
+    });
+  },
 };
 
 const baseConfig = {
@@ -66,6 +113,9 @@ const baseConfig = {
         return css;
       },
     }),
+    // MUSS nach copyStaticFiles stehen, sonst wird debug.js gestrippt
+    // BEVOR es kopiert wird (Plugin-Reihenfolge = onEnd-Reihenfolge).
+    stripWebDebugPlugin,
   ],
 };
 

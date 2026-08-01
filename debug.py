@@ -173,16 +173,18 @@ def setup_logging() -> logging.Logger:
         ch.setFormatter(formatter)
         root.addHandler(ch)
 
-    # 2) Datei — rotierend, max 5 × 1 MB
+    # 2) Datei — pro App-Start frisch (mode="w" truncated). Beta-Logs sollen
+    # eine vollstaendige Session-Aufzeichnung sein, nicht ein Mix aus mehreren
+    # Sessions — wenn der User "Logs senden" klickt, soll genau diese Session
+    # rausgehen. Plus: macht das Auseinanderhalten mehrerer Test-Sessions
+    # leichter (keine Rotation mit voicewalker.log.1 / .2 / etc.).
     try:
         log_file = log_dir() / "voicewalker.log"
-        fh = logging.handlers.RotatingFileHandler(
-            log_file, maxBytes=1_000_000, backupCount=5, encoding="utf-8"
-        )
+        fh = logging.FileHandler(log_file, mode="w", encoding="utf-8")
         fh.setLevel(level)
         fh.setFormatter(formatter)
         root.addHandler(fh)
-        root.info("log file: %s", log_file)
+        root.info("log file: %s (truncated per session)", log_file)
     except Exception as e:
         root.warning("could not open log file: %s", e)
 
@@ -221,6 +223,37 @@ def setup_logging() -> logging.Logger:
         debug_enabled(),
     )
     return root
+
+
+def apply_beta_logging(enabled: bool) -> None:
+    """Beta-Logging-Toggle: Root-Logger + eigene Handler auf DEBUG, damit
+    Sim-Snapshots / Mesh-Events / Tray-Lifecycle in der Log-Datei landen
+    und ueber 'Logs senden' an den Entwickler-Discord gehen koennen.
+    Drittanbieter-Logger (websockets, asyncio, urllib3) werden separat
+    auf INFO gehalten — sonst wuerde DEBUG das Log mit niedrig-relevantem
+    Internal-Traffic fluten (per-Frame-Logs etc.).
+
+    Idempotent. Bei enabled=False wieder zurueck auf das Normal-Level
+    (DEBUG wenn debug_enabled() per CLI/env, sonst INFO).
+    """
+    root = logging.getLogger()
+    target = logging.DEBUG if enabled else (logging.DEBUG if debug_enabled() else logging.INFO)
+    root.setLevel(target)
+    for h in root.handlers:
+        # RingHandler nimmt eh immer alles (DEBUG) — siehe setup_logging.
+        # Andere Handler (Console, File) bekommen target.
+        if not isinstance(h, RingHandler):
+            h.setLevel(target)
+    # Spam-Logger zaehmen, auch wenn enabled=True — wir wollen nicht jedes
+    # Frame der WebSocket-Lib oder Asyncio-Internal-Tasks mitloggen.
+    NOISY = (
+        "websockets", "websockets.server", "websockets.client",
+        "websockets.protocol", "asyncio", "urllib3",
+    )
+    for n in NOISY:
+        logging.getLogger(n).setLevel(logging.INFO)
+    root.info("beta_logging=%s (effective level=%s)",
+              enabled, logging.getLevelName(target))
 
 
 def get_logger(name: str) -> logging.Logger:

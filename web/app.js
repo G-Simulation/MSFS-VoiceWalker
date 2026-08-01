@@ -12,7 +12,235 @@
 // Ab v0.16+ gibt's mehrere Strategien und der Default wechselt je Version —
 // der Subpath-Import `/torrent/+esm` wird von jsDelivr nicht zuverlaessig
 // aufgeloest. Mit 0.15.0 haben wir eine stabile Default-Einstiegspunkt.
-import { joinRoom } from 'https://cdn.jsdelivr.net/npm/trystero@0.15.0/+esm';
+// Mesh-Strategie: PRIMAER MQTT auf eigenem Broker (mesh.gsimulations.de).
+// Trystero v0.24 hat den `mqtt`-Subpath in ein eigenes Package ausgelagert
+// (@trystero-p2p/mqtt). Public-Broker werden NUR als Notfall-Fallback genutzt,
+// und auch nur wenn der User dem Setting `mesh_public_fallback` explizit
+// zugestimmt hat. Default = aus → kein IP-Leak an Drittparteien.
+// Override via _settingsState.mesh_relays (config.json oder
+// VOICEWALKER_MESH_RELAYS env-var) fuer Self-Hosted-Setups / Tests.
+import { joinRoom as joinRoomMqtt } from 'https://cdn.jsdelivr.net/npm/@trystero-p2p/mqtt@0.24.0/+esm';
+const DEFAULT_MESH_RELAYS = ['wss://mesh.gsimulations.de:8884/mqtt'];
+// Public-Broker fuer den Opt-In-Notbetrieb. Beides offizielle Public-Test-
+// Broker der jeweiligen kommerziellen MQTT-Anbieter, von Trystero selbst als
+// Default gelistet. Nutzer-IP + Geohash sind dort sichtbar — DSE 5.1b deckt
+// das ab. Beide werden nur ausgewaehlt wenn der Primary down ist UND der
+// User den Opt-In-Toggle aktiv gesetzt hat.
+const PUBLIC_FALLBACK_RELAYS = [
+  'wss://broker.emqx.io:8084/mqtt',
+  'wss://broker.hivemq.com:8884/mqtt',
+];
+
+// Resolution wird einmal pro Tab berechnet (cache als Promise). joinCellRoom
+// awaitet das Promise vor dem Trystero-Join. Toggle-Aenderung im UI loest
+// einen Reload aus, damit hier sauber neu probed wird — Live-Migration
+// laufender Trystero-Rooms ist nicht in Scope.
+let _meshResolutionPromise = null;
+
+function probeWebSocket(url, timeoutMs) {
+  return new Promise((resolve) => {
+    let ws = null;
+    let done = false;
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      try { ws && ws.close(); } catch {}
+      resolve(ok);
+    };
+    try {
+      // Subprotokoll 'mqtt' setzen — manche Reverse-Proxies filtern darauf.
+      // Wenn der Broker das nicht akzeptiert, waere er fuer Trystero eh
+      // nicht nutzbar; ein Probe ohne Subproto wuerde den Failure verbergen.
+      ws = new WebSocket(url, 'mqtt');
+    } catch {
+      return resolve(false);
+    }
+    const t = setTimeout(() => finish(false), timeoutMs);
+    ws.addEventListener('open',  () => { clearTimeout(t); finish(true);  });
+    ws.addEventListener('error', () => { clearTimeout(t); finish(false); });
+    ws.addEventListener('close', () => { clearTimeout(t); finish(false); });
+  });
+}
+
+async function resolveMeshRelays() {
+  if (_meshResolutionPromise) return _meshResolutionPromise;
+  _meshResolutionPromise = (async () => {
+    // 1. User-Override aus config.json["mesh_relays"] / env hat absolute
+    //    Prioritaet — kein Probe, keine Fallback-Logik.
+    const overrides = (typeof _settingsState !== 'undefined' && _settingsState
+                       && Array.isArray(_settingsState.mesh_relays)
+                       && _settingsState.mesh_relays.length > 0)
+                       ? _settingsState.mesh_relays : null;
+    if (overrides) {
+      state.meshHealth = 'primary';
+      return { mode: 'user', urls: overrides };
+    }
+    // 2. Eigener Broker erreichbar? 3 s Timeout reicht — TLS-Handshake +
+    //    WS-Upgrade + MQTT-Subproto-Accept liegt typ. unter 800 ms.
+    const primaryOk = await probeWebSocket(DEFAULT_MESH_RELAYS[0], 3000);
+    if (primaryOk) {
+      state.meshHealth = 'primary';
+      return { mode: 'primary', urls: DEFAULT_MESH_RELAYS };
+    }
+    // 3. Primary unten — Public-Fallback NUR mit Opt-In. Ohne Opt-In bleibt
+    //    Mesh aus, bis der eigene Broker zurueck ist. Reload re-probed.
+    if (_settingsState && _settingsState.mesh_public_fallback) {
+      state.meshHealth = 'fallback';
+      console.warn('[mesh] primary offline, opt-in fallback to public brokers');
+      return { mode: 'fallback', urls: PUBLIC_FALLBACK_RELAYS };
+    }
+    state.meshHealth = 'offline';
+    console.warn('[mesh] primary offline, no opt-in fallback → mesh disabled');
+    return { mode: 'offline', urls: null };
+  })();
+  return _meshResolutionPromise;
+}
+
+// --- Mesh-Health UI: Offline-Prompt + Fallback-Banner + Auto-Recovery -------
+// Wenn der eigene Mesh-Server down ist, zeigen wir je nach Toggle-Stand:
+//   meshHealth='offline' (Toggle aus) → Modal-Dialog "Notbetrieb aktivieren?"
+//                                       (User waehlt: Toggle+Reload, oder Mesh aus lassen)
+//   meshHealth='fallback' (Toggle an) → permanenter orange Banner unter Header
+//                                       + Auto-Recovery-Probe alle 60 s
+let _meshOfflinePromptShown = false;
+let _fallbackBannerEl = null;
+let _recoveryProbeTimer = null;
+
+function _t(key, fallback) {
+  return (window.i18n && window.i18n.t(key)) || fallback;
+}
+
+function showMeshOfflinePrompt() {
+  if (_meshOfflinePromptShown) return;
+  if (document.getElementById('vw-mesh-offline-prompt')) return;
+  _meshOfflinePromptShown = true;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'vw-mesh-offline-prompt';
+  overlay.style.cssText = `
+    position: fixed; inset: 0; z-index: 99998;
+    background: rgba(11, 18, 32, 0.92); color: #e9eefc;
+    display: flex; align-items: center; justify-content: center;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    backdrop-filter: blur(6px);
+  `;
+  overlay.innerHTML = `
+    <div style="max-width:520px; padding:32px; text-align:center;
+                border:1px solid #233457; border-radius:12px;
+                background:#0b1220;">
+      <div style="font-size:36px; margin-bottom:12px;">⚠</div>
+      <h2 style="margin:0 0 12px 0; font-size:18px;" data-i18n="mesh.offline_prompt.title">
+        ${_t('mesh.offline_prompt.title', 'Mesh-Server nicht erreichbar')}
+      </h2>
+      <p style="color:#8696b8; font-size:13px; line-height:1.55; margin:0 0 20px 0;" data-i18n="mesh.offline_prompt.body">
+        ${_t('mesh.offline_prompt.body',
+          'Unser eigener Server antwortet gerade nicht. Möchtest du in den Notbetrieb über öffentliche Broker (EMQX, HiveMQ) wechseln? <strong>Deine IP-Adresse wird dabei diesen Drittanbietern bekannt.</strong> Audio bleibt P2P.')}
+      </p>
+      <div style="display:flex; gap:10px; justify-content:center;">
+        <button id="vw-mesh-offline-cancel" type="button" style="
+          background:transparent; color:#8696b8; border:1px solid #233457;
+          border-radius:6px; padding:10px 18px; font-weight:600;
+          cursor:pointer; font-size:13px;" data-i18n="mesh.offline_prompt.cancel">
+          ${_t('mesh.offline_prompt.cancel', 'Mesh aus lassen')}
+        </button>
+        <button id="vw-mesh-offline-accept" type="button" style="
+          background:#ff9d4a; color:#0b1220; border:none; border-radius:6px;
+          padding:10px 18px; font-weight:600; cursor:pointer; font-size:13px;"
+          data-i18n="mesh.offline_prompt.accept">
+          ${_t('mesh.offline_prompt.accept', 'Notbetrieb aktivieren')}
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  document.getElementById('vw-mesh-offline-cancel')?.addEventListener('click', () => {
+    overlay.remove();
+    // _meshOfflinePromptShown bleibt true → kein zweiter Dialog in dieser Session.
+    // User kann den Toggle trotzdem manuell ueber Settings setzen falls er's
+    // sich anders ueberlegt; das triggert dann Reload + Recovery-Pfad.
+  });
+  document.getElementById('vw-mesh-offline-accept')?.addEventListener('click', () => {
+    if (typeof sendBackend === 'function') {
+      sendBackend({ type: 'settings_set', patch: { mesh_public_fallback: true } });
+    }
+    // Backend-persist ist async; Reload nach kurzem Delay damit Settings drin sind.
+    setTimeout(() => location.reload(), 350);
+  });
+}
+
+function showFallbackBanner() {
+  if (_fallbackBannerEl) return;
+  const banner = document.createElement('div');
+  banner.id = 'vw-fallback-banner';
+  banner.style.cssText = `
+    position: fixed; top: 0; left: 0; right: 0; z-index: 9000;
+    background: linear-gradient(180deg, rgba(255,157,74,0.20) 0%, rgba(255,157,74,0.08) 100%);
+    border-bottom: 1px solid rgba(255,157,74,0.5); color: #ffd29c;
+    padding: 8px 14px; font-size: 12px; text-align: center;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+  `;
+  banner.innerHTML = `
+    <span data-i18n="mesh.fallback_banner.text">${_t('mesh.fallback_banner.text',
+      '⚠ Notbetrieb — eigener Server offline, deine IP geht an EMQX/HiveMQ')}</span>
+    <button id="vw-fallback-recheck" type="button" style="
+      background:transparent; color:#ffd29c; border:1px solid #ff9d4a;
+      border-radius:4px; padding:2px 10px; font-size:11px; cursor:pointer;"
+      data-i18n="mesh.fallback_banner.recheck">
+      ${_t('mesh.fallback_banner.recheck', 'Jetzt prüfen')}
+    </button>
+  `;
+  document.body.appendChild(banner);
+  _fallbackBannerEl = banner;
+  document.getElementById('vw-fallback-recheck')?.addEventListener('click', () => {
+    triggerRecoveryProbe();
+  });
+}
+
+function showRecoveryToast() {
+  const toast = document.createElement('div');
+  toast.style.cssText = `
+    position: fixed; top: 60px; right: 20px; z-index: 99999;
+    background: #0b1220; border: 1px solid #6aa5ff; color: #e9eefc;
+    padding: 12px 18px; border-radius: 8px; font-size: 13px;
+    font-family: "Segoe UI", system-ui, sans-serif; max-width: 320px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  `;
+  toast.textContent = _t('mesh.recovery_toast', 'Eigener Server zurück — App startet neu…');
+  document.body.appendChild(toast);
+}
+
+async function triggerRecoveryProbe() {
+  const ok = await probeWebSocket(DEFAULT_MESH_RELAYS[0], 3000);
+  if (!ok) return false;
+  console.info('[mesh] primary recovered → reloading');
+  showRecoveryToast();
+  setTimeout(() => location.reload(), 1500);
+  return true;
+}
+
+function startRecoveryProbeLoop() {
+  if (_recoveryProbeTimer) return;
+  _recoveryProbeTimer = setInterval(triggerRecoveryProbe, 60_000);
+}
+
+async function setupMeshHealthUI() {
+  // Erst nach Consent + Settings-State weitermachen — vorher kennen wir
+  // _settingsState.mesh_public_fallback nicht zuverlaessig.
+  const ok = await _appStartPromise;
+  if (!ok) return;
+  // resolveMeshRelays() wird sowieso vom ersten joinCellRoom getriggert.
+  // Wir rufen ihn explizit, damit state.meshHealth schon gesetzt ist BEVOR
+  // der User auf einen Mesh-Join wartet (z.B. Tracking aus, kein Sim).
+  await resolveMeshRelays();
+  if (state.meshHealth === 'offline') {
+    showMeshOfflinePrompt();
+  } else if (state.meshHealth === 'fallback') {
+    showFallbackBanner();
+    startRecoveryProbeLoop();
+  }
+}
 
 // --- Single-Tab-Lock --------------------------------------------------------
 // Verhindert, dass mehrere Browser-Tabs gleichzeitig das Mesh joinen und sich
@@ -442,10 +670,19 @@ const state = {
   voxMode: false,
   rooms: new Map(),   // cell → { room, peers:Map, posTimer }
   currentCell: null,
+  // Mesh-Health: 'unknown' (vor Probe), 'primary' (eigener Broker OK),
+  // 'fallback' (Opt-In, oeffentliche Broker), 'offline' (eigener Broker
+  // unten und kein Fallback erlaubt). Steuert Mesh-Chip-Anzeige.
+  meshHealth: 'unknown',
   ptt: { available: false, devices: [], binding: null, binding_mode: false },
   // Tracking-Enabled: wird vom Backend geliefert (persistiert in config.json).
   // Bei false → alle Rooms verlassen, keine Pos an Mesh senden, UI zeigt "verborgen".
   trackingEnabled: true,
+  // Ambient-Enabled: User-Toggle fuer Schritte/Propeller/Jet/Heli-Geraeusche.
+  // Default an, wird vom Backend mitgeliefert (persistiert) und in
+  // _updateAmbientForPeer als 0/1-Multiplier auf alle ambient-gains gelegt.
+  // Stimme bleibt unberuehrt.
+  ambientEnabled: true,
   // Pro-License (siehe ROADMAP §4). Kommt via "license_state" WS-Message vom
   // Backend; gate'd Peer-Limit, Private-Rooms, Badge.
   isPro:          false,
@@ -521,6 +758,36 @@ function applyTrackingState(enabled) {
 
 function requestTrackingToggle() {
   sendBackend({ type: 'set_tracking', enabled: !state.trackingEnabled });
+}
+
+// Ambient-Mute analog zu Tracking. Backend persistiert in config.json,
+// broadcastet 'ambient_state' an alle UIs (Browser/Toolbar/EFB) damit der
+// Toggle-Zustand synchron rendert. _updateAmbientForPeer liest
+// state.ambientEnabled bei jedem Frame; ein Toggle wirkt also ohne dass wir
+// die bereits attached gain-Nodes manuell durchgehen muessen.
+function applyAmbientState(enabled) {
+  state.ambientEnabled = !!enabled;
+  renderAmbientToggle();
+}
+function requestAmbientToggle() {
+  sendBackend({ type: 'set_ambient', enabled: !state.ambientEnabled });
+}
+function renderAmbientToggle() {
+  const btn = document.getElementById('ambientToggle');
+  if (!btn) return;
+  const on = !!state.ambientEnabled;
+  btn.setAttribute('aria-checked', on ? 'true' : 'false');
+  // Background: voll-Akzent wenn an, gedaempft wenn aus. Inline-Style
+  // statt Tailwind-aria-Variant, weil die Browser-Tailwind-CDN aria-
+  // Variants nicht zuverlaessig liefert.
+  btn.style.background = on
+    ? 'var(--color-accent)'
+    : 'rgba(150,170,200,0.18)';
+  // Knob nach rechts wenn an, links wenn aus.
+  const knob = btn.querySelector('.ambient-switch-knob');
+  if (knob) {
+    knob.style.transform = on ? 'translateX(22px)' : 'translateX(2px)';
+  }
 }
 
 // --- License / Pro -----------------------------------------------------------
@@ -988,6 +1255,8 @@ function connectBackendWs() {
       applyFeedbackResult(m);
     } else if (m.type === 'tracking_state') {
       applyTrackingState(!!m.enabled);
+    } else if (m.type === 'ambient_state') {
+      applyAmbientState(!!m.enabled);
     } else if (m.type === 'license_state') {
       applyLicenseState(m);
     } else if (m.type === 'version') {
@@ -1060,9 +1329,27 @@ function connectBackendWs() {
 // Dialog und tut sonst nichts. Ist DSGVO-konform fuer biometrische Daten
 // (Stimme). Der Dialog kann spaeter erneut geoeffnet werden falls wir einen
 // Link dafuer einbauen wollen (z.B. im Footer "Datenschutz").
-const CONSENT_KEY = 'vw.privacy_consent_v1';
-function hasConsent()   { return localStorage.getItem(CONSENT_KEY) === 'yes'; }
-function storeConsent() { localStorage.setItem(CONSENT_KEY, 'yes'); }
+// Consent-Persistenz lebt im Backend (config.json["privacy_consent_v1"]).
+// Frueher localStorage-basiert ('vw.privacy_consent_v1'), aber localStorage
+// ist origin-scoped — http://127.0.0.1:7801 und http://localhost:7801 teilen
+// sich keinen Storage. User die mal ueber das eine, mal ueber das andere
+// reinkamen, sahen das Welcome-Panel jedes Mal wieder. Backend-config.json
+// liegt in %APPDATA%\VoiceWalker und ist origin-unabhaengig.
+function hasConsent() {
+  // _settingsState wird im _appStartPromise via _settingsStatePromise befuellt
+  // BEVOR hasConsent() abgefragt wird (siehe Bootstrap-Sequenz). Wenn das
+  // settings_state vom Backend noch nicht da ist, geben wir konservativ false
+  // zurueck — der User sieht dann den Welcome-Dialog statt einer falschen
+  // "schon bestaetigt"-Annahme.
+  return !!(_settingsState && _settingsState.privacy_consent_v1 === true);
+}
+function storeConsent() {
+  // Optimistisch in-memory setzen, damit ein direktes hasConsent() nach dem
+  // Klick true liefert; das Backend bestaetigt parallel via settings_state-
+  // Broadcast (idempotent).
+  _settingsState.privacy_consent_v1 = true;
+  sendBackend({ type: 'settings_set', patch: { privacy_consent_v1: true } });
+}
 
 function ensureConsent() {
   return new Promise(resolve => {
@@ -1110,15 +1397,27 @@ function showWelcome() {
     dlg.classList.remove('hidden'); dlg.classList.add('flex');
     dlg.setAttribute('aria-hidden', 'false');
 
-    const aBox = document.getElementById('welAutostart');
+    // Autostart-Checkbox entfernt — Start kommt ausschliesslich vom Sim
+    // via exe.xml (s. installer.upsert_exe_xml + main.py self-heal).
     const uBox = document.getElementById('welAutoUpdate');
     const lBox = document.getElementById('welSendLogs');
-    if (aBox) aBox.checked = !!_settingsState.windows_autostart;
-    if (uBox) uBox.checked = (_settingsState.auto_update !== false);
-    if (lBox) lBox.checked = !!_settingsState.send_logs_on_error;
-
+    const bBox = document.getElementById('welBiometricConsent');
     const acceptBtn = document.getElementById('welcomeAcceptBtn');
     const declineBtn = document.getElementById('welcomeDeclineBtn');
+    if (uBox) uBox.checked = (_settingsState.auto_update !== false);
+    if (lBox) lBox.checked = !!_settingsState.send_logs_on_error;
+    // Biometric-Consent (Art. 9 DSGVO): default UNCHECKED, opt-in only.
+    // Accept-Button erst aktiv wenn diese Checkbox gesetzt ist.
+    if (bBox) bBox.checked = false;
+    const _updateAcceptState = () => {
+      if (!acceptBtn) return;
+      const ok = !!(bBox && bBox.checked);
+      acceptBtn.disabled = !ok;
+      acceptBtn.classList.toggle('opacity-50', !ok);
+      acceptBtn.classList.toggle('cursor-not-allowed', !ok);
+    };
+    if (bBox) bBox.addEventListener('change', _updateAcceptState);
+    _updateAcceptState();
     const closeDialog = () => {
       dlg.classList.add('hidden'); dlg.classList.remove('flex');
       dlg.setAttribute('aria-hidden', 'true');
@@ -1126,11 +1425,18 @@ function showWelcome() {
 
     if (acceptBtn) acceptBtn.onclick = () => {
       // Atomic Save: Consent + Settings + first_run_done in einem Rutsch.
-      storeConsent();
+      // Optimistisch in-memory setzen, damit hasConsent() unmittelbar true
+      // liefert (storeConsent() macht das auch — wir umgehen es hier um
+      // einen separaten WS-Roundtrip zu sparen).
+      _settingsState.privacy_consent_v1 = true;
       sendBackend({
         type: 'settings_set',
         patch: {
-          windows_autostart:  !!(aBox && aBox.checked),
+          privacy_consent_v1: true,
+          // windows_autostart wird nicht mehr aus der UI gepflegt — Start
+          // kommt vom Sim via exe.xml; msfs_lifecycle.watch_and_quit
+          // beendet die App wenn FlightSimulator2024.exe weg ist.
+          windows_autostart:  false,
           auto_update:        !!(uBox && uBox.checked),
           send_logs_on_error: !!(lBox && lBox.checked),
           first_run_done:     true,
@@ -1178,6 +1484,11 @@ const _appStartPromise = (async () => {
   }
   return true;
 })();
+
+// Mesh-Health-UI starten: Confirm-Dialog wenn Server-down + Toggle-aus,
+// Banner + Recovery-Probe wenn Notbetrieb laeuft. Wartet selbst auf
+// _appStartPromise + Consent + Settings-State.
+setupMeshHealthUI();
 
 // --- Event-Direktlink via ?join=<passphrase> --------------------------------
 // PDF-Briefings und Stream-Overlays linken auf  http://127.0.0.1:7801/?join=...
@@ -1652,14 +1963,44 @@ function setupRangeSliders() {
 }
 
 // --- Room management ---------------------------------------------------------
+let _consentGranted = false;
+_appStartPromise.then(ok => { _consentGranted = !!ok; });
 function updateRooms() {
   if (!state.mySim) return;
+  // Consent-Gate: vor User-Akzeptanz im Welcome-Dialog DARF kein Mesh-Join
+  // stattfinden — sonst leaked die IP ueber WebTorrent-Tracker bevor der
+  // User der biometrischen Voice-Verarbeitung zugestimmt hat. Backend-WS
+  // ist localhost-only und harmlos, aber WebRTC-Discovery geht ueber
+  // oeffentliche Tracker → DSGVO-relevant. Siehe _appStartPromise.
+  if (!_consentGranted) return;
   // Wenn Tracking aus: keine Rooms joinen (andere Piloten sollen uns NICHT sehen).
   // applyTrackingState(false) hat bestehende Rooms bereits verlassen.
   if (!state.trackingEnabled) return;
   // Wenn MSFS im Hauptmenue: kein Mesh-Join, keine Audio-Uebertragung.
   // renderSelf() hat bestehende Rooms bei in_menu bereits verlassen.
   if (state.mySim.in_menu || state.mySim.demo) return;  // kein Flug → kein Mesh-Join
+  // Move-Threshold: Geohash-Zellen sind ~150m breit (Precision 7). Wenn der
+  // Pilot seit dem letzten Check < 100 m bewegt hat UND der Check < 30 s
+  // her ist, kann sich an der Zell-Zugehoerigkeit unmoeglich was geaendert
+  // haben → wir sparen 9× neighbor-Compute + Room-Delta-Iteration.
+  // Erzwungen durchlaufen wenn private-Room/Tracking-Toggle die Rooms-Map
+  // veraendert hat (Hard-Reset von updateRooms._lastCheckPos).
+  const _now = performance.now();
+  const _lp = updateRooms._lastCheckPos;
+  // Bypass-Throttle wenn Rooms-Map leer (Tracking gerade angeschaltet → muss
+  // zwingend joinen) oder Mode-Change (privateRoom-Toggle).
+  const _bypass = state.rooms.size === 0
+                || updateRooms._lastPrivate !== !!state.privateRoom;
+  if (!_bypass && _lp && _now - updateRooms._lastCheckT < 30000) {
+    const _dLat = (state.mySim.lat - _lp.lat) * 111320;
+    const _dLon = (state.mySim.lon - _lp.lon)
+                * 111320 * Math.cos(state.mySim.lat * Math.PI / 180);
+    const _dM = Math.sqrt(_dLat * _dLat + _dLon * _dLon);
+    if (_dM < 100) return;
+  }
+  updateRooms._lastCheckPos = { lat: state.mySim.lat, lon: state.mySim.lon };
+  updateRooms._lastCheckT   = _now;
+  updateRooms._lastPrivate  = !!state.privateRoom;
   // Privater Room / Event: Mesh wird zusaetzlich per Geohash geshardet, damit
   // grosse Events (200 Leute ueber Europa verteilt) nicht in einem Full-Mesh
   // ersticken. Jeder Teilnehmer verbindet sich nur mit geografisch nahen
@@ -1701,10 +2042,51 @@ function updateRooms() {
   }
 }
 
-function joinCellRoom(cell) {
-  const room = joinRoom({ appId: APP_ID }, cell);
-  const entry = { room, peers: new Map(), posTimer: null };
+async function joinCellRoom(cell) {
+  // Placeholder SOFORT setzen — verhindert dass updateRooms() im naechsten
+  // Tick (~100 ms spaeter) die selbe Zelle nochmal joint, waehrend wir hier
+  // noch auf resolveMeshRelays() warten. Der Trystero-Room wird nach dem
+  // Resolve nachgetragen. _pending bleibt true bis room gesetzt ist; das
+  // Cleanup-Code-Pfad in updateRooms() prueft entry.room?.leave() defensiv.
+  const entry = { room: null, peers: new Map(), posTimer: null, _pending: true };
   state.rooms.set(cell, entry);
+  renderMeshChip();
+
+  let resolution;
+  try {
+    resolution = await resolveMeshRelays();
+  } catch (e) {
+    console.warn('[mesh] relay resolution failed:', e);
+    resolution = { mode: 'offline', urls: null };
+    state.meshHealth = 'offline';
+  }
+
+  // Wenn der Placeholder zwischenzeitlich von updateRooms() entfernt wurde
+  // (z.B. weil wir aus der Zelle weg sind, oder Tracking ausgeschaltet wurde),
+  // hier abbrechen — kein Trystero-Connect fuer "tote" Zellen.
+  if (state.rooms.get(cell) !== entry) return;
+
+  if (!resolution.urls) {
+    // Mesh aus: Placeholder bleibt drin, damit updateRooms() nicht in einen
+    // Endless-Re-Join-Loop laeuft. Beim naechsten User-Reload (oder Toggle-
+    // Flip → Reload) wird neu probed.
+    entry._offline = true;
+    delete entry._pending;
+    renderMeshChip();
+    return;
+  }
+
+  let room;
+  try {
+    room = joinRoomMqtt({ appId: APP_ID, relayUrls: resolution.urls }, cell);
+  } catch (e) {
+    console.warn('[mesh] joinRoom failed for cell', cell, e);
+    state.rooms.delete(cell);
+    renderMeshChip();
+    return;
+  }
+  entry.room = room;
+  delete entry._pending;
 
   const [sendPos, getPos] = room.makeAction('pos');
   // Pro-Feature: Range-Sync. Action-Name 8 Zeichen (Trystero-Limit).
@@ -1743,7 +2125,12 @@ function joinCellRoom(cell) {
 
   room.onPeerLeave(peerId => {
     const p = entry.peers.get(peerId);
-    if (p?.audioEl) { try { p.audioEl.srcObject = null; } catch {} }
+    // Vollstaendiger Audio-Cleanup. Vorher hingen MediaStreamSource,
+    // Panner, Gain, Analyser und die 4 Ambient-BufferSources weiter am
+    // AudioContext, auch wenn der Peer weg war. Bei vielen kommenden/
+    // gehenden Peers (Event mit ~100 Pilots) summiert sich das schnell:
+    // ein Peer kostet ~1% CPU im Audio-Thread, das wird nicht freigegeben.
+    if (p) _disposePeerAudio(p);
     entry.peers.delete(peerId);
     renderPeers();
     renderMeshChip();
@@ -1764,6 +2151,10 @@ function joinCellRoom(cell) {
     }
 
     const src = ctx.createMediaStreamSource(stream);
+    // Reference auf die MediaStreamSource halten — sonst kann _disposePeerAudio
+    // den source-Knoten nicht disconnecten und die Stream-Verbindung bleibt
+    // im AudioContext haengen.
+    p.streamSource = src;
     p.gainNode    = ctx.createGain();
     p.analyserRaw = ctx.createAnalyser();  // pre-gain: VAD
     p.analyserRaw.fftSize = 512;
@@ -1912,9 +2303,23 @@ function updateAudioFor(p) {
   // nach Karten-Distanz, da macht 3D keinen Sinn (ein Peer 600m ueber dir
   // ist auf der Karte 0m entfernt). Fuer die Audio-Lautstaerke nutzen wir
   // direkt die 3D-Distanz unten als lokale Variable.
-  const d2D = distMeters(state.mySim, p.sim);
-  const d   = dist3DMeters(state.mySim, p.sim);
-  p.currentDistance = d2D;
+  // Sentinel-Cache: state.mySim / p.sim werden bei Updates DURCH NEUE
+  // Objekte ersetzt (line 959, 1801, 3780, 4094) — Reference-Vergleich
+  // reicht, um Haversine-Calls in der 100-ms-Loop zu sparen.
+  let d2D, d;
+  if (p._lastMySim === state.mySim && p._lastPeerSim === p.sim
+        && Number.isFinite(p.currentDistance)
+        && Number.isFinite(p._cachedDist3D)) {
+    d2D = p.currentDistance;
+    d   = p._cachedDist3D;
+  } else {
+    d2D = distMeters(state.mySim, p.sim);
+    d   = dist3DMeters(state.mySim, p.sim);
+    p.currentDistance = d2D;
+    p._cachedDist3D   = d;
+    p._lastMySim      = state.mySim;
+    p._lastPeerSim    = p.sim;
+  }
 
   if (!p.gainNode) return;
 
@@ -2789,6 +3194,15 @@ document.getElementById('pttClearBtn').addEventListener('click', () => {
   sendBackend({ type: 'ptt_bind_clear' });
 });
 
+// Ambient-Toggle: Mute fuer Schritte/Propeller/Jet/Heli. Backend persistiert
+// und broadcastet — applyAmbientState rendert den Switch auf der Reaktion
+// vom Backend, nicht auf den Klick selber. So sehen alle UIs (Browser,
+// Toolbar, EFB) immer den gleichen State.
+const _ambientBtn = document.getElementById('ambientToggle');
+if (_ambientBtn) {
+  _ambientBtn.addEventListener('click', requestAmbientToggle);
+}
+
 // --- Rendering ---------------------------------------------------------------
 function setStatus(which, text, cls, i18nKey, i18nParams) {
   // which: 'sim' | 'mic' | 'mesh'
@@ -2927,9 +3341,46 @@ function bearingToCompass(deg) {
 
 function renderMeshChip() {
   const n = currentPeerCount();
-  if (n === 0)      setStatus('mesh', 'wartet auf Nachbarn', 'warn', 'status.mesh_waiting');
-  else if (n === 1) setStatus('mesh', '1 Peer', 'good', 'status.mesh_one');
-  else              setStatus('mesh', `${n} Peers`, 'good', 'status.mesh_many', { n });
+  // Health-Logik:
+  //  - meshHealth='offline' (eigener Broker unten, kein Opt-In) → SERVER OFFLINE
+  //  - meshHealth='fallback' (eigener Broker unten, Opt-In aktiv) → NOTBETRIEB
+  //  - keine state.rooms (Consent fehlt, Tracking aus, kein Sim) → INAKTIV
+  //  - rooms > 0, peers = 0 → VERBUNDEN, keine Peers
+  //  - rooms > 0, peers > 0 → VERBUNDEN, Peers da
+  if (state.meshHealth === 'offline') {
+    setStatus('mesh', 'Server offline', 'bad', 'status.mesh_server_down');
+    return;
+  }
+  if (state.meshHealth === 'fallback') {
+    // Notbetrieb: eigener Broker unten, App nutzt oeffentliche Broker (Opt-In).
+    // Status bleibt 'warn' (orange), unabhaengig von der Peer-Zahl — wir wollen
+    // dem User durchgaengig zeigen "du leakst gerade an Drittanbieter".
+    if (n === 0) {
+      setStatus('mesh', 'Notbetrieb · keine Peers', 'warn', 'status.mesh_emergency_empty');
+    } else if (n === 1) {
+      setStatus('mesh', 'Notbetrieb · 1 Peer', 'warn', 'status.mesh_emergency_one');
+    } else {
+      setStatus('mesh', `Notbetrieb · ${n} Peers`, 'warn', 'status.mesh_emergency_many', { n });
+    }
+    return;
+  }
+  // Probe-Fenster: alle Rooms sind noch Placeholder mit _pending=true. Wir
+  // wissen also weder ob der Broker geht, noch wie die Peer-Lage ist —
+  // "Mesh inaktiv" zu zeigen waere irrefuehrend, "verbunden" eine Luege.
+  if (state.meshHealth === 'unknown' && state.rooms.size > 0) {
+    setStatus('mesh', 'verbinde…', 'warn', 'status.mesh_waiting');
+    return;
+  }
+  const connected = state.rooms.size > 0;
+  if (!connected) {
+    setStatus('mesh', 'Mesh inaktiv', 'warn', 'status.mesh_offline');
+  } else if (n === 0) {
+    setStatus('mesh', 'verbunden — keine Peers', 'good', 'status.mesh_connected_empty');
+  } else if (n === 1) {
+    setStatus('mesh', '1 Peer', 'good', 'status.mesh_one');
+  } else {
+    setStatus('mesh', `${n} Peers`, 'good', 'status.mesh_many', { n });
+  }
 }
 
 function fmtDist(m) {
@@ -3116,6 +3567,10 @@ function renderPttBinding() {
 function publishOverlay() {
   if (!_isPrimaryTab) return;          // nur primary-Tab publiziert
   if (!backendWs || backendWs.readyState !== 1) return;
+  // Diff-Gate: Panel-Render lebt von overlay_state. Wenn sich nichts
+  // sichtbar geaendert hat, ist jeder zusaetzliche Send Coherent-GT-
+  // Stuttering. Heartbeat 1 s fuer State-Sync (UI-Toggles etc.).
+  const _now = performance.now();
   const out = [];
   for (const [id, p] of iterAllPeersDeduped()) {
     out.push({
@@ -3135,7 +3590,7 @@ function publishOverlay() {
   }
   // Lokaler Mic-RMS (0..~0.3 realistisch). Fuer das Panel-Mic-Level-Meter.
   const micRms = currentLocalMicRms();
-  sendBackend({
+  const msg = {
     type: 'overlay_state',
     mySim: state.mySim ? {
       lat: state.mySim.lat,
@@ -3171,9 +3626,21 @@ function publishOverlay() {
       pttBinding:       state.ptt?.binding || null,
       bindingInProgress: !!state.ptt?.binding_mode,
     },
-  });
+  };
+  // Diff-Gate: Payload mit letztem vergleichen, sonst skip. JSON.stringify
+  // muss sowieso fuer den Send passieren — wir machen es einmal hier statt
+  // in sendBackend(), und vergleichen den String. Heartbeat 1 s.
+  let _enc;
+  try { _enc = JSON.stringify(msg); } catch { _enc = ''; }
+  if (_enc && _enc === publishOverlay._lastEnc
+        && (_now - publishOverlay._lastT) < 1000) {
+    return;
+  }
+  publishOverlay._lastEnc = _enc;
+  publishOverlay._lastT = _now;
+  try { if (backendWs.readyState === 1) backendWs.send(_enc || JSON.stringify(msg)); } catch {}
 }
-// 250 ms — gleich wie vorher bei BroadcastChannel, gibt fluessiges Radar.
+// 100 ms Render-Tick — Diff-Gate (s.o.) drosselt auf reale Aenderungen.
 // Nur primary-Tab sendet (siehe Guard oben); secondary-Tabs sind eh blockiert.
 setInterval(publishOverlay, 100);
 
@@ -3505,6 +3972,50 @@ function _reattachAmbient(p, ctx) {
 // Gain-Node, der je nach p.sim.on_foot gefadet wird (siehe updateAmbient()).
 // Gain-Levels bewusst niedrig (0.2 / 0.15) — Stimme/MP3 dominiert, Ambient
 // ist nur "Atmosphaere". Distanz/Richtung macht die Pipeline automatisch.
+// Vollstaendiger Audio-Cleanup fuer einen Peer. Wird vom onPeerLeave-Callback
+// gerufen wenn ein Trystero-Peer das Mesh verlaesst. Idempotent — kann
+// mehrfach gerufen werden ohne Throw (z.B. Test-Peer + Real-Peer-Pfade).
+//
+// Zerstoert:
+//   - audioEl: srcObject lock + pause
+//   - streamSource (MediaStreamSource): disconnect → loest Stream-Pin
+//   - analyserRaw, gainNode, pannerNode: disconnect
+//   - _ambient: stop() der 4 BufferSources + disconnect aller Gains
+//
+// Setzt auf p alle Felder auf null damit GC die AudioContext-Knoten
+// einsammeln kann.
+function _disposePeerAudio(p) {
+  if (!p) return;
+  try { if (p.audioEl) { p.audioEl.pause(); p.audioEl.srcObject = null; } } catch (_) {}
+  p.audioEl = null;
+
+  try { p.streamSource && p.streamSource.disconnect(); } catch (_) {}
+  try { p.analyserRaw  && p.analyserRaw.disconnect();  } catch (_) {}
+  try { p.gainNode     && p.gainNode.disconnect();     } catch (_) {}
+  try { p.pannerNode   && p.pannerNode.disconnect();   } catch (_) {}
+  p.streamSource = null;
+  p.analyserRaw  = null;
+  p.gainNode     = null;
+  p.pannerNode   = null;
+
+  if (p._ambient) {
+    const a = p._ambient;
+    try { a.stepSrc && a.stepSrc.stop(); } catch (_) {}
+    try { a.propSrc && a.propSrc.stop(); } catch (_) {}
+    try { a.jetSrc  && a.jetSrc.stop();  } catch (_) {}
+    try { a.heliSrc && a.heliSrc.stop(); } catch (_) {}
+    try { a.stepSrc && a.stepSrc.out && a.stepSrc.out.disconnect(); } catch (_) {}
+    try { a.propSrc && a.propSrc.out && a.propSrc.out.disconnect(); } catch (_) {}
+    try { a.jetSrc  && a.jetSrc.out  && a.jetSrc.out.disconnect();  } catch (_) {}
+    try { a.heliSrc && a.heliSrc.out && a.heliSrc.out.disconnect(); } catch (_) {}
+    try { a.stepGain.disconnect(); } catch (_) {}
+    try { a.propGain.disconnect(); } catch (_) {}
+    try { a.jetGain.disconnect();  } catch (_) {}
+    try { a.heliGain.disconnect(); } catch (_) {}
+    p._ambient = null;
+  }
+}
+
 function _attachAmbient(p, ctx, kind) {
   if (!p.gainNode) return;
   // Pro-Peer-Variation: jeder User klingt etwas anders, sonst klingen
@@ -3582,10 +4093,16 @@ function _updateAmbientForPeer(p, ctx) {
   const stepActive = (onFoot && isMoving);
   const engActive  = (!onFoot) && enginesOn;
 
-  const tStep = stepActive ? _ambientLevels.footstep : 0;
-  const tProp = (engActive && engineKind === 'prop') ? _ambientLevels.propeller  : 0;
-  const tJet  = (engActive && engineKind === 'jet')  ? _ambientLevels.jet        : 0;
-  const tHeli = (engActive && engineKind === 'heli') ? _ambientLevels.helicopter : 0;
+  // Mute-Multiplier: 0 wenn der User Ambient deaktiviert hat (state.ambientEnabled
+  // false), sonst 1. Der gain-setTargetAtTime unten faded smooth — kein Klicken
+  // beim Toggle. Wirkt nur auf Ambient (Schritte/Propeller/Jet/Heli), die
+  // Stimme laeuft ueber p.gainNode unabhaengig.
+  const muteMul = state.ambientEnabled ? 1 : 0;
+
+  const tStep = stepActive ? _ambientLevels.footstep  * muteMul : 0;
+  const tProp = (engActive && engineKind === 'prop') ? _ambientLevels.propeller  * muteMul : 0;
+  const tJet  = (engActive && engineKind === 'jet')  ? _ambientLevels.jet        * muteMul : 0;
+  const tHeli = (engActive && engineKind === 'heli') ? _ambientLevels.helicopter * muteMul : 0;
 
   const tc = ctx.currentTime;
   a.stepGain.gain.setTargetAtTime(tStep, tc, 0.4);
@@ -4689,21 +5206,43 @@ const _settingsState = {
   auto_update:       true,
   send_logs_on_error: false,
   first_run_done:    false,
+  // Beta-Logging-Toggle. Default true waehrend der Beta — schreibt
+  // Sim-Snapshots, Mesh-Events und Tray-Lifecycle ins voicewalker.log,
+  // sodass "Logs senden"-Reports diagnose-tauglich werden.
+  beta_logging:      true,
+  // Privacy-Consent (Welcome-Dialog "Akzeptieren & Starten"). Lebt im Backend
+  // damit ein Origin-Wechsel (127.0.0.1 vs localhost) den Consent nicht
+  // verliert. Siehe hasConsent() / storeConsent().
+  privacy_consent_v1: false,
+  // Opt-In fuer Public-MQTT-Notbetrieb (siehe resolveMeshRelays()).
+  // Default false → Mesh ist im Ausfall des eigenen Brokers aus, statt
+  // still auf Drittanbieter umzuleiten.
+  mesh_public_fallback: false,
+  // Liste von WSS-URLs eigener MQTT-Broker (Trystero MQTT-Strategie).
+  // Wenn gesetzt, ueberspringt resolveMeshRelays() den Probe und nutzt
+  // diese URLs direkt. Quelle: config.json["mesh_relays"] / env.
+  mesh_relays:       [],
 };
 
 function applySettingsState(s) {
   for (const k of Object.keys(_settingsState)) {
     if (typeof s[k] === 'boolean') _settingsState[k] = s[k];
   }
+  // mesh_relays ist ein Array, nicht boolean → separat uebernehmen.
+  if (Array.isArray(s.mesh_relays)) _settingsState.mesh_relays = s.mesh_relays;
   // Settings-Dialog-Toggles synchronisieren (auch wenn Dialog gerade zu ist —
   // schadet nichts; sicherstellen dass beim naechsten Oeffnen aktuelle Werte
   // angezeigt werden).
   const aBox  = document.getElementById('setAutostart');
   const uBox  = document.getElementById('setAutoUpdate');
   const lBox  = document.getElementById('setSendLogs');
+  const fBox  = document.getElementById('setMeshPublicFallback');
+  const bBox  = document.getElementById('setBetaLogging');
   if (aBox) aBox.checked = _settingsState.windows_autostart;
   if (uBox) uBox.checked = _settingsState.auto_update;
   if (lBox) lBox.checked = _settingsState.send_logs_on_error;
+  if (fBox) fBox.checked = _settingsState.mesh_public_fallback;
+  if (bBox) bBox.checked = _settingsState.beta_logging;
 
   // Bootstrap-Promise resolven sobald wir settings_state haben — Welcome-
   // Logic (in _appStartPromise) wartet darauf um zu entscheiden ob das
@@ -4758,18 +5297,79 @@ function _bindSettingsToggle(id, key) {
 document.getElementById('openSettingsBtn')?.addEventListener('click', _openSettingsDialog);
 document.getElementById('settingsCloseBtn')?.addEventListener('click', _closeSettingsDialog);
 document.getElementById('settingsDoneBtn')?.addEventListener('click', _closeSettingsDialog);
-_bindSettingsToggle('setAutostart',  'windows_autostart');
+// Windows-Autostart-Toggle entfernt — Start mit MSFS via exe.xml ist die
+// einzige Start-Quelle (analog zu Drittentwickler-Flugzeug-Addons). Bei
+// Erstinstallation wird windows_autostart implizit false gesetzt; bei
+// Bestands-Usern bleibt der bisherige Wert in config.json wirkungslos.
 _bindSettingsToggle('setAutoUpdate', 'auto_update');
 _bindSettingsToggle('setSendLogs',   'send_logs_on_error');
+_bindSettingsToggle('setBetaLogging', 'beta_logging');
+
+// Mesh-Public-Fallback: Toggle-Wechsel triggert Reload, weil resolveMeshRelays()
+// memoized ist und laufende Trystero-Rooms nicht ohne weiteres auf neue
+// relayUrls migriert werden koennen. Reload ist robust und billig.
+(function () {
+  const fEl = document.getElementById('setMeshPublicFallback');
+  if (!fEl) return;
+  fEl.addEventListener('change', () => {
+    sendBackend({ type: 'settings_set', patch: { mesh_public_fallback: fEl.checked } });
+    // Kurzer Delay, damit das Backend den Patch persistieren kann bevor wir
+    // reloaden — sonst springt der Toggle nach Reload zurueck.
+    setTimeout(() => location.reload(), 250);
+  });
+})();
 
 // Sprach-Dropdown — clientseitig persistiert ueber i18n.setLang() (localStorage).
 // Kein Backend-Round-Trip; Sprache ist UI-only.
 (function () {
   const sel = document.getElementById('setLanguage');
   if (!sel || !window.i18n) return;
-  sel.value = window.i18n.getLang();
-  sel.addEventListener('change', () => {
-    window.i18n.setLang(sel.value);
+
+  // Anzeigenamen nur fuer die eingebauten Sprachen. Nutzereigene Dateien
+  // (z. B. fr.json) erscheinen mit ihrem Code in Grossbuchstaben.
+  const NAMES = { de: 'Deutsch', en: 'English', nl: 'Nederlands' };
+
+  function fillOptions() {
+    const cur = window.i18n.getLang();
+    sel.innerHTML = '';
+    window.i18n.supported().forEach(code => {
+      const o = document.createElement('option');
+      o.value = code;
+      o.textContent = NAMES[code] || code.toUpperCase();
+      sel.appendChild(o);
+    });
+    sel.value = cur;
+  }
+  fillOptions();
+  // Nutzersprachen kommen erst per /api/lang nach — dann Liste neu bauen.
+  window.addEventListener('i18n:changed', fillOptions);
+
+  sel.addEventListener('change', () => window.i18n.setLang(sel.value));
+
+  // Export: vollstaendige Vorlage der aktuell gewaehlten Sprache als JSON.
+  document.getElementById('langExportBtn')?.addEventListener('click', () => {
+    const code = sel.value || window.i18n.getLang();
+    const blob = new Blob([JSON.stringify(window.i18n.dict(code), null, 2)],
+                          { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = code + '.json';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
+  });
+
+  // Ordner im Explorer zeigen; der Server legt ihn samt LIESMICH.txt an und
+  // antwortet mit dem Pfad, den wir als Hinweis einblenden.
+  document.getElementById('langFolderBtn')?.addEventListener('click', () => {
+    fetch('/api/lang/open')
+      .then(r => r.ok ? r.text() : Promise.reject())
+      .then(p => {
+        const hint = document.getElementById('langHint');
+        if (hint && p) hint.textContent = p;
+      })
+      .catch(() => {});
   });
 })();
 

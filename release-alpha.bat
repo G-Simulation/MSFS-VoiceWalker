@@ -1,173 +1,176 @@
 @echo off
 REM ============================================================
-REM   VoiceWalker — Alpha Release Script
+REM   VoiceWalker — Release Script
+REM
+REM   Aufruf:  release-alpha.bat [version]
+REM            release-alpha.bat            -> nimmt DEFAULT_VERSION
+REM            release-alpha.bat 0.2.0      -> Tag v0.2.0
 REM
 REM   Was es macht:
-REM     1) git init (falls noch nicht)
-REM     2) alle Dateien committen
-REM     3) zu github.com/G-Simulation/MSFS-VoiceWalker pushen (via SSH)
-REM     4) Tag v0.1.0 setzen und pushen
-REM     5) Wenn 'gh' CLI installiert: GitHub-Release direkt erstellen,
-REM        MSI anhaengen, RELEASE_NOTES einfuegen, als Pre-Release markieren
+REM     1) prueft dass der Working Tree sauber ist
+REM     2) prueft dass Release-Notes und Setup-Artefakt existieren
+REM     3) zeigt den SHA256 und vergleicht ihn mit den Release-Notes
+REM     4) pusht den AKTUELLEN Branch
+REM     5) setzt Tag v<version> und pusht ihn
+REM     6) fragt nach, legt dann via 'gh' das GitHub-Release an
+REM
+REM   Was es bewusst NICHT mehr macht (war frueher drin und gefaehrlich):
+REM     - kein 'git add -A' + Auto-Commit: das committete alles was gerade
+REM       herumlag, auch Dateien die nicht ins Repo gehoeren
+REM     - kein hartes 'push origin main': stand man auf einem Branch, wurde
+REM       ein veraltetes main veroeffentlicht
+REM     - kein 'git remote remove/add origin': das bog die Remote-URL
+REM       ungefragt auf SSH um
+REM     - kein ungefragtes Anlegen des oeffentlichen Releases
 REM
 REM   Voraussetzungen:
-REM     - Git installiert und im PATH
-REM     - SSH-Key fuer github.com eingerichtet (hast du)
-REM     - Optional: 'gh' CLI (https://cli.github.com), fuer automatischen
-REM       Release-Upload. Ohne gh musst du den Release manuell auf GitHub
-REM       anlegen und die MSI anhaengen.
+REM     - sauberer Working Tree, alles committet
+REM     - Setup gebaut (VS: Installer-Projekt -> Erstellen)
+REM     - 'gh' CLI eingeloggt (gh auth status), sonst Anleitung fuer manuell
 REM ============================================================
 setlocal ENABLEDELAYEDEXPANSION
 cd /d "%~dp0"
 
-set "REMOTE_SSH=git@github.com:G-Simulation/MSFS-VoiceWalker.git"
-set "REMOTE_HTTPS=https://github.com/G-Simulation/MSFS-VoiceWalker.git"
-set "TAG=v0.1.0"
-set "TITLE=VoiceWalker v0.1.0 (Alpha)"
+set "DEFAULT_VERSION=0.2.0"
+set "VERSION=%~1"
+if "%VERSION%"=="" set "VERSION=%DEFAULT_VERSION%"
+set "TAG=v%VERSION%"
+set "TITLE=VoiceWalker %TAG% (Alpha)"
+set "NOTES=RELEASE_NOTES_%TAG%.md"
 set "MSI=installer\bin\x64\Release\VoiceWalker-Setup.msi"
-set "NOTES=RELEASE_NOTES_v0.1.0.md"
+set "SETUPEXE=installer\bin\x64\Release\VoiceWalker-Setup.exe"
 
 echo.
 echo ============================================================
-echo   VoiceWalker Alpha Release
-echo   Remote: %REMOTE_SSH%
-echo   Tag:    %TAG%
+echo   VoiceWalker Release %TAG%
 echo ============================================================
 echo.
 
 where git >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Git nicht im PATH. Installiere Git for Windows:
-    echo         https://git-scm.com/download/win
-    pause & exit /b 1
-)
-
-REM ---------- 1. git init ----------
-if not exist ".git" (
-    echo [1/6] git init ^+ main branch
-    git init -q
-    git branch -M main
-    if errorlevel 1 goto :fail
-) else (
-    echo [1/6] .git vorhanden, ueberspringe init
-)
-
-REM ---------- 2. Remote ----------
-echo [2/6] remote 'origin' setzen
-git remote remove origin >nul 2>&1
-git remote add origin %REMOTE_SSH%
-if errorlevel 1 goto :fail
-
-REM ---------- 3. Commit ----------
-echo [3/6] staging ^+ commit
-REM Falls .vs/ frueher mal mit-indexiert wurde, jetzt rauswerfen (harmlos wenn nicht da)
-git rm -r --cached .vs 2>nul 1>nul
-
-git add -A
-if errorlevel 1 (
-    echo.
-    echo [ERROR] 'git add' fehlgeschlagen. Haeufigste Ursache:
-    echo         Visual Studio hat Dateien im .vs\-Ordner gesperrt.
-    echo         Loesung: VS schliessen ^(oder Solution schliessen^) und
-    echo                  release-alpha.bat neu starten.
+    echo [ERROR] Git nicht im PATH.
     goto :fail
 )
 
-git diff --cached --quiet
-if errorlevel 1 (
-    git commit -m "Release v0.1.0 (Alpha) — VoiceWalker" -q
-    if errorlevel 1 goto :fail
-) else (
-    echo       ^(keine neuen Aenderungen zum Committen^)
-    REM Pruefe ob ueberhaupt ein Commit auf main existiert; wenn nein, abbrechen
-    git rev-parse --verify main >nul 2>&1
-    if errorlevel 1 (
-        echo.
-        echo [ERROR] Noch kein Commit auf main. Erzeuge erstmal einen manuell:
-        echo         git add -A  ^&^&  git commit -m "Initial commit"
-        goto :fail
-    )
-)
+REM ---------- 1. Working Tree sauber? ----------
+echo [1/6] Working Tree pruefen
+for /f %%i in ('git status --porcelain 2^>nul ^| find /c /v ""') do set "DIRTY=%%i"
+if not "%DIRTY%"=="0" goto :dirty
+echo       sauber
 
-REM ---------- 3b. Signieren (wenn Cert vorhanden) ----------
-echo [3b] Code-Signing (falls CERT_SHA1 gesetzt)
-call sign.bat
-if errorlevel 1 (
-    echo [ERROR] Signierung fehlgeschlagen. Build abgebrochen.
+REM ---------- 2. Release-Notes + Artefakt ----------
+echo [2/6] Release-Notes und Setup pruefen
+if not exist "%NOTES%" (
+    echo [ERROR] %NOTES% fehlt. Lege die Datei an, bevor du releast.
     goto :fail
 )
+set "ASSET="
+if exist "%MSI%"      set "ASSET=%MSI%"
+if exist "%SETUPEXE%" set "ASSET=%SETUPEXE%"
+if "%ASSET%"=="" (
+    echo [ERROR] Weder %MSI% noch %SETUPEXE% gefunden.
+    echo         Erst bauen: Visual Studio -^> Installer-Projekt -^> Erstellen
+    goto :fail
+)
+echo       Notes:  %NOTES%
+echo       Setup:  %ASSET%
 
-REM ---------- 4. Push main ----------
-echo [4/6] push origin main
-git push -u origin main
+REM ---------- 3. SHA256 ----------
+echo [3/6] SHA256 des Setups
+set "SHA="
+for /f "skip=1 tokens=1" %%h in ('certutil -hashfile "%ASSET%" SHA256 ^| findstr /r "^[0-9a-f]"') do (
+    if not defined SHA set "SHA=%%h"
+)
+echo       %SHA%
+findstr /i /c:"%SHA%" "%NOTES%" >nul 2>&1
 if errorlevel 1 (
     echo.
-    echo [ERROR] Push fehlgeschlagen. Moegliche Ursachen:
-    echo   - Repo existiert noch nicht auf GitHub. Anlegen:
-    echo     https://github.com/organizations/G-Simulation/repositories/new
-    echo     ^(Name: MSFS-VoiceWalker, public, KEINE README/License/gitignore-Haken^)
-    echo   - SSH-Key nicht bei github hinterlegt oder kein Org-Schreibrecht
-    echo   - Falls HTTPS statt SSH bevorzugt: remote umstellen mit
-    echo       git remote set-url origin %REMOTE_HTTPS%
-    echo     und erneut pushen.
+    echo [WARNUNG] Dieser Hash steht nicht in %NOTES%.
+    echo           Der Updater prueft das Setup gegen eine Zeile
+    echo             SHA256: ^<hex^>
+    echo           im Release-Text. Fehlt sie, installiert er zwar, protokolliert
+    echo           aber dass die Integritaetspruefung uebersprungen wurde.
+    echo.
+    set /p "GOSHA=Trotzdem weiter? (j/N): "
+    if /i not "!GOSHA!"=="j" goto :aborted
+)
+
+REM ---------- 4. Aktuellen Branch pushen ----------
+for /f %%b in ('git rev-parse --abbrev-ref HEAD') do set "BRANCH=%%b"
+echo [4/6] push origin %BRANCH%
+git push origin %BRANCH%
+if errorlevel 1 (
+    echo [ERROR] Push fehlgeschlagen — Rechte oder Netzwerk pruefen.
     goto :fail
 )
 
 REM ---------- 5. Tag ----------
-echo [5/6] tag %TAG% setzen und pushen
-git tag -a %TAG% -m "Alpha release v0.1.0" 2>nul
-git push origin %TAG%
-if errorlevel 1 (
-    echo [WARN] Tag-Push fehlgeschlagen ^(evtl. schon vorhanden^). Weiter.
+echo [5/6] Tag %TAG%
+git rev-parse -q --verify "refs/tags/%TAG%" >nul
+if not errorlevel 1 (
+    echo [ERROR] Tag %TAG% existiert bereits. Waehle eine neue Version:
+    echo           release-alpha.bat 0.2.1
+    goto :fail
 )
+git tag -a %TAG% -m "Release %TAG%"
+if errorlevel 1 goto :fail
+git push origin %TAG%
+if errorlevel 1 goto :fail
 
-REM ---------- 6. GitHub Release via gh CLI ----------
+REM ---------- 6. GitHub-Release ----------
 where gh >nul 2>&1
 if errorlevel 1 (
     echo.
-    echo [6/6] 'gh' CLI nicht installiert.
-    echo.
-    echo   Bitte Release manuell anlegen:
-    echo     1^) https://github.com/G-Simulation/MSFS-VoiceWalker/releases/new
-    echo     2^) Tag %TAG% auswaehlen
-    echo     3^) Titel: %TITLE%
-    echo     4^) Notes aus %NOTES% einfuegen
-    echo     5^) "Set as a pre-release" anhaken
-    echo     6^) MSI anhaengen: %MSI%
-    echo.
-    echo   Oder 'gh' CLI installieren: https://cli.github.com
+    echo [6/6] 'gh' CLI nicht installiert — Release bitte manuell anlegen:
+    echo         https://github.com/G-Simulation/MSFS-VoiceWalker/releases/new
+    echo         Tag %TAG%, Titel "%TITLE%", Text aus %NOTES%,
+    echo         "Set as a pre-release" anhaken, %ASSET% anhaengen.
     goto :done
 )
 
-echo [6/6] gh CLI gefunden — erstelle GitHub-Release
-set "RELEASE_ARGS=%TAG% --repo G-Simulation/MSFS-VoiceWalker --title "%TITLE%" --notes-file "%NOTES%" --prerelease"
+echo.
+echo [6/6] Jetzt wird ein OEFFENTLICHES Pre-Release angelegt:
+echo         Tag:   %TAG%
+echo         Titel: %TITLE%
+echo         Datei: %ASSET%
+echo       Alle installierten VoiceWalker sehen es beim naechsten Update-Check.
+echo.
+set /p "GO=Release wirklich veroeffentlichen? (j/N): "
+if /i not "%GO%"=="j" goto :aborted
 
-if exist "%MSI%" (
-    echo       MSI gefunden, wird mit hochgeladen
-    gh release create %RELEASE_ARGS% "%MSI%"
-) else (
-    echo       [HINWEIS] %MSI% existiert nicht — erst bauen ^(VS: Installer-Projekt → Erstellen^)
-    echo       Release wird ohne MSI angelegt; du kannst sie spaeter via "gh release upload %TAG% %MSI%" nachreichen.
-    gh release create %RELEASE_ARGS%
-)
-
+gh release create %TAG% --repo G-Simulation/MSFS-VoiceWalker ^
+   --title "%TITLE%" --notes-file "%NOTES%" --prerelease "%ASSET%"
 if errorlevel 1 (
-    echo [WARN] gh release-create hat einen Fehler gemeldet.
-    echo        Pruefe ob du via 'gh auth status' eingeloggt bist.
+    echo [WARN] gh release create hat einen Fehler gemeldet.
+    echo        Pruefe 'gh auth status'.
+    goto :fail
 )
 
 :done
 echo.
 echo ============================================================
 echo  Fertig.
-echo  Repo:    https://github.com/G-Simulation/MSFS-VoiceWalker
 echo  Release: https://github.com/G-Simulation/MSFS-VoiceWalker/releases/tag/%TAG%
 echo ============================================================
 pause
 exit /b 0
 
+:dirty
+echo.
+echo [ERROR] Working Tree ist nicht sauber. Erst committen:
+echo           git status
+echo         Ein Release soll genau dem entsprechen was im Repo steht.
+goto :fail
+
+:aborted
+echo.
+echo [ABGEBROCHEN] Nichts veroeffentlicht.
+echo               Tag %TAG% ist ggf. schon gesetzt und gepusht.
+pause
+exit /b 1
+
 :fail
 echo.
-echo [ABORTED] Release fehlgeschlagen — siehe Meldungen oben.
+echo [ABGEBROCHEN] Release fehlgeschlagen — siehe Meldungen oben.
 pause
 exit /b 1

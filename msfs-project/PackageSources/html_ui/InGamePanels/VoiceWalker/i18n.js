@@ -11,7 +11,7 @@
      i18n.t('peers.distance', { d: '120m' })   // {d} im String wird ersetzt
 
    Sprache wird aus localStorage 'vw.lang' gelesen, sonst aus
-   navigator.language (de* → de, sonst en). Manuell setzbar via i18n.setLang().
+   navigator.language (de* → de, nl* → nl, sonst en). Manuell via i18n.setLang().
    Bei setLang() wird automatisch das DOM neu uebersetzt + ein 'i18n:changed'
    CustomEvent gefired, damit JS-Module ihre dynamischen Strings aktualisieren.
    ========================================================================== */
@@ -36,9 +36,22 @@
       'status.msfs_quit':      'getrennt (MSFS beendet?)',
       'status.mic_ready':      'bereit',
       'status.mic_denied':     'Zugriff verweigert',
-      'status.mesh_waiting':   'wartet auf Nachbarn',
-      'status.mesh_one':       '1 Peer',
-      'status.mesh_many':      '{n} Peers',
+      'status.mesh_waiting':         'wartet auf Nachbarn',
+      'status.mesh_offline':         'Mesh inaktiv',
+      'status.mesh_connected_empty': 'verbunden — keine Peers',
+      'status.mesh_one':             '1 Peer',
+      'status.mesh_many':            '{n} Peers',
+      'status.mesh_server_down':     'Server offline',
+      'status.mesh_emergency_empty': 'Notbetrieb · keine Peers',
+      'status.mesh_emergency_one':   'Notbetrieb · 1 Peer',
+      'status.mesh_emergency_many':  'Notbetrieb · {n} Peers',
+      'mesh.offline_prompt.title':   'Mesh-Server nicht erreichbar',
+      'mesh.offline_prompt.body':    'Unser eigener Server antwortet gerade nicht. Möchtest du in den Notbetrieb über öffentliche Broker (EMQX, HiveMQ) wechseln? <strong>Deine IP-Adresse wird dabei diesen Drittanbietern bekannt.</strong> Audio bleibt P2P.',
+      'mesh.offline_prompt.cancel':  'Mesh aus lassen',
+      'mesh.offline_prompt.accept':  'Notbetrieb aktivieren',
+      'mesh.fallback_banner.text':   '⚠ Notbetrieb — eigener Server offline, deine IP geht an EMQX/HiveMQ',
+      'mesh.fallback_banner.recheck': 'Jetzt prüfen',
+      'mesh.recovery_toast':         'Eigener Server zurück — App startet neu…',
       'strip.sim':             'Sim',
       'strip.mic':             'Mikro',
       'strip.mesh':            'Mesh',
@@ -61,14 +74,21 @@
       'settings.subtitle':     'Werden in config.json gespeichert.',
       'settings.close':        'Schliessen',
       'settings.done':         'Fertig',
-      'settings.autostart':    'Mit Windows starten',
-      'settings.autostart.desc': 'VoiceWalker läuft nach dem Login automatisch im Tray.',
+      'settings.autostart':    'Auch ohne MSFS mit Windows starten',
+      'settings.autostart.desc': 'Mit MSFS startet VoiceWalker sowieso automatisch. Diese Option lässt die App zusätzlich nach jedem Windows-Login im Tray laufen — sinnvoll z. B. für Tests ohne Sim.',
       'settings.autoupdate':   'Automatisch aktualisieren',
       'settings.autoupdate.desc': 'Updates werden im Hintergrund installiert. Beim nächsten Start kurzer Hinweis.',
       'settings.sendlogs':     'Logs bei Fehler an Entwickler senden',
       'settings.sendlogs.desc': 'Bei einem Crash wird das Log an den Entwickler-Discord geschickt. Username, Pfade, IPs, E-Mails und Lizenzkeys werden vorher automatisch ersetzt. Audiodaten landen ohnehin nie im Log.',
+      'settings.meshfallback':      'Mesh-Notbetrieb über öffentliche Server erlauben',
+      'settings.meshfallback.desc': 'Wenn unser Mesh-Server ausfällt, kann VoiceWalker stattdessen öffentliche MQTT-Broker (EMQX, HiveMQ) nutzen. Deine IP-Adresse und ungefähre Position (~20 km) werden dabei diesen Drittanbietern bekannt. Audio bleibt P2P. Standard: aus.',
+      'settings.betalogging':       'Erweiterte Beta-Logs aufzeichnen',
+      'settings.betalogging.desc':  'In der Beta-Phase werden zusätzlich Sim-Snapshots und Mesh-Events ins Log geschrieben — hilft bei der Fehlersuche. Klick auf „Logs jetzt senden" überträgt die anonymisierte Datei an den Entwickler-Discord. Standard: an. Performance-Kosten unter 0,5 %.',
       'settings.language':     'Sprache',
       'settings.language.desc': 'UI-Sprache von VoiceWalker. Greift sofort.',
+      'settings.language.export': 'Sprachdatei exportieren',
+      'settings.language.folder': 'Ordner öffnen',
+      'settings.language.hint':  'Eigene Übersetzung? Datei exportieren, in den Ordner legen, bearbeiten — und gern an info@gott3d.de schicken.',
       'settings.feedback.manual': 'Manuell:',
       'settings.feedback.placeholder': 'Kurz beschreiben (optional)…',
       'settings.feedback.send':       'Logs jetzt senden',
@@ -116,6 +136,9 @@
       'audio.speaker':         'Lautsprecher',
       'audio.volume':          'Lautstärke',
       'audio.default':         'Standard',
+      'audio.ambient.label':   'Hintergrundgeräusche',
+      'audio.ambient.on':      'An',
+      'audio.ambient.off':     'Aus',
 
       'callsign.label':        'Callsign',
 
@@ -199,7 +222,7 @@
       'welcome.b1.bold':       'Dein Mikrofon wird an Piloten in deiner Nähe übertragen.',
       'welcome.b1.body':       'Stimme gilt nach DSGVO als biometrisches Datum — wir fragen deshalb hier ausdrücklich. Du kannst jederzeit stumm schalten.',
       'welcome.b2.bold':       'Peer-to-Peer, kein zentraler Server.',
-      'welcome.b2.body':       'Für\'s Matchmaking kontaktiert dein Browser öffentliche WebTorrent-Tracker — dabei wird deine IP kurz sichtbar. Keine Namen, keine Audio-Daten. Audio läuft direkt zwischen den Piloten.',
+      'welcome.b2.body':       'Für\'s Matchmaking kontaktiert dein Browser entweder unseren eigenen Mesh-Server (wenn konfiguriert) oder als Fallback öffentliche WebTorrent-Tracker. In beiden Fällen ist dabei nur deine IP-Adresse kurz sichtbar — keine Namen, keine Audio-Daten. Audio läuft danach Ende-zu-Ende-verschlüsselt direkt zwischen den Piloten.',
       'welcome.b3.bold':       'Nichts wird dauerhaft gespeichert.',
       'welcome.b3.body':       'Weder wir noch irgendein Server kennen deine Flüge, Positionen oder Gespräche. Lokal: Callsign, Audio-Geräte, Tracking-Schalter.',
       'welcome.b4.bold':       'Virtuelle Sim-Koordinaten, nicht dein echter Ort.',
@@ -209,7 +232,9 @@
       'welcome.b6.bold':       'Logs senden ist freiwillig.',
       'welcome.b6.body':       'Username, Pfade, IPs, E-Mails und Lizenzkeys werden vor dem Upload automatisch ersetzt. Audiodaten landen ohnehin nie im Log.',
       'welcome.settings_h':    'Einstellungen',
-      'welcome.autostart':     'Mit Windows starten',
+      'welcome.biometric_consent': 'Ich willige ausdrücklich in die Verarbeitung meiner Stimme als biometrisches Datum ein (Art. 9 Abs. 2 lit. a DSGVO). Pflicht für die Voice-Funktion.',
+      'welcome.autostart':      'Auch ohne MSFS mit Windows starten (Tray)',
+      'welcome.autostart_hint': 'VoiceWalker startet sowieso automatisch mit MSFS. Diese Option ist nur nötig, wenn die App dauerhaft im Tray laufen soll (z. B. für Tests ohne Sim).',
       'welcome.autoupdate':    'Automatisch aktualisieren',
       'welcome.sendlogs':      'Bei Fehlern anonyme Logs senden (hilft bei Bug-Suche)',
       'welcome.decline':       'Ablehnen',
@@ -252,6 +277,10 @@
       'panel.private.empty':      'kein Raum aktiv',
       'panel.private.room_prefix': 'Raum',
       'panel.private.note':       'Beitritt & Verlassen nur im Browser.',
+      'panel.legal.title':        'Rechtliches',
+      'panel.legal.privacy':      'Datenschutz',
+      'panel.legal.imprint':      'Impressum',
+      'panel.legal.note':         'Im Browser anklickbar (http://127.0.0.1:7801).',
       'panel.btn.far':            'Weit',
       'panel.tooltip.ptt':        'Halten zum Sprechen',
       'panel.tooltip.tracking':   'Tracking an/aus',
@@ -273,9 +302,22 @@
       'status.msfs_quit':      'disconnected (MSFS quit?)',
       'status.mic_ready':      'ready',
       'status.mic_denied':     'access denied',
-      'status.mesh_waiting':   'waiting for neighbors',
-      'status.mesh_one':       '1 peer',
-      'status.mesh_many':      '{n} peers',
+      'status.mesh_waiting':         'waiting for neighbors',
+      'status.mesh_offline':         'mesh offline',
+      'status.mesh_connected_empty': 'connected — no peers',
+      'status.mesh_one':             '1 peer',
+      'status.mesh_many':            '{n} peers',
+      'status.mesh_server_down':     'server offline',
+      'status.mesh_emergency_empty': 'emergency · no peers',
+      'status.mesh_emergency_one':   'emergency · 1 peer',
+      'status.mesh_emergency_many':  'emergency · {n} peers',
+      'mesh.offline_prompt.title':   'Mesh server unreachable',
+      'mesh.offline_prompt.body':    'Our own server is not responding right now. Do you want to switch to emergency mode via public brokers (EMQX, HiveMQ)? <strong>Your IP address will become visible to those third parties.</strong> Audio stays P2P.',
+      'mesh.offline_prompt.cancel':  'Leave mesh off',
+      'mesh.offline_prompt.accept':  'Enable emergency mode',
+      'mesh.fallback_banner.text':   '⚠ Emergency mode — own server offline, your IP goes to EMQX/HiveMQ',
+      'mesh.fallback_banner.recheck': 'Check now',
+      'mesh.recovery_toast':         'Own server back — app reloading…',
       'strip.sim':             'Sim',
       'strip.mic':             'Mic',
       'strip.mesh':            'Mesh',
@@ -298,14 +340,21 @@
       'settings.subtitle':     'Stored in config.json.',
       'settings.close':        'Close',
       'settings.done':         'Done',
-      'settings.autostart':    'Start with Windows',
-      'settings.autostart.desc': 'VoiceWalker runs in the tray automatically after login.',
+      'settings.autostart':    'Also start with Windows even without MSFS',
+      'settings.autostart.desc': 'VoiceWalker launches with MSFS automatically. This option additionally runs the app in the tray after each Windows login — handy for tests without the sim.',
       'settings.autoupdate':   'Auto-update',
       'settings.autoupdate.desc': 'Updates are installed in the background. A short notice on next start.',
       'settings.sendlogs':     'Send logs to developer on errors',
       'settings.sendlogs.desc': 'On crash the log is sent to the developer Discord. Usernames, paths, IPs, e-mails and license keys are automatically replaced beforehand. Audio data never ends up in the log anyway.',
+      'settings.meshfallback':      'Allow mesh emergency mode via public servers',
+      'settings.meshfallback.desc': 'If our mesh server is down, VoiceWalker can fall back to public MQTT brokers (EMQX, HiveMQ). Your IP address and approximate position (~20 km) become visible to those third parties. Audio stays P2P. Default: off.',
+      'settings.betalogging':       'Record extended beta logs',
+      'settings.betalogging.desc':  'During the beta phase, sim snapshots and mesh events are additionally written to the log — helps with debugging. Clicking "Send logs now" uploads the anonymized file to the developer Discord. Default: on. Performance cost below 0.5 %.',
       'settings.language':     'Language',
       'settings.language.desc': 'VoiceWalker UI language. Applies immediately.',
+      'settings.language.export': 'Export language file',
+      'settings.language.folder': 'Open folder',
+      'settings.language.hint':  'Your own translation? Export the file, drop it in the folder, edit it — and feel free to send it to info@gott3d.de.',
       'settings.feedback.manual': 'Manual:',
       'settings.feedback.placeholder': 'Briefly describe (optional)…',
       'settings.feedback.send':       'Send logs now',
@@ -353,6 +402,9 @@
       'audio.speaker':         'Speaker',
       'audio.volume':          'Volume',
       'audio.default':         'Default',
+      'audio.ambient.label':   'Ambient sounds',
+      'audio.ambient.on':      'On',
+      'audio.ambient.off':     'Off',
 
       'callsign.label':        'Callsign',
 
@@ -436,7 +488,7 @@
       'welcome.b1.bold':       'Your microphone is transmitted to pilots near you.',
       'welcome.b1.body':       'Voice is biometric data under GDPR — we therefore ask explicitly here. You can mute at any time.',
       'welcome.b2.bold':       'Peer-to-peer, no central server.',
-      'welcome.b2.body':       'For matchmaking your browser contacts public WebTorrent trackers — your IP is briefly visible. No names, no audio data. Audio flows directly between pilots.',
+      'welcome.b2.body':       'For matchmaking your browser contacts either our own mesh server (when configured) or, as a fallback, public WebTorrent trackers. In either case only your IP is briefly visible — no names, no audio data. Audio then flows end-to-end-encrypted directly between pilots.',
       'welcome.b3.bold':       'Nothing is permanently stored.',
       'welcome.b3.body':       'Neither we nor any server know your flights, positions or conversations. Locally: callsign, audio devices, tracking switch.',
       'welcome.b4.bold':       'Virtual sim coordinates, not your real location.',
@@ -446,7 +498,9 @@
       'welcome.b6.bold':       'Sending logs is voluntary.',
       'welcome.b6.body':       'Usernames, paths, IPs, e-mails and license keys are automatically replaced before upload. Audio never ends up in the log anyway.',
       'welcome.settings_h':    'Settings',
-      'welcome.autostart':     'Start with Windows',
+      'welcome.biometric_consent': 'I expressly consent to the processing of my voice as biometric data (Art. 9 (2)(a) GDPR). Required for the voice feature.',
+      'welcome.autostart':      'Also start with Windows even without MSFS (Tray)',
+      'welcome.autostart_hint': 'VoiceWalker launches automatically with MSFS anyway. Only enable this if you want the app to run permanently in the tray (e.g. for tests without the sim).',
       'welcome.autoupdate':    'Auto-update',
       'welcome.sendlogs':      'Send anonymised logs on errors (helps with bug-hunting)',
       'welcome.decline':       'Decline',
@@ -489,15 +543,286 @@
       'panel.private.empty':      'no active room',
       'panel.private.room_prefix': 'Room',
       'panel.private.note':       'Join & leave only in the browser.',
+      'panel.legal.title':        'Legal',
+      'panel.legal.privacy':      'Privacy',
+      'panel.legal.imprint':      'Imprint',
+      'panel.legal.note':         'Clickable in the browser (http://127.0.0.1:7801).',
       'panel.btn.far':            'Far',
       'panel.tooltip.ptt':        'Hold to talk',
       'panel.tooltip.tracking':   'Toggle tracking',
       'panel.tooltip.far':        'Show distant peers',
     },
+
+    nl: {
+      'header.subtitle':       'Proximity-voice voor MSFS 2024 · P2P · geen server',
+      'header.online':         'online',
+      'header.offline':        'offline',
+      'header.tooltip.settings': 'Instellingen',
+
+      'status.connecting':     'verbinden…',
+      'status.initializing':   'initialiseren…',
+      'status.waiting_for_sim': 'wacht op sim…',
+      'status.reconnecting':   'verbinding verbroken, opnieuw verbinden…',
+      'status.connected':      'verbonden',
+      'status.demo':           'Demo (geen sim)',
+      'status.main_menu':      'Hoofdmenu / niet in de lucht',
+      'status.msfs_quit':      'verbinding verbroken (MSFS afgesloten?)',
+      'status.mic_ready':      'gereed',
+      'status.mic_denied':     'toegang geweigerd',
+      'status.mesh_waiting':         'wacht op buren',
+      'status.mesh_offline':         'mesh offline',
+      'status.mesh_connected_empty': 'verbonden — geen peers',
+      'status.mesh_one':             '1 peer',
+      'status.mesh_many':            '{n} peers',
+      'status.mesh_server_down':     'server offline',
+      'status.mesh_emergency_empty': 'noodmodus · geen peers',
+      'status.mesh_emergency_one':   'noodmodus · 1 peer',
+      'status.mesh_emergency_many':  'noodmodus · {n} peers',
+      'mesh.offline_prompt.title':   'Mesh-server niet bereikbaar',
+      'mesh.offline_prompt.body':    'Onze eigen server reageert op dit moment niet. Wil je overschakelen naar de noodmodus via publieke brokers (EMQX, HiveMQ)? <strong>Je IP-adres wordt daarbij zichtbaar voor die derde partijen.</strong> Audio blijft P2P.',
+      'mesh.offline_prompt.cancel':  'Mesh uit laten',
+      'mesh.offline_prompt.accept':  'Noodmodus inschakelen',
+      'mesh.fallback_banner.text':   '⚠ Noodmodus — eigen server offline, je IP gaat naar EMQX/HiveMQ',
+      'mesh.fallback_banner.recheck': 'Nu controleren',
+      'mesh.recovery_toast':         'Eigen server terug — app wordt herladen…',
+      'strip.sim':             'Sim',
+      'strip.mic':             'Mic',
+      'strip.mesh':            'Mesh',
+
+      'tabs.radar':            'Radar',
+      'tabs.setup':            'Setup',
+      'tabs.pro':              'Pro & Events',
+
+      'btn.ptt':               'PTT',
+      'btn.ptt.tooltip':       'Ingedrukt houden om te praten',
+      'btn.tracking':          'Tracking',
+      'btn.tracking.tooltip':  'Tracking aan/uit',
+      'btn.far':               'Ver',
+      'btn.far.tooltip':       'Peers op afstand tonen',
+
+      'peers.empty':           'niemand in de buurt',
+      'speaking.label':        'spreekt',
+
+      'settings.title':        'Instellingen',
+      'settings.subtitle':     'Opgeslagen in config.json.',
+      'settings.close':        'Sluiten',
+      'settings.done':         'Klaar',
+      'settings.autostart':    'Ook met Windows starten zonder MSFS',
+      'settings.autostart.desc': 'VoiceWalker start automatisch mee met MSFS. Deze optie draait de app daarnaast na elke Windows-aanmelding in het systeemvak — handig om te testen zonder de sim.',
+      'settings.autoupdate':   'Automatisch bijwerken',
+      'settings.autoupdate.desc': 'Updates worden op de achtergrond geïnstalleerd. Bij de volgende start zie je een korte melding.',
+      'settings.sendlogs':     'Logboek bij fouten naar de ontwikkelaar sturen',
+      'settings.sendlogs.desc': 'Bij een crash wordt het logboek naar de Discord van de ontwikkelaar gestuurd. Gebruikersnamen, paden, IP-adressen, e-mailadressen en licentiesleutels worden vooraf automatisch vervangen. Audio komt sowieso nooit in het logboek terecht.',
+      'settings.meshfallback':      'Mesh-noodmodus via publieke servers toestaan',
+      'settings.meshfallback.desc': 'Als onze mesh-server uitvalt, kan VoiceWalker terugvallen op publieke MQTT-brokers (EMQX, HiveMQ). Je IP-adres en je positie bij benadering (~20 km) worden dan zichtbaar voor die derde partijen. Audio blijft P2P. Standaard: uit.',
+      'settings.betalogging':       'Uitgebreide bètalogboeken vastleggen',
+      'settings.betalogging.desc':  'Tijdens de bètafase worden sim-snapshots en mesh-gebeurtenissen extra in het logboek geschreven — dat helpt bij het opsporen van fouten. Met "Logboek nu versturen" gaat het geanonimiseerde bestand naar de Discord van de ontwikkelaar. Standaard: aan. Prestatiekosten onder 0,5 %.',
+      'settings.language':     'Taal',
+      'settings.language.desc': 'Taal van de VoiceWalker-interface. Werkt direct.',
+      'settings.language.export': 'Taalbestand exporteren',
+      'settings.language.folder': 'Map openen',
+      'settings.language.hint':  'Eigen vertaling? Exporteer het bestand, zet het in de map, pas het aan — en stuur het gerust naar info@gott3d.de.',
+      'settings.feedback.manual': 'Handmatig:',
+      'settings.feedback.placeholder': 'Kort omschrijven (optioneel)…',
+      'settings.feedback.send':       'Logboek nu versturen',
+
+      'pane.miclevel':         'Microfoonniveau',
+
+      'update.available':      'Update beschikbaar',
+      'update.install':        'Nu installeren',
+      'update.details':        'Details',
+      'update.dismiss':        'Sluiten',
+
+      'radar.title':           'Radar',
+      'radar.heading_up':      'Heading Up',
+      'radar.headphones_hint': 'Koptelefoon voor echt richtinggevoel · scrollen = zoomen',
+      'radar.legend.both':     'over en weer hoorbaar',
+      'radar.legend.you_hear': 'jij hoort hen',
+      'radar.legend.he_hears': 'zij horen jou',
+      'radar.legend.out':      'buiten bereik',
+      'radar.legend.speaking': 'spreekt nu',
+
+      'self.title':            'Jij',
+      'self.view':             'Weergave',
+      'self.position':         'Positie',
+      'self.agl':              'Hoogte AGL',
+      'self.cell':             'Mesh-cel',
+      'self.aircraft':         'Vliegtuig',
+      'self.tracking.on':      'Zichtbaar',
+      'self.tracking.off':     'Stand-by',
+      'self.tracking.hidden':  'Verborgen',
+      'self.tracking.tooltip': 'Tracking aan/uit zetten',
+      'self.mode.no_sim':      'Geen sim',
+      'self.mode.menu':        'Hoofdmenu',
+
+      'ptt.hold_space':        'Spatiebalk ingedrukt houden om te praten',
+      'ptt.summary':           'USB-PTT toewijzen (optioneel)',
+      'ptt.binding':           'Huidige koppeling',
+      'ptt.binding.none':      'geen',
+      'ptt.devices':           'Gevonden apparaten',
+      'ptt.bind':              'Toets toewijzen',
+      'ptt.cancel':            'Annuleren',
+      'ptt.clear':             'Wissen',
+      'ptt.help':              'Klik op "Toets toewijzen" en druk daarna op een knop van je joystick / HOTAS / yoke / buttonbox. Werkt daarna ook wanneer MSFS de focus heeft.',
+
+      'audio.mic':             'Microfoon',
+      'audio.speaker':         'Luidspreker',
+      'audio.volume':          'Volume',
+      'audio.default':         'Standaard',
+      'audio.ambient.label':   'Omgevingsgeluiden',
+      'audio.ambient.on':      'Aan',
+      'audio.ambient.off':     'Uit',
+
+      'callsign.label':        'Callsign',
+
+      'mic.options':           'Microfoonopties',
+      'mic.vox.title':         'Open microfoon (VOX)',
+      'mic.vox.desc.1':        'Zendt automatisch zodra je praat — geen knop ingedrukt houden. Handig met VR of wanneer beide handen aan de yoke / HOTAS zitten. Standaard is',
+      'mic.vox.desc.2':        'spatiebalk ingedrukt houden',
+
+      'license.summary':       'Pro ontgrendelen',
+      'license.status.free':   'Gratis versie — voer je Pro-sleutel in om te ontgrendelen',
+      'license.placeholder':   'bijv. DEV-PRO-TESTER of LMFWC-sleutel',
+      'license.activate':      'Activeren',
+      'license.help.1':        'Nog geen sleutel? Pro (€ 7,99 eenmalig) is te koop op',
+      'license.help.2':        'Onbeperkt peers, privéruimtes, supporter-badge.',
+
+      'stream.summary':        'Streammodus (voor Twitch / YouTube)',
+      'stream.intro':          'Voor streamers: andere pilotenstemmen worden automatisch weggedraaid zodra jij praat (zoals ducking in Discord), plus een transparante browseroverlay voor OBS.',
+      'stream.ducking.title':  'Automatische ducking',
+      'stream.ducking.desc':   'Andere piloten worden teruggeregeld naar ~30 % zolang jij in de microfoon praat. Jouw commentaar blijft leidend in de stream.',
+      'stream.obs.title':      'OBS-browserbron',
+      'stream.obs.howto.1':    'In OBS:',
+      'stream.obs.howto.2':    'Bronnen → + → Browser → Toevoegen',
+      'stream.obs.howto.3':    ', plak deze URL:',
+      'stream.obs.copy':       'Kopiëren',
+      'stream.obs.help.1':     'Breedte 400 × hoogte 600 aanbevolen. Zet in het OBS-browserdialoog',
+      'stream.obs.help.2':     '"Achtergrond bepalen"',
+      'stream.obs.help.3':     'aan (transparant) — dan verschijnen alleen piloten die op dat moment praten als pill-labels in de stream.',
+
+      'mesh.public':           'Publieke mesh',
+      'mesh.private.label':    'Privéruimte',
+      'mesh.private.btn':      'Privéruimte…',
+      'mesh.private.help':     'Voer een wachtwoordzin in — alle piloten met dezelfde zin komen in dezelfde privémesh terecht (wereldwijd, zonder geohash).',
+      'mesh.private.placeholder': 'Wachtwoordzin (min. 6 tekens)',
+      'mesh.private.join':     'Deelnemen',
+
+      'peers.title':           'Piloten',
+      'peers.show_far':        'incl. buiten bereik',
+      'peers.waiting':         'Wachten op andere piloten in de buurt…',
+
+      'footer.p2p.1':          'P2P via publieke WebTorrent-trackers · geen registratie ·',
+      'footer.overlay':        'Mini-overlay openen',
+      'footer.foss':           'VoiceWalker is vrije software (Apache 2.0).',
+      'footer.donate':         'Als deze tool je helpt, is een donatie welkom:',
+      'footer.paypal':         '☕ via PayPal',
+
+      'consent.title':         'Even kort',
+      'consent.intro':         'Voordat VoiceWalker start, dit is wat er achter de schermen gebeurt. Geen lange voorwaarden, alleen het belangrijkste:',
+      'consent.b1.bold':       'Je microfoon wordt uitgezonden naar piloten bij jou in de buurt.',
+      'consent.b1.body':       'Stem is een biometrisch gegeven onder de AVG — daarom vragen we het hier uitdrukkelijk. Je kunt op elk moment dempen of de schakelaar',
+      'consent.b1.italic':     'Zichtbaar/Verborgen',
+      'consent.b1.tail':       'gebruiken.',
+      'consent.b2.bold':       'Peer-to-peer, geen centrale server.',
+      'consent.b2.body':       'Om andere piloten te vinden neemt je browser contact op met publieke WebTorrent-trackers (openwebtorrent.com e.a.) — je IP is daarbij kort zichtbaar. Geen namen, geen callsign, geen audio bereikt die trackers. Na het koppelen loopt alles rechtstreeks tussen jou en je peers.',
+      'consent.b3.bold':       'Er wordt niets blijvend opgeslagen.',
+      'consent.b3.body':       'Noch wij noch een server kent je vluchten, posities of gesprekken. Wat lokaal op je pc blijft: callsign, gekozen audioapparaat, tracking-schakelaar (in config.json en localStorage).',
+      'consent.b4.bold':       'Virtuele sim-coördinaten, niet je echte locatie.',
+      'consent.b4.body':       'Wat gedeeld wordt is je virtuele vliegtuig / avatar in MSFS — geen echte gps-gegevens van je pc.',
+      'consent.b5.bold':       'De Pro-licentie wordt bij onze eigen server gecontroleerd.',
+      'consent.b5.body':       'Voer je een Pro-sleutel in, dan stuurt de app alleen die sleutel naar gsimulations.de ter controle. Het resultaat wordt lokaal bewaard (7 dagen offline-marge). In de gratis versie gebeurt dit helemaal niet.',
+      'consent.b6.bold':       'Logboek versturen is vrijwillig (standaard uit).',
+      'consent.b6.body':       'Zet je "Logboek bij fouten versturen" aan of druk je op de knop, dan gaat voicewalker.log naar een Discord van de ontwikkelaar. Vóór verzending worden gebruikersnamen, paden, IP-adressen, e-mailadressen en licentiesleutels automatisch vervangen. Audio komt sowieso nooit in het logboek terecht.',
+      'consent.privacy_link':  'Volledige privacyverklaring',
+      'consent.imprint_link':  'Colofon',
+      'consent.decline':       'Nee, bedankt',
+      'consent.accept':        'Begrepen & starten',
+
+      'firstrun.title':        'Nog één stap',
+      'firstrun.intro':        'Drie schakelaars — je kunt ze altijd aanpassen via het tandwielmenu.',
+      'firstrun.autostart':    'Met Windows starten',
+      'firstrun.autostart.desc': 'Draait na het aanmelden automatisch in het systeemvak, klaar voor MSFS.',
+      'firstrun.autoupdate':   'Automatisch bijwerken',
+      'firstrun.autoupdate.desc': 'Aanbevolen — kleine update (~30 MB) installeert zonder melding.',
+      'firstrun.sendlogs':     'Logboek bij fouten versturen',
+      'firstrun.sendlogs.desc': 'Helpt mij problemen sneller te vinden — je kunt dit altijd uitzetten.',
+      'firstrun.save':         'Opslaan en starten',
+
+      // ----- Welkomstvenster (alles-in-één bij de eerste start) -----
+      'welcome.title':         'Welkom bij VoiceWalker',
+      'welcome.intro':         'Even instellen, daarna draait het vanzelf. Eén bevestiging en je bent klaar.',
+      'welcome.privacy_h':     'Privacy',
+      'welcome.b1.bold':       'Je microfoon wordt uitgezonden naar piloten bij jou in de buurt.',
+      'welcome.b1.body':       'Stem is een biometrisch gegeven onder de AVG — daarom vragen we het hier uitdrukkelijk. Je kunt op elk moment dempen.',
+      'welcome.b2.bold':       'Peer-to-peer, geen centrale server.',
+      'welcome.b2.body':       'Voor het koppelen neemt je browser contact op met onze eigen mesh-server (als die is ingesteld) of anders met publieke WebTorrent-trackers. In beide gevallen is alleen je IP kort zichtbaar — geen namen, geen audio. Audio loopt daarna eind-tot-eind versleuteld rechtstreeks tussen piloten.',
+      'welcome.b3.bold':       'Er wordt niets blijvend opgeslagen.',
+      'welcome.b3.body':       'Noch wij noch een server kent je vluchten, posities of gesprekken. Lokaal: callsign, audioapparaten, tracking-schakelaar.',
+      'welcome.b4.bold':       'Virtuele sim-coördinaten, niet je echte locatie.',
+      'welcome.b4.body':       'Gedeeld wordt de positie van je avatar in MSFS — geen echte gps-gegevens van je pc.',
+      'welcome.b5.bold':       'De Pro-licentie wordt bij onze eigen server gecontroleerd.',
+      'welcome.b5.body':       'Voer je een Pro-sleutel in, dan stuurt de app alleen die sleutel naar gsimulations.de ter controle. In de gratis versie gebeurt dit helemaal niet.',
+      'welcome.b6.bold':       'Logboek versturen is vrijwillig.',
+      'welcome.b6.body':       'Gebruikersnamen, paden, IP-adressen, e-mailadressen en licentiesleutels worden vóór verzending automatisch vervangen. Audio komt sowieso nooit in het logboek terecht.',
+      'welcome.settings_h':    'Instellingen',
+      'welcome.biometric_consent': 'Ik geef uitdrukkelijk toestemming voor de verwerking van mijn stem als biometrisch gegeven (art. 9 lid 2 sub a AVG). Vereist voor de spraakfunctie.',
+      'welcome.autostart':      'Ook met Windows starten zonder MSFS (systeemvak)',
+      'welcome.autostart_hint': 'VoiceWalker start sowieso automatisch mee met MSFS. Zet dit alleen aan als je de app permanent in het systeemvak wilt hebben (bijv. om te testen zonder de sim).',
+      'welcome.autoupdate':    'Automatisch bijwerken',
+      'welcome.sendlogs':      'Geanonimiseerd logboek bij fouten versturen (helpt bij het opsporen van bugs)',
+      'welcome.decline':       'Weigeren',
+      'welcome.accept':        'Accepteren & starten',
+
+      'update.installed':      'Update geïnstalleerd',
+
+      'peers.section.in_range':   'binnen hoorbereik',
+      'peers.section.out_range':  'buiten bereik',
+      'peers.section.cockpit_other': 'in cockpit (andere wereld)',
+      'peers.section.foot_other':    'te voet (andere wereld)',
+      'peers.none_in_range':      'niemand binnen bereik',
+      'peer.badge.foot':          'te voet',
+
+      // ----- InGame-paneel (MSFS-werkbalk) -----
+      'panel.audio':              'Audio',
+      'panel.control':            'Bediening',
+      'panel.profile':            'Profiel',
+      'panel.modes':              'Modus',
+      'panel.mode.vox':           'Open (VOX)',
+      'panel.ptt_key':            'PTT-toets',
+      'panel.bind.assign':        'toewijzen',
+      'panel.bind.change':        'wijzigen',
+      'panel.bind.cancel':        'annuleren',
+      'panel.bind.bound':         'gekoppeld',
+      'panel.bind.press':         'druk nu op een toets...',
+      'panel.bind.key_prefix':    'Toets',
+      'panel.bind.btn_short':     'Knop',
+      'panel.bind.joystick_fallback': 'Joystick',
+      'panel.peers.title':        'Piloten in de buurt',
+      'panel.peers.empty':        'niemand in de buurt',
+      'panel.peers.tracking_off': 'tracking uit',
+      'panel.peers.activate_browser': 'activeren in de browser',
+      'panel.pro.section_title':  'Pro-licentie',
+      'panel.pro.intro':          'Voer je licentiesleutel in de browser in:',
+      'panel.pro.open_browser':   'instellen in de browser',
+      'panel.pro.pill_active':    'Pro actief',
+      'panel.pro.pill_free':      'Gratis',
+      'panel.private.title':      'Privéruimte',
+      'panel.private.empty':      'geen actieve ruimte',
+      'panel.private.room_prefix': 'Ruimte',
+      'panel.private.note':       'Deelnemen & verlaten alleen in de browser.',
+      'panel.legal.title':        'Juridisch',
+      'panel.legal.privacy':      'Privacy',
+      'panel.legal.imprint':      'Colofon',
+      'panel.legal.note':         'Klikbaar in de browser (http://127.0.0.1:7801).',
+      'panel.btn.far':            'Ver',
+      'panel.tooltip.ptt':        'Ingedrukt houden om te praten',
+      'panel.tooltip.tracking':   'Tracking aan/uit',
+      'panel.tooltip.far':        'Peers op afstand tonen',
+    },
   };
 
   const STORAGE_KEY = 'vw.lang';
-  const SUPPORTED = ['de', 'en'];
+  const SUPPORTED = ['de', 'en', 'nl'];
 
   function detectDefault() {
     try {
@@ -506,6 +831,7 @@
     } catch (_) {}
     const nav = (navigator && navigator.language || '').toLowerCase();
     if (nav.startsWith('de')) return 'de';
+    if (nav.startsWith('nl')) return 'nl';
     return 'en';
   }
 
@@ -562,11 +888,86 @@
   function getLang() { return LANG; }
   function supported() { return SUPPORTED.slice(); }
 
+  // Vollstaendiges Woerterbuch einer Sprache — Grundlage fuer den Export.
+  // en als Basis, damit die Vorlage auch dann alle Keys enthaelt, wenn eine
+  // Nutzersprache nur teilweise uebersetzt ist.
+  function dict(lang) {
+    return Object.assign({}, TR.en, TR[lang || LANG] || {});
+  }
+
+  // --- Nutzereigene Sprachdateien -------------------------------------------
+  // Der lokale Server liefert unter /api/lang den Inhalt von
+  // <data_dir>/lang/*.json als { code: { key: text } }. Eingebaute Sprachen
+  // werden dabei pro Key ueberschrieben (praktisch fuer Korrekturen),
+  // unbekannte Codes kommen als neue Sprache dazu — mit en als Basis, damit
+  // eine unvollstaendige Uebersetzung nie leere Felder erzeugt.
+  function applyPacks(packs) {
+    let added = 0, patched = 0;
+    for (const code in packs) {
+      const pack = packs[code];
+      if (!pack || typeof pack !== 'object') continue;
+      if (!TR[code]) { TR[code] = Object.assign({}, TR.en); added++; }
+      else { patched++; }
+      for (const k in pack) {
+        if (typeof pack[k] === 'string') TR[code][k] = pack[k];
+      }
+      if (!SUPPORTED.includes(code)) SUPPORTED.push(code);
+    }
+    return { added, patched };
+  }
+
+  function packUrls() {
+    const urls = [];
+    try {
+      const p = location.protocol;
+      if (p === 'http:' || p === 'https:') urls.push('/api/lang');
+    } catch (_) {}
+    // Das MSFS-Panel laeuft nicht auf unserem Origin — dort absolut auf den
+    // lokalen Server, dieselben Hosts die panel.js fuer den WebSocket nutzt.
+    urls.push('http://localhost:7801/api/lang');
+    urls.push('http://127.0.0.1:7801/api/lang');
+    return urls;
+  }
+
+  function loadUserPacks() {
+    // Bewusst ohne await/async-Kette nach aussen: schlaegt alles fehl (kein
+    // fetch, Server noch nicht da, keine Dateien), bleibt es bei den
+    // eingebauten Sprachen. Die App startet dadurch nie langsamer.
+    const urls = packUrls();
+    let i = 0;
+    function next() {
+      if (i >= urls.length) return;
+      const url = urls[i++];
+      let p;
+      try { p = fetch(url, { cache: 'no-store' }); } catch (_) { return next(); }
+      p.then(res => (res && res.ok) ? res.json() : Promise.reject())
+       .then(packs => {
+         if (!packs || typeof packs !== 'object') return;
+         const n = applyPacks(packs);
+         if (!n.added && !n.patched) return;
+         // Eine gespeicherte Wahl kann jetzt gueltig geworden sein, weil die
+         // Sprache erst mit den Nutzerdateien dazugekommen ist.
+         try {
+           const saved = localStorage.getItem(STORAGE_KEY);
+           if (saved && SUPPORTED.includes(saved)) LANG = saved;
+         } catch (_) {}
+         document.documentElement.lang = LANG;
+         applyDOM();
+         window.dispatchEvent(new CustomEvent('i18n:changed', { detail: { lang: LANG } }));
+       })
+       .catch(() => next());
+    }
+    next();
+  }
+
   // Beim Boot DOM uebersetzen — falls i18n.js vor DOMContentLoaded geladen,
   // warten wir; sonst direkt anwenden.
   function boot() {
     document.documentElement.lang = LANG;
     applyDOM();
+    // Nutzerdateien erst danach: das DOM steht bereits in einer eingebauten
+    // Sprache, ein Nachziehen ist unkritisch und blockiert den Start nicht.
+    loadUserPacks();
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot);
@@ -574,5 +975,5 @@
     boot();
   }
 
-  window.i18n = { t, setLang, getLang, supported, applyDOM };
+  window.i18n = { t, setLang, getLang, supported, applyDOM, dict, reloadPacks: loadUserPacks };
 })();

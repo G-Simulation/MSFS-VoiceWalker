@@ -1,0 +1,3 @@
+# Dev-Dependencies (NICHT in PyInstaller-Bundle).
+# Installation: python -m pip install -r requirements-dev.txt
+pytest>=8.0

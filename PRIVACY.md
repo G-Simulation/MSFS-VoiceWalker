@@ -127,6 +127,33 @@ zwingend erforderlich ist:
   mit DNS-Resolvern. Wer keine Daten an US-Server übermitteln möchte, kann
   VoiceWalker nicht im öffentlichen Mesh nutzen.
 
+### 5.1b Öffentliche MQTT-Broker (nur bei aktivem Opt-In `mesh_public_fallback`)
+
+- **Standardverhalten:** **aus.** Im Standardbetrieb wird kein Drittanbieter-Broker
+  kontaktiert.
+- **Wirkung des Opt-In:** Nur wenn der Nutzer in den Einstellungen den Schalter
+  *„Mesh-Notbetrieb über öffentliche Server erlauben"* aktiviert UND der eigene
+  Mesh-Server zum Verbindungszeitpunkt nicht erreichbar ist, weicht die App
+  ersatzweise auf folgende öffentliche MQTT-Broker aus:
+  - `broker.emqx.io` — **EMQX Inc.**, 25-29, Hosier Lane, London EC1A 9LQ,
+    United Kingdom (Cloud-Infrastruktur in den USA). **Drittlandtransfer:** USA.
+  - `broker.hivemq.com` — **HiveMQ GmbH**, Schaffhauser Str. 5, 73728 Esslingen
+    am Neckar, Deutschland.
+- **Übertragene Daten:** IP-Adresse, Geohash-Kennung der aktuellen Zelle (~20 km
+  Genauigkeit), zufällige Peer-ID. **Keine Audio-Daten** — Sprache läuft
+  weiterhin Ende-zu-Ende über WebRTC zwischen den Piloten.
+- **Zweck:** Notfall-Vermittlung des ersten Kontakts zu anderen Piloten, wenn
+  der eigene Server ausfällt. Sobald die Peer-Verbindung steht, wird der Broker
+  nicht mehr für Audio genutzt.
+- **Drittlandtransfer (EMQX):** USA. Es liegen keine Standardvertragsklauseln
+  gem. Art. 46 DSGVO vor; die Nutzung erfolgt ausschließlich auf Grundlage
+  der ausdrücklichen Einwilligung gem. Art. 49 Abs. 1 lit. a DSGVO durch
+  Aktivieren des Opt-In-Schalters.
+- **Rechtsgrundlage:** Art. 6 Abs. 1 lit. a DSGVO (Einwilligung). Die
+  Einwilligung kann jederzeit widerrufen werden, indem der Schalter in den
+  Einstellungen wieder deaktiviert wird; ab dann wird kein öffentlicher
+  Broker mehr kontaktiert.
+
 ### 5.2 Google STUN-Server (NAT-Traversal)
 
 - **Server:** `stun.l.google.com:19302`
@@ -157,6 +184,15 @@ zwingend erforderlich ist:
 - **Wann:** Nur, wenn Sie aktiv den Button **„Logs jetzt senden"**
   klicken, **oder** wenn Sie in den Einstellungen den Schalter
   **„Logs bei Fehler senden"** aktiviert haben (Standard: aus).
+- **Beta-Phase — erweiterte Logs:** Während der Beta ist der Schalter
+  **„Erweiterte Beta-Logs aufzeichnen"** standardmäßig aktiviert. Dann
+  enthält die lokale Logdatei zusätzlich Sim-Snapshots (Kamera-Status,
+  Position als virtuelle Sim-Koordinate, in_menu-Flag), Mesh-Events
+  (Peer-Join/-Leave, Geohash-Cell-Wechsel, ohne IP-Adressen) und
+  Tray-Lifecycle. Diese Daten werden **nur lokal** gespeichert und gehen
+  ausschließlich dann an Discord, wenn Sie aktiv „Logs jetzt senden"
+  klicken. Die Anonymisierung gemäß Abschnitt 6 greift weiterhin.
+  Schalter kann jederzeit in den Einstellungen deaktiviert werden.
 - **Drittlandtransfer:** USA. Discord ist nach dem EU-US Data Privacy
   Framework zertifiziert.
 - **Widerruf:** Den Toggle jederzeit deaktivieren; bereits übertragene Logs

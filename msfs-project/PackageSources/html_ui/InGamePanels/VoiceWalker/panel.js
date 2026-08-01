@@ -245,7 +245,24 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     scheduleRender();
   }
-  VW.resizeTimer = setInterval(resizeCanvas, 500);
+  // ResizeObserver wenn verfuegbar (kein Polling), sonst Fallback auf 500-ms-
+  // setInterval. Coherent-GT in MSFS 2024 unterstuetzt ResizeObserver; in
+  // 2020 ist es teils nicht zuverlaessig — deshalb bleibt der Fallback drin.
+  if (typeof ResizeObserver !== 'undefined') {
+    try {
+      const _wrap = $('vw-radar-wrap');
+      if (_wrap) {
+        VW.resizeObserver = new ResizeObserver(resizeCanvas);
+        VW.resizeObserver.observe(_wrap);
+      } else {
+        VW.resizeTimer = setInterval(resizeCanvas, 500);
+      }
+    } catch (_) {
+      VW.resizeTimer = setInterval(resizeCanvas, 500);
+    }
+  } else {
+    VW.resizeTimer = setInterval(resizeCanvas, 500);
+  }
   // Boot-Phase: in den ersten ~2 Sekunden alle 16 ms (60 fps) resizen,
   // damit der Canvas dem Layout-Settle direkt folgt statt erst beim
   // 500-ms-Tick auf "richtige Groesse" zu springen. Kostet quasi nichts
@@ -268,7 +285,16 @@
     // N/O/S/W-Compass-Marker AUSSERHALB des Kreises (analog Web-UI).
     const R  = Math.min(W, H) / 2 - 32;
 
-    ctx.clearRect(0, 0, W, H);
+    // Backing-Store komplett wischen, nicht nur CSS-Pixel-Bereich. Coherent
+    // GT (insb. EFB) hat sporadisch einen ungewischten Strip am rechten Rand
+    // gezeigt — sah aus wie ein paar diagonale Linien-Artefakte. Ursache:
+    // clearRect(0,0,W,H) wirkt auf die DPR-skalierte Backing-Geometrie, und
+    // bei Sub-Pixel-Layouts deckt es nicht die letzte Backing-Spalte. Sicher
+    // ist clearRect mit Identity-Transform auf die rohe canvas.width/height.
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
 
     // Dunkle Scheibe mit weichem Edge-Fade analog Web-UI: in der Mitte
     // Akzent-Glow, bis 95% R volle Fuell-Farbe, von 95% bis ~108% R Alpha
@@ -780,8 +806,16 @@
   // (sim @10 Hz, overlay @10 Hz) und Rotationen ruckeln in 100-ms-Stufen.
   // Mit Heading-Interpolation (siehe smoothedHeading() in render()) wird
   // die Drehung weichgezogen zwischen den Sim-Updates.
-  function _continuousLoop() {
-    try { render(); } catch (e) { /* render-Fehler werden in render() geloggt */ }
+  // FPS-Cap: Coherent kann RAF in Bursts feuern (manchmal >60 fps), ohne
+  // Cap konkurriert das Panel mit dem MSFS-Render-Thread → User sieht
+  // Sim-Stuttering. 60-fps-Cap (16 ms) reicht visuell und entspannt CPU.
+  const _RAF_MIN_DT = 16;
+  function _continuousLoop(_now) {
+    const _t = _now || performance.now();
+    if (!_continuousLoop._lastT || (_t - _continuousLoop._lastT) >= _RAF_MIN_DT) {
+      _continuousLoop._lastT = _t;
+      try { render(); } catch (e) { /* render-Fehler werden in render() geloggt */ }
+    }
     VW.contRafId = requestAnimationFrame(_continuousLoop);
   }
   VW.contRafId = requestAnimationFrame(_continuousLoop);
@@ -945,6 +979,16 @@
         state.ui.trackingEnabled = !!m.enabled;
         if (!m.enabled) state.trackingOff = true;
         else state.trackingOff = false;
+      } else if (m.type === 'ambient_state') {
+        // Backend hat den Ambient-Mute geflippt (durch eigenes Click oder
+        // durch ein anderes UI). Wir spiegeln den Zustand auf die zwei
+        // .vw-mode-btn (vw-ambient-on / vw-ambient-off) per active-Klasse.
+        if (!state.ui) state.ui = {};
+        state.ui.ambientEnabled = !!m.enabled;
+        const ambOn  = $('vw-ambient-on');
+        const ambOff = $('vw-ambient-off');
+        if (ambOn)  ambOn.classList.toggle('active', !!m.enabled);
+        if (ambOff) ambOff.classList.toggle('active', !m.enabled);
       } else if (m.type === 'version') {
         const vEl = $('vw-version');
         if (vEl && m.version) vEl.textContent = 'v' + m.version;
@@ -1202,6 +1246,17 @@
       }
       if (id === 'vw-mode-vox') {
         if (!(state.ui && state.ui.voxMode)) sendActionPayload({ action: 'toggle-vox' });
+        return;
+      }
+      // Ambient-Mute (Schritte/Propeller/Jet/Heli). Click auf den nicht-
+      // aktiven Button → Backend togglet, broadcastet ambient_state, UI
+      // rendert sich auf den Reaktion vom Backend, nicht auf den Click.
+      if (id === 'vw-ambient-on') {
+        if (!(state.ui && state.ui.ambientEnabled)) sendActionPayload({ action: 'toggle-ambient' });
+        return;
+      }
+      if (id === 'vw-ambient-off') {
+        if (state.ui && state.ui.ambientEnabled) sendActionPayload({ action: 'toggle-ambient' });
         return;
       }
       if (id === 'vw-bind-btn') {
