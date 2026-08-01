@@ -4,7 +4,7 @@ REM   VoiceWalker — Release Script
 REM
 REM   Aufruf:  release-alpha.bat [version]
 REM            release-alpha.bat            -> nimmt DEFAULT_VERSION
-REM            release-alpha.bat 0.2.0      -> Tag v0.2.0
+REM            release-alpha.bat 0.2.1      -> Tag v0.2.1
 REM
 REM   Was es macht:
 REM     1) prueft dass der Working Tree sauber ist
@@ -31,7 +31,7 @@ REM ============================================================
 setlocal ENABLEDELAYEDEXPANSION
 cd /d "%~dp0"
 
-set "DEFAULT_VERSION=0.2.0"
+set "DEFAULT_VERSION=0.2.1"
 set "VERSION=%~1"
 if "%VERSION%"=="" set "VERSION=%DEFAULT_VERSION%"
 set "TAG=v%VERSION%"

@@ -21,7 +21,7 @@
   <Package
       Name="VoiceWalker"
       Manufacturer="G-Simulations"
-      Version="0.2.0.0"
+      Version="0.2.1.0"
       UpgradeCode="F9E8D7C6-B5A4-4392-8170-6F5E4D3C2B1A"
       Scope="perUser"
       Language="1031"
