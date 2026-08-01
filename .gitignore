@@ -98,3 +98,13 @@ packaging/.assets.stamp
 # WASM-Zwischenbau: das Ergebnis wird nach
 # msfs-project/PackageSources/modules/ kopiert und nur dort versioniert.
 MSFS/Release/
+
+# --- Nicht ins oeffentliche Repo ---
+# Dieses Repo ist public und enthaelt die App und das MSFS-Addon.
+# Alles Folgende ist Server-, Geschaefts- oder Marketingseite: es bleibt
+# lokal liegen und gehoert in ein eigenes, privates Repo.
+/wordpress-plugin/
+/erpnext-app/
+/presskit/
+/SIGNPATH_APPLICATION.md
+/WP_PRIVACY_SNIPPET.md

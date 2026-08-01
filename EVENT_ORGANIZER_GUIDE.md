@@ -38,10 +38,10 @@ Technik [README.md](README.md).
   brauchen dieselbe).
 
 **Für komfortable Event-Verwaltung empfohlen:**
-- Eine **WordPress-Site** mit dem **G-Sim Events**-Plugin
-  (`wordpress-plugin/gsim-events/`). Damit kannst du Events anlegen,
-  Reichweiten/Ambient pro Event vorgeben, und automatisch ein PDF-Briefing
-  generieren.
+- Eine **WordPress-Site** mit dem **G-Sim Events**-Plugin. Damit kannst du
+  Events anlegen, Reichweiten/Ambient pro Event vorgeben, und automatisch ein
+  PDF-Briefing generieren. Das Plugin wird separat gepflegt und ist nicht Teil
+  dieses Repos.
 
 > *📷 Bild-Vorschlag:* **Veranstalter-Workflow-Diagramm** — schematische
 > Übersicht: WordPress-Event-Anlage → Passphrase + Range-Settings → REST-API →
@@ -105,7 +105,7 @@ und bietet pro Event:
 ### Plugin installieren
 
 1. WordPress-Admin → Plugins → "Add New" → ZIP hochladen
-   (`wordpress-plugin/gsim-events.zip`, gebaut mit `python wordpress-plugin/build.py`)
+   (`gsim-events.zip`)
 2. Aktivieren
 3. The Events Calendar muss installiert sein (Voraussetzung)
 
