@@ -308,9 +308,14 @@ void CALLBACK MsfsVWDispatch(SIMCONNECT_RECV* pData, DWORD /*cb*/, void* /*ctx*/
         s_simobjDataCount++;
         s_periodicStarted = true;
         s_tickCount++;
-        // Alle ~3 Ticks (≈10 Hz bei 30 fps) einen Probe publizieren.
-        // Niedriger geht nicht ohne sicht-/spürbare Verzögerung beim Drehen.
-        if ((s_tickCount % 3) == 0) fire_probe();
+        // Jeder Tick → bei 30 fps ≈ 30 Hz Publish. Backend liest die CDA mit
+        // 20 Hz; bei 10 Hz hier sahen wir periodische "Pausen" in der Drehung,
+        // weil jedes 2. Backend-Broadcast denselben heading-Wert lieferte und
+        // der Heading-Smoother in der UI alle ~80 ms aufgeholt hatte aber dann
+        // 20 ms warten musste bis der naechste WASM-Update kam. Mit 30 Hz ist
+        // der Wert in der CDA nie aelter als ~33 ms — der Smoother bekommt bei
+        // jedem 50-ms-Backend-Tick einen frischen Wert und steht nie still.
+        fire_probe();
     }
 }
 

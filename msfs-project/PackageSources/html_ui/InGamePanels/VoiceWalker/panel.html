@@ -455,11 +455,17 @@
       }
       .vw-setup-row input[type="range"] {
         flex: 1; min-width: 0;
-        /* Padding wie bei Dropdown/Text-Input — damit der Slider-Track an der
-           gleichen x-Position startet wie "Standard" / der Input-Text rechts
-           daneben. Ohne Padding klebt der Track am linken Frame-Rand und
-           wirkt 10px weiter links als die anderen Felder. */
-        padding: 0 10px;
+        /* Exakt gleiche Padding/Border-Mathematik wie .vw-setup-row select /
+           input[type="text"], sonst rendert der Range-Track 2 px breiter
+           (kein Border = mehr Innenbreite bei box-sizing: border-box) und
+           der Slider wirkt sichtbar breiter als Mic-/Speaker-/Callsign-
+           Felder daneben. Border bleibt transparent damit der Slider nicht
+           wie ein gerahmter Input aussieht — geht nur um die Box-Geometrie.
+           Background ebenfalls transparent (statt rgba), sonst kriegt der
+           Slider sichtbar einen Input-Hintergrund. */
+        padding: 6px 10px;
+        border: 1px solid transparent;
+        background: transparent;
         accent-color: var(--accent);
       }
       .vw-setup-row .pct {
@@ -722,6 +728,16 @@
               <label for="vw-vol" data-i18n="audio.volume">Lautstaerke</label>
               <input type="range" id="vw-vol" min="0" max="150" step="1" value="100">
               <span class="pct" id="vw-vol-val">100%</span>
+            </div>
+            <!-- Ambient-Mute (Schritte/Propeller/Jet/Heli). Toggle via
+                 panel_action toggle-ambient → Backend persistiert + broadcastet
+                 ambient_state, Browser-UI mutet den Mix. -->
+            <div class="vw-setup-row">
+              <label data-i18n="audio.ambient.label">Hintergrundgeraeusche</label>
+              <div class="vw-mode-toggle">
+                <div class="vw-mode-btn active" id="vw-ambient-on" data-i18n="audio.ambient.on">An</div>
+                <div class="vw-mode-btn" id="vw-ambient-off" data-i18n="audio.ambient.off">Aus</div>
+              </div>
             </div>
           </div>
 
