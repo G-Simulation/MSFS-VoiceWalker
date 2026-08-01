@@ -1,6 +1,6 @@
 # Privacy Policy — VoiceWalker
 
-**Last updated:** 28 April 2026
+**Last updated:** 1 August 2026
 **Language:** English · [Deutsche Fassung: PRIVACY.md](PRIVACY.md)
 
 This privacy policy applies to the **VoiceWalker** desktop application for
@@ -57,11 +57,19 @@ leave your machine through VoiceWalker itself:
 | Audio volume, radar range, UI language | `localStorage` | Persistent settings |
 | Tracking switch (visible/hidden) | `config.json` | Mesh visibility |
 | License key + validation cache (7 days) | `license_cache.json` | Pro unlock & offline grace |
-| Rotating log file (max. 5 × 1 MB) | `%LOCALAPPDATA%\VoiceWalker\voicewalker.log` | Error diagnostics |
+| Log of the current session (recreated on every start) | `%LOCALAPPDATA%\VoiceWalker\voicewalker.log` | Error diagnostics |
 | Privacy consent flag | `localStorage` (`vw.privacy_consent_v1`) | Avoid re-prompting |
+| Device identifier (random UUID, **not** derived from hardware) | `.machine_id` | Binding the Pro license to one device |
+| Self-made language files | `%LOCALAPPDATA%\VoiceWalker\lang\*.json` | Your own translations |
 
-You may delete this data at any time by uninstalling VoiceWalker and/or
-clearing localStorage in the browser tab.
+You may delete this data at any time by uninstalling VoiceWalker or by
+removing the files listed above. The app runs in its own window (Microsoft
+Edge WebView2); its `localStorage` is removed along with the uninstall.
+
+**E-mail invitation.** The “Invite” button in a private room opens your mail
+client with prepared text (room code and short instructions). VoiceWalker
+sends nothing itself and never learns the recipient's address — what you
+send is decided in your own mail client.
 
 ### 3.2 Data transmitted to other pilots (P2P)
 
@@ -164,9 +172,15 @@ operation:
 
 ### 5.3 License server (Pro activation only)
 
-- **Endpoint:** `https://www.gsimulations.de/wp-json/gsim-events/v1/license/validate`
+- **Endpoints:** `…/wp-json/gsim-events/v1/license/validate` (check only)
+  and `…/license/activate` (unlocking on this device), both under
+  `https://www.gsimulations.de`
 - **Hoster:** domainfactory GmbH, Oskar-Messter-Str. 33, 85737 Ismaning, Germany
-- **Data transmitted:** license key, IP address, user-agent
+- **Data transmitted:** license key, IP address, user-agent. On
+  **activation** additionally a device identifier (random UUID, see
+  section 3.1) and a device name — the latter being your computer's
+  **hostname**, so you can tell your activated devices apart in the
+  overview. Both serve to limit the number of devices per license.
 - **Purpose:** Verifying the validity of a Pro license key.
 - **Retention:** Validation results are logged transactionally on the
   server side; access only by the provider. A data processing agreement
@@ -199,7 +213,7 @@ operation:
 
 - **Provider:** GitHub Inc. (Microsoft), 88 Colin P Kelly Jr Street, San Francisco, CA 94107, USA
 - **Data transmitted:** IP address, user-agent, requested endpoint
-  (`/repos/G-Simulation/MSFS-VoiceWalker/releases/latest`)
+  (`/repos/G-Simulation/MSFS-VoiceWalker/releases`)
 - **Purpose:** Checking availability of new versions.
 - **Third-country transfer:** USA, Microsoft is certified under the EU-US
   Data Privacy Framework.
@@ -215,7 +229,9 @@ automatically. The following patterns are replaced:
 
 - **Windows usernames** in paths (`C:\Users\maxmuster\…` → `C:\Users\<USER>\…`)
 - **Hostnames** of your machine → `<HOST>`
-- **IP addresses** (IPv4 and IPv6) → `<IP>`
+- **IP addresses** (IPv4 and IPv6) → `<IP>`. Loopback addresses (`127.0.0.1`,
+  `::1`) are kept — they refer to your own machine, identify nobody and are
+  needed for diagnostics.
 - **E-mail addresses** → `<EMAIL>`
 - **License keys** (LMFWC and DEV format) → `<LICENSE_KEY>`
 
@@ -231,7 +247,7 @@ is never written to the log and therefore never transmitted.
 |---|---|
 | Local config / settings | Until you delete them or uninstall VoiceWalker |
 | License cache | 7 days offline grace; lifetime keys renewable indefinitely |
-| Local log | rotating, max. 5 × 1 MB; older entries are overwritten automatically |
+| Local log | current session only; overwritten on every app start |
 | WebTorrent trackers | only for the duration of the active connection |
 | STUN servers | no retention beyond the request (technically stateless) |
 | License server | transactional logs (validation requests) max. 90 days |

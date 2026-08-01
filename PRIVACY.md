@@ -1,6 +1,6 @@
 # Datenschutzerklärung — VoiceWalker
 
-**Stand:** 28. April 2026
+**Stand:** 1. August 2026
 **Sprache:** Deutsch · [English version: PRIVACY.en.md](PRIVACY.en.md)
 
 Diese Datenschutzerklärung gilt für die Desktop-Anwendung **VoiceWalker** für
@@ -58,11 +58,20 @@ verlassen Ihren Rechner **nicht** durch VoiceWalker selbst:
 | Audio-Lautstärke, Radar-Reichweite, UI-Sprache | `localStorage` | Persistente Einstellungen |
 | Tracking-Schalter (sichtbar/verborgen) | `config.json` | Mesh-Sichtbarkeit |
 | Lizenzkey + Validierungs-Cache (7 Tage) | `license_cache.json` | Pro-Freischaltung & Offline-Grace-Period |
-| Rotierendes Log (max. 5 × 1 MB) | `%LOCALAPPDATA%\VoiceWalker\voicewalker.log` | Fehlerdiagnose |
+| Log der laufenden Sitzung (wird bei jedem Start neu angelegt) | `%LOCALAPPDATA%\VoiceWalker\voicewalker.log` | Fehlerdiagnose |
 | Datenschutz-Einwilligung | `localStorage` (`vw.privacy_consent_v1`) | Wiederholungsabfrage vermeiden |
+| Geräte-Kennung (zufällige UUID, **kein** Hardware-Merkmal) | `.machine_id` | Bindung der Pro-Lizenz an ein Gerät |
+| Selbst erstellte Sprachdateien | `%LOCALAPPDATA%\VoiceWalker\lang\*.json` | Eigene Übersetzungen |
 
 Sie können diese Daten jederzeit löschen, indem Sie VoiceWalker deinstallieren
-und/oder den Browser-Tab schließen und localStorage leeren.
+oder die genannten Dateien entfernen. Die App läuft in einem eigenen Fenster
+(Microsoft Edge WebView2); dessen `localStorage` wird bei der Deinstallation
+mit entfernt.
+
+**Einladung per E-Mail.** Die Schaltfläche „Einladen“ im privaten Raum öffnet
+Ihr Mailprogramm mit vorbereitetem Text (Raum-Code und Kurzanleitung).
+VoiceWalker versendet nichts selbst und kennt die Empfängeradresse nicht —
+was Sie verschicken, entscheiden Sie in Ihrem Mailprogramm.
 
 ### 3.2 Daten, die an andere Piloten übertragen werden (P2P)
 
@@ -167,9 +176,16 @@ zwingend erforderlich ist:
 
 ### 5.3 Lizenzserver (nur Pro-Aktivierung)
 
-- **Endpunkt:** `https://www.gsimulations.de/wp-json/gsim-events/v1/license/validate`
+- **Endpunkte:** `…/wp-json/gsim-events/v1/license/validate` (reine Prüfung)
+  und `…/license/activate` (Freischaltung auf diesem Gerät), beide unter
+  `https://www.gsimulations.de`
 - **Hoster:** domainfactory GmbH, Oskar-Messter-Str. 33, 85737 Ismaning, Deutschland
-- **Übertragene Daten:** Lizenzschlüssel, IP-Adresse, User-Agent
+- **Übertragene Daten:** Lizenzschlüssel, IP-Adresse, User-Agent. Bei der
+  **Aktivierung** zusätzlich eine Geräte-Kennung (zufällige UUID, siehe
+  Abschnitt 3.1) sowie ein Gerätename — dieser ist der **Hostname Ihres
+  Rechners**, damit Sie Ihre aktivierten Geräte in der Übersicht
+  auseinanderhalten können. Beides dient der Begrenzung der Geräteanzahl
+  pro Lizenz.
 - **Zweck:** Prüfung der Gültigkeit eines Pro-Lizenzschlüssels
 - **Speicherdauer:** Validierungsergebnisse werden serverseitig
   vorgangsbezogen geloggt; Zugriff nur durch den Anbieter. Eine
@@ -202,7 +218,7 @@ zwingend erforderlich ist:
 
 - **Anbieter:** GitHub Inc. (Microsoft), 88 Colin P Kelly Jr Street, San Francisco, CA 94107, USA
 - **Übertragene Daten:** IP-Adresse, User-Agent, abgefragter Endpoint
-  (`/repos/G-Simulation/MSFS-VoiceWalker/releases/latest`)
+  (`/repos/G-Simulation/MSFS-VoiceWalker/releases`)
 - **Zweck:** Verfügbarkeitsprüfung neuer Versionen.
 - **Drittlandtransfer:** USA, Microsoft ist nach EU-US Data Privacy
   Framework zertifiziert.
@@ -218,7 +234,9 @@ anonymisiert. Folgende Muster werden ersetzt:
 
 - **Windows-Benutzernamen** in Pfaden (`C:\Users\maxmuster\…` → `C:\Users\<USER>\…`)
 - **Hostnamen** Ihres Rechners → `<HOST>`
-- **IP-Adressen** (IPv4 und IPv6) → `<IP>`
+- **IP-Adressen** (IPv4 und IPv6) → `<IP>`. Loopback-Adressen (`127.0.0.1`,
+  `::1`) bleiben stehen — sie bezeichnen Ihren eigenen Rechner, identifizieren
+  niemanden und werden für die Fehlersuche gebraucht.
 - **E-Mail-Adressen** → `<EMAIL>`
 - **Lizenzschlüssel** (LMFWC- und DEV-Format) → `<LICENSE_KEY>`
 
@@ -235,7 +253,7 @@ geschrieben und damit auch nicht übertragen.
 |---|---|
 | Lokale Konfiguration / Einstellungen | bis Sie sie löschen oder VoiceWalker deinstallieren |
 | Lizenz-Cache | 7 Tage Offline-Grace; bei Pro-Lifetime-Keys lebenslang erneuerbar |
-| Lokales Log | rotierend, max. 5 × 1 MB; ältere Einträge werden automatisch überschrieben |
+| Lokales Log | nur die laufende Sitzung; bei jedem Start der App überschrieben |
 | WebTorrent-Tracker | nur für die Dauer der laufenden Verbindung |
 | STUN-Server | keine Speicherung über die Anfrage hinaus (technisch zustandslos) |
 | Lizenz-Server | vorgangsbezogene Logs (Validierungs-Anfragen) max. 90 Tage |
