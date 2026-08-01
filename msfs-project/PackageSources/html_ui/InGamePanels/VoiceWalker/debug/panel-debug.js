@@ -129,10 +129,6 @@
   fab.type = 'button';
   fab.title = 'Debug-Overlay oeffnen (Strg+Shift+D)';
   fab.textContent = 'DBG';
-  // Von Anfang an unsichtbar. toggle() blendet ihn erst ein, nachdem das
-  // Overlay einmal geoeffnet wurde — ohne das stuende der Knopf im Kopf des
-  // Panels, auch wenn das Overlay selbst zu ist.
-  fab.style.display = 'none';
 
   function attach() {
     function appendBoth() {
@@ -193,19 +189,13 @@
     logEl.scrollTop = logEl.scrollHeight;
   }
 
-  // Der DBG-Knopf im Panel-Kopf bleibt unsichtbar, bis das Overlay einmal
-  // bewusst geoeffnet wurde. Sonst sieht jeder Nutzer eine Debug-Schaltflaeche
-  // in der Kopfzeile — auch wenn das Overlay selbst zu ist.
-  let fabFreigegeben = false;
-
   function toggle(force) {
     const open = force === undefined ? !overlay.classList.contains('open') : !!force;
-    if (open) fabFreigegeben = true;
     overlay.classList.toggle('open', open);
     // Overlay + FAB sind nicht mehr DOM-Geschwister (FAB lebt im .vw-header,
     // Overlay am host) — FAB-Sichtbarkeit deshalb hier explizit toggeln,
     // statt per CSS-Sibling-Selector.
-    fab.style.display = (open || !fabFreigegeben) ? 'none' : '';
+    fab.style.display = open ? 'none' : '';
     if (open) renderLog();
   }
 

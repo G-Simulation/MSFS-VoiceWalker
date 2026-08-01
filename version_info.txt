@@ -5,8 +5,8 @@
 # (Certum Open Source, ausgestellt auf "Patrick Gottberg").
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(0, 2, 1, 0),
-    prodvers=(0, 2, 1, 0),
+    filevers=(0, 2, 2, 0),
+    prodvers=(0, 2, 2, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -22,12 +22,12 @@ VSVersionInfo(
           [
             StringStruct('CompanyName',      'Patrick Gottberg'),
             StringStruct('FileDescription',  'VoiceWalker — Proximity Voice Chat fuer MSFS 2024'),
-            StringStruct('FileVersion',      '0.2.1'),
+            StringStruct('FileVersion',      '0.2.2'),
             StringStruct('InternalName',     'VoiceWalker'),
             StringStruct('LegalCopyright',   'Copyright (c) 2026 Patrick Gottberg. Licensed under Apache-2.0.'),
             StringStruct('OriginalFilename', 'VoiceWalker.exe'),
             StringStruct('ProductName',      'VoiceWalker'),
-            StringStruct('ProductVersion',   '0.2.1'),
+            StringStruct('ProductVersion',   '0.2.2'),
           ]
         )
       ]

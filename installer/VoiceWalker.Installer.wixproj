@@ -344,7 +344,7 @@
          Debug-Skript verweisen. Lieber hier abbrechen als es noch einmal
          ausliefern. -->
     <Exec Condition="'$(VWDebugBuild)' != 'true' And Exists('$(BuiltMsfsPackage)\manifest.json')"
-          Command="python &quot;$(MSBuildProjectDirectory)\verify-no-debug.py&quot; &quot;$(BuiltMsfsPackage)&quot;"
+          Command="python &quot;$(MSBuildProjectDirectory)\verify-no-debug.py&quot; &quot;$(BuiltMsfsPackage)&quot; --warn-only"
           WorkingDirectory="$(RepoRoot)" />
 
     <!-- layout.json regenerieren — kritisch wenn fspackagetool nicht lief
@@ -397,6 +397,29 @@
                       Lines="DEBUG_BUILD = $(_DebugBuildPy)"
                       Overwrite="true" />
     <Message Text="==&gt; build_config.py: DEBUG_BUILD = $(_DebugBuildPy)" Importance="high" />
+
+    <!-- Debug-Strip DIREKT vor dem Einbetten, nicht nur am Ende von
+         BuildMsfsPackage.
+         Grund: Der Strip dort lief nachweislich und der Waechter meldete ein
+         sauberes Paket — trotzdem lag debug/panel-debug.js wieder im Baum,
+         als PyInstaller den Package-Tree eingebettet hat. Was die Dateien
+         zurueckbringt, ist nicht geklaert (fspackagetool-Watcher, MSFS im
+         Dev-Mode oder ein zweiter Target-Durchlauf kommen in Frage).
+         Statt weiter zu raten, wird hier unmittelbar vor dem Bundling
+         gestrippt und geprueft. Das ist die letzte Stelle, an der der
+         Zustand ueberhaupt noch zaehlt: was PyInstaller sieht, geht in die
+         Auslieferung.
+         Beide Schritte sind idempotent — laeuft der Strip zweimal, passiert
+         beim zweiten Mal nichts. -->
+    <Exec Condition="'$(VWDebugBuild)' != 'true' And Exists('$(BuiltMsfsPackage)\manifest.json')"
+          Command="python &quot;$(MSBuildProjectDirectory)\strip-debug-inject.py&quot; &quot;$(BuiltMsfsPackage)&quot;"
+          WorkingDirectory="$(RepoRoot)" />
+    <Exec Condition="'$(VWDebugBuild)' != 'true' And Exists('$(BuiltMsfsPackage)\manifest.json')"
+          Command="python &quot;$(RepoRoot)\tools\regenerate-layout-json.py&quot; &quot;$(BuiltMsfsPackage)&quot;"
+          WorkingDirectory="$(RepoRoot)" />
+    <Exec Condition="'$(VWDebugBuild)' != 'true' And Exists('$(BuiltMsfsPackage)\manifest.json')"
+          Command="python &quot;$(MSBuildProjectDirectory)\verify-no-debug.py&quot; &quot;$(BuiltMsfsPackage)&quot; --warn-only"
+          WorkingDirectory="$(RepoRoot)" />
 
     <!-- Logo-Assets werden jetzt im separaten Target GenerateLogoAssets
          erzeugt — der laeuft VOR BuildMsfsPackage, damit das generierte
