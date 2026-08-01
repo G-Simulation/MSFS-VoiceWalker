@@ -179,7 +179,7 @@ zwingend erforderlich ist:
 - **Endpunkte:** `…/wp-json/gsim-events/v1/license/validate` (reine Prüfung)
   und `…/license/activate` (Freischaltung auf diesem Gerät), beide unter
   `https://www.gsimulations.de`
-- **Hoster:** domainfactory GmbH, Oskar-Messter-Str. 33, 85737 Ismaning, Deutschland
+- **Hoster:** IONOS SE, Elgendorfer Str. 57, 56410 Montabaur, Deutschland
 - **Übertragene Daten:** Lizenzschlüssel, IP-Adresse, User-Agent. Bei der
   **Aktivierung** zusätzlich eine Geräte-Kennung (zufällige UUID, siehe
   Abschnitt 3.1) sowie ein Gerätename — dieser ist der **Hostname Ihres
@@ -188,8 +188,8 @@ zwingend erforderlich ist:
   pro Lizenz.
 - **Zweck:** Prüfung der Gültigkeit eines Pro-Lizenzschlüssels
 - **Speicherdauer:** Validierungsergebnisse werden serverseitig
-  vorgangsbezogen geloggt; Zugriff nur durch den Anbieter. Eine
-  Auftragsverarbeitung mit domainfactory liegt vor.
+  vorgangsbezogen geloggt; Zugriff nur durch den Anbieter. Mit dem Hoster
+  besteht ein Vertrag zur Auftragsverarbeitung nach Art. 28 DSGVO.
 
 ### 5.4 Discord (nur bei freiwilliger Log-Übermittlung)
 

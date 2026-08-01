@@ -175,7 +175,7 @@ operation:
 - **Endpoints:** `…/wp-json/gsim-events/v1/license/validate` (check only)
   and `…/license/activate` (unlocking on this device), both under
   `https://www.gsimulations.de`
-- **Hoster:** domainfactory GmbH, Oskar-Messter-Str. 33, 85737 Ismaning, Germany
+- **Hoster:** IONOS SE, Elgendorfer Str. 57, 56410 Montabaur, Germany
 - **Data transmitted:** license key, IP address, user-agent. On
   **activation** additionally a device identifier (random UUID, see
   section 3.1) and a device name — the latter being your computer's
@@ -184,7 +184,7 @@ operation:
 - **Purpose:** Verifying the validity of a Pro license key.
 - **Retention:** Validation results are logged transactionally on the
   server side; access only by the provider. A data processing agreement
-  with domainfactory is in place.
+  under Art. 28 GDPR is in place with the hoster.
 
 ### 5.4 Discord (only on voluntary log submission)
 
