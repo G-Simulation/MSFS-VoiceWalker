@@ -88,3 +88,9 @@ msfs-project/Sources/wasm/MSFS/
 
 # Build-Stamp fuer GenerateLogoAssets-Target (MSBuild Inkremental-Tracker)
 packaging/.assets.stamp
+
+# Laufzeit-Dateien der App im Dev-Lauf: data_dir() ist hier das Repo-Verzeichnis.
+# .machine_id ist eine Geraete-Kennung pro Installation und darf nie ins Repo.
+.machine_id
+# Nutzereigene Sprachdateien (<data_dir>/lang/*.json) — gehoeren dem Nutzer.
+/lang/
