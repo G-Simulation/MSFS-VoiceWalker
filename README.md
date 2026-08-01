@@ -11,7 +11,6 @@
 </p>
 
 # VoiceWalker
-
 Copyright 2026 Patrick Gottberg / [G-Simulation](https://www.gsimulations.de).
 Lizenziert unter der [Apache License 2.0](LICENSE) — freie, offene Software.
 Benutzen, forken, weiterentwickeln, verteilen: alles erlaubt, solange
@@ -138,11 +137,15 @@ Kachel. Alle Leute in derselben Kachel landen im selben Mesh. Damit an
 Kachelgrenzen nichts verloren geht, werden zusätzlich die 8 Nachbarkacheln
 abonniert — Suchradius rund 60 × 60 km.
 
-**"Sich finden" über kostenlose Tracker.** Öffentlich erreichbare
-WebTorrent-Tracker funktionieren wie ein schwarzes Brett: *"Ich bin in Kachel
-`u33d`, wer noch?"*. Die Tracker leiten die Anfrage an andere in derselben
-Kachel weiter. Ab da reden die Leute **direkt** miteinander — nicht mehr über
-die Tracker.
+**"Sich finden" über Mesh-Server.** Standardmäßig läuft das Matchmaking
+über unseren eigenen Mesh-Server (MQTT-Broker, betrieben von uns) — deine
+IP wird nur dort kurz für den Verbindungsaufbau sichtbar, an keine
+Drittpartei. Falls keine Server-URL konfiguriert ist (z. B. im Self-Hosted-
+Setup), greift als Fallback ein öffentlicher WebTorrent-Tracker. In beiden
+Fällen wirken sie wie ein schwarzes Brett: *"Ich bin in Kachel `u33d`, wer
+noch?"*. Ab dem ersten Match reden die Leute **direkt** miteinander —
+nicht mehr über den Server. Konfiguration via `mesh_relays` in
+`config.json` oder Env-Variable `VOICEWALKER_MESH_RELAYS`.
 
 **"Direkt reden" via WebRTC.** Dein Browser baut mit jedem anderen Browser in
 deiner Kachel eine direkte Peer-to-Peer-Verbindung auf. Dein Mikro-Audio geht
@@ -275,7 +278,14 @@ Das Projekt besteht aus **drei Prozessen** auf dem Rechner des Spielers:
   Backend (`ws://127.0.0.1:7801/ui`) und teilen `state.ui` so dass z.B.
   ein VOX-Toggle in einer UI sofort in der anderen sichtbar wird.
 - Die `exe.xml`-Einbindung sorgt dafür, dass `VoiceWalker.exe` beim
-  Start von MSFS automatisch mithochgefahren wird.
+  Start von MSFS automatisch mithochgefahren wird. Beim Beenden des
+  Sims schließt sich VoiceWalker per Process-Watcher
+  (`msfs_lifecycle.watch_and_quit`) automatisch wieder — wie ein
+  Drittentwickler-Aircraft-Addon, kein Windows-Autostart nötig.
+- **Self-Heal**: Bei jedem App-Start prüft `main.py` alle gefundenen
+  MSFS-Installs und ergänzt/korrigiert/dedupliziert den `Launch.Addon`-
+  Eintrag in der `exe.xml` (Schutz vor MSFS-Updates die das überschreiben,
+  Reinstalls auf andere Pfade, Doppel-Einträgen aus älteren Versionen).
 
 ---
 
@@ -502,19 +512,10 @@ d.h. selbst wenn etwas schiefgeht, kannst du manuell zurückrollen.
 - [x] **Tracking-Toggle** mit Persistenz in `config.json`.
 - [x] **Auto-Updater** mit Release-Channel + Installer-Chain.
 
-**In Arbeit / offen:**
-
-- [ ] **Event-Plattform** (The Events Calendar + PDF-Briefing-Hook):
+- [x] **Event-Plattform** (The Events Calendar + PDF-Briefing-Hook):
   Veranstalter bucht → Room-ID + Passphrase + PDF automatisch generiert.
-- [ ] **Code-Signing-Zertifikat** — Certum Open Source Cert (auf Patrick Gottberg)
-  in Vorbereitung; `sign.bat` wartet auf den Thumbprint. SignPath Foundation
-  als Plan B parallel beworben. Bis dahin warnt Windows SmartScreen beim
-  Installer vor "unbekanntem Herausgeber" — das ist normal und unproblematisch,
-  "Weitere Informationen" → "Trotzdem ausführen".
-- [ ] **Radio-Sound-Effekt** (Funkgeräusche, Squelch-Rauschen) — aktuell
-  ist die Stimme "clean". Aviation-Feeling-Sahne.
-- [ ] **Session-Recording** (Pro-Feature, langfristig).
-- [ ] **Landing-Page** `gsimulations.de/voicewalker` + Press-Kit.
+- [x] **Ambient-Sound-Effekt** (Schritte, Propeller, Triebwerke).
+- [x] **Landing-Page** `gsimulations.de/voicewalker` + Press-Kit.
 
 ---
 

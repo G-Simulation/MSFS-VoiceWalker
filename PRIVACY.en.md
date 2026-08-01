@@ -124,6 +124,33 @@ operation:
   DNS resolvers. If you do not want to send data to US servers, you
   cannot use VoiceWalker on the public mesh.
 
+### 5.1b Public MQTT brokers (only with the opt-in `mesh_public_fallback` enabled)
+
+- **Default behaviour:** **off.** No third-party broker is contacted in
+  standard operation.
+- **Effect of the opt-in:** Only if the user enables the toggle *"Allow mesh
+  emergency mode via public servers"* in the settings AND our own mesh server
+  is unreachable at connection time, the app falls back to the following
+  public MQTT brokers:
+  - `broker.emqx.io` — **EMQX Inc.**, 25-29 Hosier Lane, London EC1A 9LQ,
+    United Kingdom (cloud infrastructure located in the USA).
+    **Third-country transfer:** USA.
+  - `broker.hivemq.com` — **HiveMQ GmbH**, Schaffhauser Str. 5, 73728 Esslingen
+    am Neckar, Germany.
+- **Data transmitted:** IP address, geohash identifier of the current cell
+  (~20 km granularity), random peer ID. **No audio data** — voice continues
+  to flow end-to-end via WebRTC between the pilots.
+- **Purpose:** Emergency relay for the initial peer handshake when our own
+  server is down. Once the peer connection is established the broker is no
+  longer used for audio.
+- **Third-country transfer (EMQX):** USA. No standard contractual clauses
+  pursuant to Art. 46 GDPR are in place; processing is based exclusively on
+  the explicit consent under Art. 49(1)(a) GDPR by activating the opt-in
+  toggle.
+- **Legal basis:** Art. 6(1)(a) GDPR (consent). Consent can be withdrawn at
+  any time by disabling the toggle in the settings; from that moment on no
+  public broker is contacted.
+
 ### 5.2 Google STUN servers (NAT traversal)
 
 - **Server:** `stun.l.google.com:19302`
@@ -154,6 +181,15 @@ operation:
 - **When:** Only if you actively click **"Send logs now"**, **or** if
   you have enabled the toggle **"Send logs on errors"** in settings
   (default: off).
+- **Beta phase — extended logs:** During the beta, the toggle
+  **"Record extended beta logs"** is enabled by default. The local log
+  file then additionally contains sim snapshots (camera state, position
+  as virtual sim coordinates, in_menu flag), mesh events (peer
+  join/leave, geohash cell changes, without IP addresses) and tray
+  lifecycle. These data are stored **locally only** and are only sent
+  to Discord if you actively click "Send logs now". Anonymisation per
+  section 6 still applies. The toggle can be disabled at any time in
+  the settings.
 - **Third-country transfer:** USA. Discord is certified under the EU-US
   Data Privacy Framework.
 - **Withdrawal:** Disable the toggle at any time; logs already
