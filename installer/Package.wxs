@@ -24,6 +24,8 @@
       Version="0.1.0.0"
       UpgradeCode="F9E8D7C6-B5A4-4392-8170-6F5E4D3C2B1A"
       Scope="perUser"
+      Language="1031"
+      Codepage="1252"
       Compressed="yes">
 
     <SummaryInformation Description="VoiceWalker — Proximity-Voice für MSFS 2024" />
@@ -34,6 +36,52 @@
 
     <!-- Alles in eine eingebettete CAB packen, damit die MSI eine einzelne Datei ist -->
     <MediaTemplate EmbedCab="yes" />
+
+    <!-- ========================================================
+         Auto-Close laufender App-Instanzen.
+         Wenn der User gerade VoiceWalker laufen hat (Tray-Icon aktiv) und
+         ein Update einspielt, blockt Windows den File-Tausch wegen offener
+         File-Handles. Util:CloseApplication schickt zuerst WM_CLOSE
+         (sauberes Quit, Tray-Quit-Pfad), wenn das nicht klappt, wird der
+         Prozess hart terminiert. PromptToContinue=no = User wird nicht
+         gefragt, alles laeuft silent durch.
+         ======================================================== -->
+    <util:CloseApplication
+        Id="CloseVoiceWalkerExe"
+        Target="VoiceWalker.exe"
+        CloseMessage="yes"
+        PromptToContinue="no"
+        TerminateProcess="5"
+        RebootPrompt="no"
+        EndSessionMessage="yes" />
+    <util:CloseApplication
+        Id="CloseIntegratorExe"
+        Target="VoiceWalker-Integrator.exe"
+        CloseMessage="yes"
+        PromptToContinue="no"
+        TerminateProcess="5"
+        RebootPrompt="no"
+        EndSessionMessage="yes" />
+
+    <!-- ========================================================
+         WebView2-Runtime-Detection.
+         Inspect die offiziellen Edge-Update-Registry-Keys (siehe MS-Doku
+         https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution).
+         Wenn 'pv' fehlt oder leer/0.0.0.0 ist → Runtime nicht installiert,
+         und unser Bootstrapper-CustomAction laeuft (siehe unten).
+         ======================================================== -->
+    <Property Id="WEBVIEW2_PV_HKLM_64">
+      <RegistrySearch Id="WV2HKLM64"
+                      Root="HKLM"
+                      Key="SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+                      Name="pv" Type="raw" />
+    </Property>
+    <Property Id="WEBVIEW2_PV_HKCU">
+      <RegistrySearch Id="WV2HKCU"
+                      Root="HKCU"
+                      Key="Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+                      Name="pv" Type="raw" />
+    </Property>
 
     <!-- Icon, das in Add/Remove Programs + Start-Menu + Desktop-Shortcut
          erscheint. Liegt in packaging/app-icon.ico (Multi-Size 16..256 px),
@@ -123,6 +171,20 @@
                        Name="Readme" Type="integer" Value="1" KeyPath="yes" />
       </Component>
 
+      <!-- WebView2-Runtime-Bootstrapper. Microsofts Online-Installer (~2 MB)
+           wird mitgeliefert, damit User ohne WebView2-Runtime offline durch
+           den Install kommen. Beim Install ruft die InstallWebView2-Custom-
+           Action diesen File mit /silent /install auf — aber nur wenn die
+           Runtime fehlt (Property-Conditions auf WEBVIEW2_PV_*).
+           Datei wird vom wixproj-Target DownloadWebView2Bootstrapper geholt. -->
+      <Component Id="WebView2BootstrapperFile" Guid="A1B2C301-0001-4000-8000-000000000006">
+        <File Id="WebView2BootstrapperExe"
+              Source="..\packaging\MicrosoftEdgeWebview2Setup.exe" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\G-Simulation\VoiceWalker\Components"
+                       Name="WebView2Bootstrapper" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+
       <!-- Reine Registry-Komponente, darf * haben -->
       <Component Id="RemoveInstallFolder" Guid="*">
         <RemoveFolder Id="RemoveInstallFolder"
@@ -134,14 +196,21 @@
 
     </ComponentGroup>
 
-    <!-- Start-Menu-Verknuepfung (immer mitinstalliert) -->
+    <!-- Start-Menu-Verknuepfung (immer mitinstalliert).
+         ShortcutProperty System.AppUserModel.ID verlinkt den Shortcut mit
+         unserer Toast-App-ID. Ohne diese Property filtert Win10/11 unsere
+         Modern-Toasts oft (Action-Center sieht keine "echte" App-Verknuepfung
+         und droppt die Notification). MUSS exakt mit der ID matchen, die
+         tray.py per SetCurrentProcessExplicitAppUserModelID setzt. -->
     <Component Id="StartMenuShortcut" Directory="ApplicationProgramsFolder" Guid="*">
       <Shortcut Id="AppStartMenuShortcut"
                 Name="VoiceWalker"
                 Description="Proximity-Voice für MSFS 2024"
                 Target="[INSTALLFOLDER]VoiceWalker.exe"
                 WorkingDirectory="INSTALLFOLDER"
-                Icon="AppIcon.ico" IconIndex="0" />
+                Icon="AppIcon.ico" IconIndex="0">
+        <ShortcutProperty Key="System.AppUserModel.ID" Value="GSimulations.VoiceWalker" />
+      </Shortcut>
       <RemoveFolder Id="RemoveStartMenuFolder" On="uninstall" />
       <RegistryValue Root="HKCU"
                      Key="Software\G-Simulation\VoiceWalker"
@@ -149,14 +218,18 @@
                      Type="integer" Value="1" KeyPath="yes" />
     </Component>
 
-    <!-- Desktop-Verknuepfung (optionales Feature) -->
+    <!-- Desktop-Verknuepfung (optionales Feature). Selbe AppUserModelID-
+         Property — beide Shortcuts muessen die ID haben, damit Windows
+         egal von wo der User startet die selbe Toast-App-ID kennt. -->
     <Component Id="DesktopShortcutComp" Directory="DesktopFolder" Guid="*">
       <Shortcut Id="AppDesktopShortcut"
                 Name="VoiceWalker"
                 Description="Proximity-Voice für MSFS 2024"
                 Target="[INSTALLFOLDER]VoiceWalker.exe"
                 WorkingDirectory="INSTALLFOLDER"
-                Icon="AppIcon.ico" IconIndex="0" />
+                Icon="AppIcon.ico" IconIndex="0">
+        <ShortcutProperty Key="System.AppUserModel.ID" Value="GSimulations.VoiceWalker" />
+      </Shortcut>
       <RegistryValue Root="HKCU"
                      Key="Software\G-Simulation\VoiceWalker"
                      Name="DesktopShortcut"
@@ -167,6 +240,17 @@
          Custom Action: MSFS-Integrator am Ende ausfuehren
          (registriert Community-Folder + exe.xml)
          ======================================================== -->
+    <!-- WebView2-Runtime nachinstallieren wenn fehlt. Bootstrapper laeuft
+         silent, blockiert bis fertig (Return="ignore" — falls Bootstrapper
+         crasht, install bricht NICHT ab; pywebview faellt dann auf
+         Edge-Fallback zurueck). Schedule unten in InstallExecuteSequence. -->
+    <CustomAction Id="InstallWebView2"
+                  FileRef="WebView2BootstrapperExe"
+                  ExeCommand="/silent /install"
+                  Execute="deferred"
+                  Impersonate="yes"
+                  Return="ignore" />
+
     <CustomAction Id="RunIntegrator"
                   FileRef="IntegratorExeFile"
                   ExeCommand=""
@@ -194,8 +278,16 @@
                   Return="asyncNoWait" />
 
     <InstallExecuteSequence>
-      <Custom Action="RunIntegrator"
+      <!-- WebView2-Runtime VOR dem Integrator nachinstallieren — der Integrator
+           braucht sie nicht direkt, aber die App selbst wird gleich danach
+           gestartet (LaunchVoiceWalker) und braucht WebView2 fuer's pywebview-
+           Window. Condition: nur wenn WEDER per-machine NOCH per-user 'pv'
+           in der Registry steht (oder wenn er nur "0.0.0.0" ist = Stub). -->
+      <Custom Action="InstallWebView2"
               After="InstallFiles"
+              Condition="(NOT WEBVIEW2_PV_HKLM_64 OR WEBVIEW2_PV_HKLM_64=&quot;0.0.0.0&quot;) AND (NOT WEBVIEW2_PV_HKCU OR WEBVIEW2_PV_HKCU=&quot;0.0.0.0&quot;) AND (NOT Installed OR REINSTALL)" />
+      <Custom Action="RunIntegrator"
+              After="InstallWebView2"
               Condition="NOT Installed" />
       <Custom Action="LaunchVoiceWalker"
               After="RunIntegrator"
@@ -206,10 +298,15 @@
     </InstallExecuteSequence>
 
     <!-- ========================================================
-         UI: Standard-Dialogfolge mit Lizenz-Seite
+         UI: Standard-Dialogfolge mit Lizenz-Seite + VoiceWalker-Branding.
+         dialog-bg.bmp ist 493x312 (Welcome+Exit-Dialog), banner.bmp ist
+         493x58 (oben in Folge-Dialogen). Beide werden zur Build-Zeit aus
+         brand/-Assets generiert (siehe wixproj-Target GenerateInstallerImages).
          ======================================================== -->
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
     <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+    <WixVariable Id="WixUIDialogBmp" Value="dialog-bg.bmp" />
+    <WixVariable Id="WixUIBannerBmp" Value="banner.bmp" />
 
   </Package>
 </Wix>

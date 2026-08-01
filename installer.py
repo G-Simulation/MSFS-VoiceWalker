@@ -141,7 +141,7 @@ EXE_XML_TEMPLATE = (
 
 def upsert_exe_xml(exe_xml_path: Path, addon_name: str, exe_path: Path) -> str:
     """Fügt einen Launch.Addon-Eintrag hinzu oder aktualisiert einen vorhandenen.
-    Rückgabewert: 'added' | 'updated' | 'unchanged'."""
+    Rückgabewert: 'added' | 'updated' | 'unchanged' | 'deduped'."""
     if not exe_xml_path.exists():
         exe_xml_path.parent.mkdir(parents=True, exist_ok=True)
         exe_xml_path.write_text(EXE_XML_TEMPLATE, encoding="utf-8")
@@ -149,13 +149,32 @@ def upsert_exe_xml(exe_xml_path: Path, addon_name: str, exe_path: Path) -> str:
     tree = ET.parse(exe_xml_path)
     root = tree.getroot()
 
-    # Vorhandenen Eintrag suchen
-    existing = None
+    # Vorhandene Eintraege suchen — case-insensitive Name-Match damit auch
+    # legacy lowercase ("voicewalker") oder Duplikate aus frueheren Installs
+    # mit erfasst werden. Bei mehreren Treffern: ersten behalten, Rest
+    # entfernen (vorher gab's einen Bug der die App 2x in exe.xml schrieb,
+    # MSFS startete dann aus Verwirrung gar keinen Addon-EXE-Launch).
+    target_names = {addon_name.lower(), ADDON_NAME_LEGACY.lower()}
+    matches = []
     for addon in root.findall("Launch.Addon"):
         name_el = addon.find("Name")
-        if name_el is not None and (name_el.text or "").strip() == addon_name:
-            existing = addon
-            break
+        if name_el is not None and (name_el.text or "").strip().lower() in target_names:
+            matches.append(addon)
+
+    deduped = False
+    existing = None
+    if matches:
+        existing = matches[0]
+        # Name normalisieren auf den aktuellen kanonischen Wert
+        n_el = existing.find("Name")
+        if n_el is None:
+            n_el = ET.SubElement(existing, "Name")
+        if (n_el.text or "").strip() != addon_name:
+            n_el.text = addon_name
+            deduped = True
+        for extra in matches[1:]:
+            root.remove(extra)
+            deduped = True
 
     action = "unchanged"
     if existing is None:
@@ -179,6 +198,9 @@ def upsert_exe_xml(exe_xml_path: Path, addon_name: str, exe_path: Path) -> str:
         if (dis_el.text or "").strip().lower() != "false":
             dis_el.text = "False"
             action = "updated"
+
+    if deduped and action == "unchanged":
+        action = "deduped"
 
     # Backup einmalig
     backup = exe_xml_path.with_suffix(".xml.bak")

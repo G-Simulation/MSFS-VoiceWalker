@@ -40,6 +40,12 @@
 
     <SuppressIces>ICE61;ICE91</SuppressIces>
 
+    <!-- Sprache des MSI: Deutsch (DE-DE / 1031). Wirkt zusammen mit
+         <Package Language="1031"> in Package.wxs. WiX zieht damit aus
+         WixToolset.UI.wixext die deutschen Standard-Strings (Welcome-Text,
+         Buttons "Weiter"/"Zurueck"/"Abbrechen", etc.). -->
+    <Cultures>de-DE</Cultures>
+
     <!-- Debug-Build-Schalter. Wenn true: debug.js wird ins Bundle eingepackt
          und /debug/* Endpoints sind in main.py freigegeben. Wenn false
          (Default fuer Public-Release): debug.js fehlt im Bundle, Endpoints
@@ -61,6 +67,38 @@
     <PackageReference Include="WixToolset.UI.wixext" Version="6.0.2" />
     <PackageReference Include="WixToolset.Util.wixext" Version="6.0.2" />
   </ItemGroup>
+
+
+  <!-- TARGET 0b: WebView2-Runtime-Bootstrapper holen.
+       Microsoft liefert einen ~2 MB grossen Online-Bootstrapper, der die
+       eigentliche Runtime von MS-Servern nachlaedt (architektur-passend,
+       silent). Die Package.wxs bindet die Datei als File ein und ruft sie
+       als Custom-Action auf, wenn die Runtime fehlt (Registry-Check).
+       URL ist Microsofts permanenter Fwlink fuer den Evergreen-Bootstrapper:
+         https://go.microsoft.com/fwlink/p/?LinkId=2124703
+       Wir laden nur einmal — wenn die EXE schon liegt, skippt das Target. -->
+  <Target Name="DownloadWebView2Bootstrapper"
+          BeforeTargets="BeforeBuild"
+          Condition="!Exists('$(RepoRoot)\packaging\MicrosoftEdgeWebview2Setup.exe')">
+    <Message Text="==&gt; Lade WebView2-Bootstrapper von Microsoft..." Importance="high" />
+    <DownloadFile SourceUrl="https://go.microsoft.com/fwlink/p/?LinkId=2124703"
+                  DestinationFolder="$(RepoRoot)\packaging"
+                  DestinationFileName="MicrosoftEdgeWebview2Setup.exe" />
+  </Target>
+
+
+  <!-- TARGET 0c: Installer-Branding-BMPs generieren.
+       build-installer-images.py erzeugt installer/dialog-bg.bmp (493x312)
+       und installer/banner.bmp (493x58) aus brand/voicewalker-logo-*.png.
+       Inputs/Outputs sorgen fuer inkrementelles Bauen. -->
+  <Target Name="GenerateInstallerImages"
+          BeforeTargets="BeforeBuild"
+          Inputs="$(RepoRoot)\brand\voicewalker-logo-mark-light.png;$(RepoRoot)\brand\voicewalker-logo-horizontal.png;$(RepoRoot)\packaging\build-installer-images.py"
+          Outputs="$(MSBuildProjectDirectory)\dialog-bg.bmp;$(MSBuildProjectDirectory)\banner.bmp">
+    <Message Text="==&gt; Generiere Installer-Branding-BMPs (dialog-bg, banner)..." Importance="high" />
+    <Exec Command="python packaging\build-installer-images.py"
+          WorkingDirectory="$(RepoRoot)" />
+  </Target>
 
 
   <!-- TARGET 1: Toolchain-Check -->
@@ -168,8 +206,16 @@
     <Exec Condition="!Exists('$(EfbAppDir)\node_modules\esbuild\package.json')"
           Command="npm install --legacy-peer-deps"
           WorkingDirectory="$(EfbAppDir)" />
+    <!-- VW_DEBUG_BUILD an npm/esbuild durchreichen. build.js prueft die Var
+         und strippt im Public-Build dist/web/debug.js + den zugehoerigen
+         <script>-Tag aus dist/web/index.html. Ohne diese Env-Var landet
+         das Strg+Shift+D-Overlay im EFB-Bundle. Der nachfolgende Strip-
+         Schritt in BuildMsfsPackage cleant denselben Pfad nochmal aus dem
+         Built-Package — Belt-and-suspenders, falls der EFB-Build aus
+         irgendeinem Grund nicht durchlief. -->
     <Exec Command="npm run build"
-          WorkingDirectory="$(EfbAppDir)" />
+          WorkingDirectory="$(EfbAppDir)"
+          EnvironmentVariables="VW_DEBUG_BUILD=$(VWDebugBuild)" />
     <Error Condition="!Exists('$(EfbAppDistJs)')"
            Text="EFB-App-Build fehlgeschlagen: $(EfbAppDistJs) wurde nicht erzeugt." />
     <Message Text="==&gt; EFB-App fertig: $(EfbAppDistJs)" Importance="high" />
@@ -364,9 +410,15 @@
 
     <!-- App-EXE: noconsole + Tray-Modul + App-Icon eingebunden.
          pystray + PIL muessen mit collect-all rein damit das Windows-Tray-
-         Backend in der gefrorenen EXE verfuegbar ist. tray + pynput + license_client
-         als hidden-import weil sie nur dynamisch geladen werden. -->
-    <Exec Command="python -m PyInstaller --noconfirm --clean --name VoiceWalker --onefile --noconsole --icon &quot;packaging\app-icon.ico&quot; --add-data &quot;dist\web_for_build;web&quot; --collect-all SimConnect --collect-all pygame --collect-all websockets --collect-all pystray --collect-all PIL --collect-all sounddevice --hidden-import ptt_backend --hidden-import debug --hidden-import tray --hidden-import pynput --hidden-import license_client --hidden-import build_config --hidden-import msfs_lifecycle main.py"
+         Backend in der gefrorenen EXE verfuegbar ist. tray + pynput +
+         license_client als hidden-import weil sie nur dynamisch geladen
+         werden.
+         Pywebview/WebView2: collect-all webview holt clr_loader-DLLs und
+         WebBrowserInterop.dll mit; hidden-import webview_window/runtime
+         registriert die zwei neuen Module fuer den webview-window-Modus.
+         packaging\app-icon.ico kommt als Data ins Bundle, damit pywebview
+         das Icon im Subprocess-Modus laden kann. -->
+    <Exec Command="python -m PyInstaller --noconfirm --clean --name VoiceWalker --onefile --noconsole --icon &quot;packaging\app-icon.ico&quot; --add-data &quot;dist\web_for_build;web&quot; --add-data &quot;packaging\app-icon.ico;packaging&quot; --collect-all SimConnect --collect-all pygame --collect-all websockets --collect-all pystray --collect-all PIL --collect-all sounddevice --collect-all webview --collect-all clr_loader --hidden-import ptt_backend --hidden-import debug --hidden-import tray --hidden-import pynput --hidden-import license_client --hidden-import build_config --hidden-import msfs_lifecycle --hidden-import webview_window --hidden-import webview_runtime main.py"
           WorkingDirectory="$(RepoRoot)" />
 
     <Error Condition="!Exists('$(AppExe)')"
