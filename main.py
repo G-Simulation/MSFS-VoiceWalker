@@ -1703,11 +1703,19 @@ async def ws_handler(ws):
                     # selbst ignoriert's, MSFS-Panel-iframe rendert damit das
                     # Radar). Wir cachen zusaetzlich fuer Clients die sich
                     # spaeter verbinden.
+                    # Der ui-Block MUSS mit. Er wurde hier frueher stillschweigend
+                    # weggelassen, weil die Nachricht beim Weiterreichen neu
+                    # zusammengebaut statt durchgereicht wird. Folge: Das Panel
+                    # bekam Position und Peers, aber nie Callsign, Pro-Status,
+                    # privaten Raum, PTT-Bindung oder Geraetelisten — es zeigte
+                    # deshalb dauerhaft "-" als Callsign und merkte nichts davon,
+                    # dass man in einem privaten Raum sitzt.
                     STATE.overlay_cache = {
                         "type": "overlay_state",
                         "mySim":  m.get("mySim"),
                         "myRange": m.get("myRange"),
                         "peers":  m.get("peers", []),
+                        "ui":     m.get("ui"),
                         "t":      time.time(),
                     }
                     asyncio.create_task(broadcast(STATE.overlay_cache))

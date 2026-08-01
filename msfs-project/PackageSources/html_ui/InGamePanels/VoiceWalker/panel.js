@@ -543,7 +543,7 @@
           let edgeColor;
           if (theyHearMe_oor && iHearThem_oor) edgeColor = '#3fdc8a';
           else if (iHearThem_oor)              edgeColor = '#6aa5ff';
-          else if (theyHearMe_oor)             edgeColor = '#ffc857';
+          else if (theyHearMe_oor)             edgeColor = '#ff7ab6';
           else                                 edgeColor = '#6b7896';
           ctx.save();
           ctx.fillStyle = edgeColor;
@@ -571,7 +571,7 @@
         // 4-Farben-Hör-Status analog Web-UI (siehe Legende):
         //   #3fdc8a grün   — beidseitig hoerbar
         //   #6aa5ff blau   — nur du hoerst ihn
-        //   #ffc857 orange — nur er hoert dich
+        //   #ff7ab6 pink   — nur er hoert dich
         //   #6b7896 grau   — ausser Reichweite
         // + Speaking-Override (#ffe066 gelb).
         const peerHearM_st = +p.sim.hearRangeM || 1000;
@@ -580,7 +580,7 @@
         const color = p.speaking          ? '#ffe066'
                     : theyHearMe && iHearThem ? '#3fdc8a'
                     : iHearThem               ? '#6aa5ff'
-                    : theyHearMe              ? '#ffc857'
+                    : theyHearMe              ? '#ff7ab6'
                     :                           '#6b7896';
 
         // Walker = Punkt + Cone in Peer-Heading. Cockpit = Aircraft-Icon.
@@ -601,7 +601,7 @@
           const coneRGB = p.speaking          ? '255,224,102'
                        : color === '#3fdc8a' ? '63,220,138'
                        : color === '#6aa5ff' ? '106,165,255'
-                       : color === '#ffc857' ? '255,200,87'
+                       : color === '#ff7ab6' ? '255,122,182'
                        :                       '107,120,150';
           const peerConeGrad = ctx.createRadialGradient(px, py, 0, px, py, peerConeR);
           peerConeGrad.addColorStop(0, 'rgba(' + coneRGB + ',0.45)');
@@ -667,10 +667,27 @@
     const pb = $('vw-probadge');
     if (state.ui) {
       if (cs) cs.textContent = state.ui.callsign || '-';
-      if (pb) pb.classList.toggle('visible', !!state.ui.isPro);
+      if (pb) {
+        const pro = !!state.ui.isPro;
+        pb.classList.toggle('visible', pro);
+        // Das PRO-Abzeichen klebte links am Callsign, weil `margin-left:auto`
+        // auf der Zoom-Pille sitzt und alles Rechte nach rechts schiebt. Ist
+        // das Abzeichen sichtbar, uebernimmt es diese Rolle und beginnt die
+        // rechte Gruppe; die Zoom-Pille bekommt dann nur noch Abstand.
+        // Bewusst in JS statt per Geschwister-Selektor: Coherent GT ist bei
+        // `~` nicht verlaesslich (siehe Kommentar zum Debug-Overlay).
+        pb.style.marginLeft = pro ? 'auto' : '';
+        const zoomEl = $('vw-zoom');
+        if (zoomEl) zoomEl.style.marginLeft = pro ? '8px' : 'auto';
+      }
     } else {
       if (cs) cs.textContent = '-';
-      if (pb) pb.classList.remove('visible');
+      if (pb) {
+        pb.classList.remove('visible');
+        pb.style.marginLeft = '';
+        const zoomEl = $('vw-zoom');
+        if (zoomEl) zoomEl.style.marginLeft = 'auto';
+      }
     }
 
     // Zoom-Label

@@ -3182,7 +3182,7 @@ function renderRadar() {
       let edgeColor;
       if (theyHearMe && iHearThem) edgeColor = '#3fdc8a';
       else if (iHearThem)          edgeColor = '#6aa5ff';
-      else if (theyHearMe)         edgeColor = '#ffc857';
+      else if (theyHearMe)         edgeColor = '#ff7ab6';
       else                         edgeColor = '#6b7896';
       ctx.save();
       ctx.fillStyle = edgeColor;
@@ -3207,7 +3207,7 @@ function renderRadar() {
     let color;
     if (theyHearMe && iHearThem) color = '#3fdc8a';   // beidseitig hörbar
     else if (iHearThem)          color = '#6aa5ff';   // nur ich höre ihn
-    else if (theyHearMe)         color = '#ffc857';   // nur er hört mich
+    else if (theyHearMe)         color = '#ff7ab6';   // nur er hört mich
     else                         color = '#6b7896';   // keiner hört
 
     const isSpeaking = p.speaking && (p.currentVolume > 0.05 || p.isTestPeer);
@@ -3246,7 +3246,7 @@ function renderRadar() {
       const coneRGB = isSpeaking          ? '255, 224, 102'
                     : color === '#3fdc8a' ? '63, 220, 138'
                     : color === '#6aa5ff' ? '106, 165, 255'
-                    : color === '#ffc857' ? '255, 200, 87'
+                    : color === '#ff7ab6' ? '255, 122, 182'
                     :                       '107, 120, 150';
       const peerConeGrad = ctx.createRadialGradient(px, py, 0, px, py, peerConeR);
       peerConeGrad.addColorStop(0, 'rgba(' + coneRGB + ', 0.45)');
