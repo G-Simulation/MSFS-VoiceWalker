@@ -108,3 +108,7 @@ MSFS/Release/
 /presskit/
 /SIGNPATH_APPLICATION.md
 /WP_PRIVACY_SNIPPET.md
+
+# Aus PRIVACY.md erzeugte HTML-Fassung fuer die Website — Ausgabe von
+# tools/md2wp.py, gehoert wie der Rest der Website nicht ins App-Repo.
+/website/
