@@ -94,7 +94,7 @@ Siehe [PRIVACY.md](PRIVACY.md) bzw. [PRIVACY.en.md](PRIVACY.en.md).
 Der Updater verifiziert das heruntergeladene Setup gegen diesen Hash. Er gilt
 für `VoiceWalker-Setup.msi` aus diesem Release:
 
-    SHA256: <wird nach dem Build eingetragen>
+    SHA256: f3594c8b5e9240d80c7bee5777cd815858c88c63b509f416c7c2b394f0bca5e3
 
 Nachrechnen unter Windows:
 
