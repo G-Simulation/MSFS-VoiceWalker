@@ -44,9 +44,14 @@ except Exception:
 # -----------------------------------------------------------------------------
 # Konfiguration
 # -----------------------------------------------------------------------------
-APP_VERSION          = "0.1.0"            # aktuelle Version — bei Release bumpen
+APP_VERSION          = "0.2.0"            # aktuelle Version — bei Release bumpen
 GITHUB_REPO          = "G-Simulation/MSFS-VoiceWalker"
-RELEASE_API_URL      = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+# Bewusst die Release-LISTE, nicht /releases/latest: dieser Endpunkt blendet
+# Pre-Releases aus. Waehrend der Alpha ist aber jedes Release eines, weshalb
+# /releases/latest fuer dieses Repo dauerhaft 404 lieferte — der Updater sah
+# nie ein Update, obwohl v0.1.0 veroeffentlicht war. Die Liste kommt
+# neueste-zuerst; wir nehmen den ersten Eintrag der kein Draft ist.
+RELEASE_API_URL      = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=10"
 CHECK_INTERVAL_S     = 24 * 3600          # taeglich
 STARTUP_DELAY_S      = 30                 # erste Pruefung erst nach 30 s
 REQUEST_TIMEOUT_S    = 10
@@ -63,6 +68,7 @@ class UpdateState:
         self.current: str        = APP_VERSION
         self.latest: Optional[str] = None
         self.download_url: Optional[str] = None
+        self.asset_name: Optional[str] = None   # bestimmt msiexec vs. EXE-Start
         self.release_notes: str  = ""
         self.html_url: Optional[str] = None
         self.error: Optional[str] = None
@@ -147,7 +153,16 @@ def _fetch_release_blocking() -> dict | None:
         if status >= 400:
             # Nicht-404-Fehler signalisieren wir durch dict mit _http_status
             return {"_http_status": status}
-        return json.loads(r.read().decode("utf-8", errors="replace"))
+        payload = json.loads(r.read().decode("utf-8", errors="replace"))
+        # RELEASE_API_URL liefert eine Liste (neueste zuerst). Drafts sind
+        # fuer Nutzer nicht abrufbar und werden uebersprungen; Pre-Releases
+        # dagegen bewusst akzeptiert — das ist der Alpha-Kanal.
+        if isinstance(payload, list):
+            for rel in payload:
+                if isinstance(rel, dict) and not rel.get("draft"):
+                    return rel
+            return None
+        return payload
 
 
 async def check_once() -> UpdateState:
@@ -175,15 +190,24 @@ async def check_once() -> UpdateState:
 
     tag = data.get("tag_name", "")
     assets = data.get("assets", []) or []
-    msi = next(
-        (a for a in assets if str(a.get("name", "")).lower().endswith(".msi")),
-        None,
-    )
+
+    def _by_ext(ext: str):
+        return next(
+            (a for a in assets if str(a.get("name", "")).lower().endswith(ext)),
+            None,
+        )
+
+    # MSI bevorzugt (echter Silent-Install via msiexec, MajorUpgrade-Swap),
+    # sonst die Setup-EXE. Vorher wurde ausschliesslich nach .msi gesucht —
+    # am v0.1.0-Release haengt aber eine .exe, wodurch download_url leer und
+    # 'available' dauerhaft False blieb.
+    asset = _by_ext(".msi") or _by_ext(".exe")
 
     STATE.latest        = tag.lstrip("v").lstrip("V") or None
     STATE.release_notes = data.get("body") or ""
     STATE.html_url      = data.get("html_url")
-    STATE.download_url  = msi.get("browser_download_url") if msi else None
+    STATE.asset_name    = asset.get("name") if asset else None
+    STATE.download_url  = asset.get("browser_download_url") if asset else None
     STATE.available     = (
         STATE.latest is not None
         and STATE.download_url is not None
@@ -275,9 +299,11 @@ def _compute_sha256_blocking(path: Path) -> str:
     return h.hexdigest()
 
 
-def _write_restart_helper(msi_path: Path, exe_path: str) -> Path:
+def _write_restart_helper(msi_path: Path, exe_path: str,
+                          wait_for: str = "msiexec.exe") -> Path:
     """Schreibt eine kleine .bat in %TEMP%, die:
-       1) auf das Beenden von msiexec.exe wartet (Polling, ~1 s Tick)
+       1) auf das Beenden von wait_for wartet (Polling, ~1 s Tick) — das ist
+          msiexec.exe bei einer MSI, sonst der Prozessname der Setup-EXE
        2) die frisch installierte App neu startet (selber Pfad — MSI hat die
           .exe ueber das alte Binary geschrieben)
        3) sich selbst loescht, damit %TEMP% nicht zumuellt
@@ -290,9 +316,9 @@ def _write_restart_helper(msi_path: Path, exe_path: str) -> Path:
     bat.write_text(
         "@echo off\r\n"
         "rem VoiceWalker silent-update restart helper\r\n"
-        "rem Wartet bis msiexec fertig ist, startet die neue App, loescht sich selbst.\r\n"
+        "rem Wartet bis das Setup fertig ist, startet die neue App, loescht sich selbst.\r\n"
         ":wait\r\n"
-        'tasklist /fi "imagename eq msiexec.exe" 2>nul | find /i "msiexec.exe" >nul\r\n'
+        f'tasklist /fi "imagename eq {wait_for}" 2>nul | find /i "{wait_for}" >nul\r\n'
         "if %errorlevel%==0 (\r\n"
         "  ping -n 2 127.0.0.1 >nul\r\n"
         "  goto wait\r\n"
@@ -326,7 +352,10 @@ async def download_and_install(silent: bool = False) -> bool:
         return False
 
     STATE.installing = True
-    target = Path(tempfile.gettempdir()) / f"VoiceWalker-{STATE.latest}.msi"
+    # Endung aus dem Asset-Namen uebernehmen — davon haengt ab, ob msiexec
+    # oder die EXE direkt gestartet wird.
+    suffix = ".msi" if str(STATE.asset_name or "").lower().endswith(".msi") else ".exe"
+    target = Path(tempfile.gettempdir()) / f"VoiceWalker-{STATE.latest}{suffix}"
     try:
         log.info("updater: lade %s → %s", STATE.download_url, target)
         await asyncio.to_thread(_download_blocking, STATE.download_url, target)
@@ -385,8 +414,10 @@ async def download_and_install(silent: bool = False) -> bool:
     try:
         exe_path = sys.executable
         if exe_path:
-            helper_path = _write_restart_helper(target, exe_path)
-            log.info("updater: restart helper -> %s", helper_path)
+            wait_for = "msiexec.exe" if suffix == ".msi" else target.name
+            helper_path = _write_restart_helper(target, exe_path, wait_for)
+            log.info("updater: restart helper -> %s (wartet auf %s)",
+                     helper_path, wait_for)
     except Exception as e:
         log.warning("updater: restart helper konnte nicht geschrieben werden: %s", e)
 
@@ -394,17 +425,24 @@ async def download_and_install(silent: bool = False) -> bool:
         # /qn = quiet no-UI (silent), /passive = minimal UI (Fortschritt sichtbar).
         # /norestart = kein automatischer Reboot. Windows Installer macht den
         # MajorUpgrade-Swap automatisch.
-        ui_flag = "/qn" if silent else "/passive"
-        log.info("updater: starte msiexec %s fuer %s", ui_flag, target)
+        if suffix == ".msi":
+            ui_flag = "/qn" if silent else "/passive"
+            cmd = ["msiexec", "/i", str(target), ui_flag, "/norestart"]
+        else:
+            # Setup-EXE: /S ist die Silent-Konvention der gaengigen Bundles
+            # (WiX-Burn versteht zusaetzlich /quiet). Ohne silent laeuft sie
+            # mit eigener Oberflaeche.
+            cmd = [str(target)] + (["/S", "/quiet", "/norestart"] if silent else [])
+        log.info("updater: starte %s", " ".join(cmd))
         subprocess.Popen(
-            ["msiexec", "/i", str(target), ui_flag, "/norestart"],
+            cmd,
             creationflags=(
                 subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
                 if hasattr(subprocess, "DETACHED_PROCESS") else 0
             ),
         )
     except Exception as e:
-        STATE.error = f"msiexec start fehlgeschlagen: {e}"
+        STATE.error = f"Setup-Start fehlgeschlagen: {e}"
         STATE.installing = False
         log.error("updater: %s", STATE.error)
         return False
