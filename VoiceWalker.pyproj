@@ -21,6 +21,7 @@
          %LOCALAPPDATA%\VoiceWalker\voicewalker.log und das Browser-
          Debug-Panel (Strg+Shift+D). -->
     <IsWindowsApplication>True</IsWindowsApplication>
+    <TestFramework>Pytest</TestFramework>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>true</DebugSymbols>
