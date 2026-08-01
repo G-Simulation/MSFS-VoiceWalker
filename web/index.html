@@ -264,6 +264,10 @@
 
     /* Selection */
     ::selection { background: rgba(106,165,255,0.3); color: #fff; }
+
+    /* Scrollbars unsichtbar — Scroll-Funktion bleibt, nur Anzeige weg */
+    * { scrollbar-width: none; -ms-overflow-style: none; }
+    *::-webkit-scrollbar { width: 0; height: 0; display: none; }
   </style>
 </head>
 <body class="min-h-screen font-sans antialiased">
@@ -482,6 +486,26 @@
                    class="flex-1 min-w-0 accent-[color:var(--color-accent)]">
             <span id="masterVolumeVal" class="tabular-nums text-[color:var(--color-muted)] shrink-0 w-10 text-right">100%</span>
           </div>
+
+          <!-- Ambient-Mute: einheitlich fuer Schritte/Propeller/Jet/Heli.
+               Stimme bleibt unberuehrt. State persistiert im Backend
+               (config.json) und syncht via WS zu Toolbar/EFB. Layout: Label
+               links, iOS-Style Switch rechts — gleiche Row-Geometrie wie
+               Mic/Speaker/Volume daneben. -->
+          <label for="ambientToggle"
+                 class="text-[color:var(--color-muted)]"
+                 data-i18n="audio.ambient.label">Hintergrundgeräusche</label>
+          <button id="ambientToggle" type="button"
+                  role="switch" aria-checked="true"
+                  data-i18n-attr="aria-label:audio.ambient.label"
+                  class="relative inline-flex items-center h-6 w-11 shrink-0
+                         rounded-full transition-colors border
+                         border-[color:var(--color-border)]
+                         hover:border-[color:var(--color-accent)] cursor-pointer">
+            <span class="ambient-switch-knob inline-block h-4 w-4 rounded-full
+                         bg-white shadow transition-transform"
+                  aria-hidden="true"></span>
+          </button>
         </div>
 
         <!-- Mikrofon-Optionen: versteckt, weil fuer 95 % der User der Default
@@ -938,10 +962,13 @@
         Einstellungen
       </h3>
       <div class="space-y-3 text-sm mb-6">
-        <label class="flex items-center gap-3 cursor-pointer">
-          <input type="checkbox" id="welAutostart"
-                 class="w-4 h-4 accent-[color:var(--color-accent)]" />
-          <span data-i18n="welcome.autostart">Mit Windows starten</span>
+        <label class="flex items-start gap-3 cursor-pointer">
+          <input type="checkbox" id="welBiometricConsent"
+                 class="w-4 h-4 mt-0.5 accent-[color:var(--color-accent)]" />
+          <span data-i18n="welcome.biometric_consent">
+            Ich willige ausdrücklich in die Verarbeitung meiner Stimme als biometrisches Datum
+            ein (Art. 9 Abs. 2 lit. a DSGVO). Pflicht für die Voice-Funktion.
+          </span>
         </label>
         <label class="flex items-center gap-3 cursor-pointer">
           <input type="checkbox" id="welAutoUpdate" checked
@@ -1027,18 +1054,6 @@
       <ul class="space-y-4 mb-6">
         <li class="flex items-start gap-3">
           <label class="vw-toggle mt-0.5">
-            <input id="setAutostart" type="checkbox">
-            <span></span>
-          </label>
-          <div class="flex-1 min-w-0">
-            <div class="text-sm font-semibold" data-i18n="settings.autostart">Mit Windows starten</div>
-            <div class="text-xs text-[color:var(--color-muted)] mt-0.5" data-i18n="settings.autostart.desc">
-              VoiceWalker laeuft nach dem Login automatisch im Tray.
-            </div>
-          </div>
-        </li>
-        <li class="flex items-start gap-3">
-          <label class="vw-toggle mt-0.5">
             <input id="setAutoUpdate" type="checkbox">
             <span></span>
           </label>
@@ -1063,6 +1078,40 @@
           </div>
         </li>
         <li class="flex items-start gap-3">
+          <label class="vw-toggle mt-0.5">
+            <input id="setMeshPublicFallback" type="checkbox">
+            <span></span>
+          </label>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold" data-i18n="settings.meshfallback">
+              Mesh-Notbetrieb über öffentliche Server erlauben
+            </div>
+            <div class="text-xs text-[color:var(--color-muted)] mt-0.5" data-i18n="settings.meshfallback.desc">
+              Wenn unser Mesh-Server ausfällt, kann VoiceWalker stattdessen öffentliche
+              MQTT-Broker (EMQX, HiveMQ) nutzen. <strong>Deine IP-Adresse und ungefähre
+              Position (~20 km) werden dabei diesen Drittanbietern bekannt.</strong>
+              Audio bleibt P2P. Standard: aus.
+            </div>
+          </div>
+        </li>
+        <li class="flex items-start gap-3">
+          <label class="vw-toggle mt-0.5">
+            <input id="setBetaLogging" type="checkbox">
+            <span></span>
+          </label>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold" data-i18n="settings.betalogging">
+              Erweiterte Beta-Logs aufzeichnen
+            </div>
+            <div class="text-xs text-[color:var(--color-muted)] mt-0.5" data-i18n="settings.betalogging.desc">
+              In der Beta-Phase werden zusätzlich Sim-Snapshots und Mesh-Events
+              ins Log geschrieben — hilft bei der Fehlersuche. Klick auf
+              „Logs jetzt senden" überträgt die anonymisierte Datei an den
+              Entwickler-Discord. Standard: an. Performance-Kosten unter 0,5 %.
+            </div>
+          </div>
+        </li>
+        <li class="flex items-start gap-3">
           <div class="mt-0.5 w-11 shrink-0 flex items-center justify-center">
             <svg viewBox="0 0 24 24" class="w-4 h-4 text-[color:var(--color-muted)]" fill="none"
                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1081,7 +1130,27 @@
                            focus:border-[color:var(--color-accent)] outline-none">
               <option value="de">Deutsch</option>
               <option value="en">English</option>
+              <option value="nl">Nederlands</option>
             </select>
+            <!-- Eigene Sprachdateien: Vorlage exportieren, Ordner oeffnen.
+                 Die Liste oben wird von app.js aus i18n.supported() neu
+                 aufgebaut, damit Nutzersprachen automatisch auftauchen. -->
+            <div class="flex flex-wrap gap-2 mt-2">
+              <button id="langExportBtn" type="button"
+                      class="px-3 py-1.5 text-xs rounded-lg bg-[rgba(7,11,22,0.5)]
+                             border border-[color:var(--color-border)]
+                             hover:border-[color:var(--color-accent)]"
+                      data-i18n="settings.language.export">Sprachdatei exportieren</button>
+              <button id="langFolderBtn" type="button"
+                      class="px-3 py-1.5 text-xs rounded-lg bg-[rgba(7,11,22,0.5)]
+                             border border-[color:var(--color-border)]
+                             hover:border-[color:var(--color-accent)]"
+                      data-i18n="settings.language.folder">Ordner öffnen</button>
+            </div>
+            <div id="langHint" class="text-xs text-[color:var(--color-muted)] mt-1.5"
+                 data-i18n="settings.language.hint">
+              Eigene Übersetzung? Datei exportieren, in den Ordner legen, bearbeiten — und gern an info@gott3d.de schicken.
+            </div>
           </div>
         </li>
       </ul>

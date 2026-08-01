@@ -39,6 +39,7 @@ except Exception:
 # Logging ZUERST initialisieren — alle Module unten reden über den Logger
 from debug import (
     debug_enabled,
+    apply_beta_logging,
     get_logger,
     install_asyncio_exception_handler,
     recent_log_entries,
@@ -149,6 +150,30 @@ SETTINGS_DEFAULTS = {
     "auto_update":         True,
     "send_logs_on_error":  False,
     "first_run_done":      False,
+    # Erweiterte Beta-Logs: aktiviert DEBUG-Level fuer main/tray/vw-window/ptt
+    # plus zusaetzliche Info-Marker an Mesh- und Sim-State-Changes. Macht
+    # 'Logs senden'-Reports diagnose-tauglich (Race-Conditions, Mesh-Asym,
+    # in_menu-Erkennung etc.). Performance-Impact unter 0.5%, ~10MB Log
+    # pro 2h-Session. Default an waehrend der Beta-Phase, User kann's via
+    # Settings-Toggle abschalten. Unabhaengig vom VWDebugBuild-Flag (das
+    # steuert das Debug-Panel + /debug-Endpoints, hat in Release nichts
+    # verloren — Beta-Logs duerfen aber im Release-Build aktiv sein).
+    "beta_logging":        True,
+    # Privacy-Consent (Welcome-Dialog "Akzeptieren & Starten"). Wird zusaetzlich
+    # in localStorage als 'vw.privacy_consent_v1' gespiegelt — aber localStorage
+    # ist origin-scoped (127.0.0.1 vs localhost) und kann von Browser-Cleanern
+    # geloescht werden, deshalb ist die config.json hier die robuste Quelle.
+    # hasConsent() im Frontend liest OR aus beiden Quellen. _v1 als Suffix
+    # damit kuenftige DSE-Aenderungen ueber _v2 etc. eine Re-Consent-Welle
+    # ausloesen koennen.
+    "privacy_consent_v1":  False,
+    # Opt-In fuer den Public-MQTT-Notbetrieb. Default AUS = die App nutzt
+    # ausschliesslich unseren eigenen Broker; faellt der aus, ist das Mesh
+    # aus. Wenn der User den Toggle aktiviert, weicht die App im Ausfall
+    # auf oeffentliche MQTT-Broker (EMQX, HiveMQ) aus — dabei wird die
+    # IP-Adresse + grobe Position diesen Drittanbietern bekannt. Siehe
+    # PRIVACY.md §5.1b.
+    "mesh_public_fallback": False,
 }
 
 def settings_view(cfg: dict | None = None) -> dict:
@@ -164,6 +189,19 @@ def settings_view(cfg: dict | None = None) -> dict:
     out["windows_autostart"] = autostart.is_enabled() if (
         getattr(sys, "frozen", False)
     ) else bool(cfg.get("windows_autostart", False))
+    # Mesh-Relay-URLs: wenn gesetzt (Liste oder String) → Trystero nutzt
+    # MQTT-Strategie auf den eigenen Broker, statt oeffentliche WebTorrent-
+    # Tracker. Quellen in Reihenfolge: env VOICEWALKER_MESH_RELAYS (CSV),
+    # config.json "mesh_relays" (Liste). Empty-List = Public-Tracker (default).
+    relays_env = os.environ.get("VOICEWALKER_MESH_RELAYS", "").strip()
+    if relays_env:
+        relays = [u.strip() for u in relays_env.split(",") if u.strip()]
+    else:
+        cfg_relays = cfg.get("mesh_relays", [])
+        if isinstance(cfg_relays, str):
+            cfg_relays = [u.strip() for u in cfg_relays.split(",") if u.strip()]
+        relays = [str(u) for u in cfg_relays] if isinstance(cfg_relays, list) else []
+    out["mesh_relays"] = relays
     return out
 
 
@@ -187,6 +225,13 @@ def settings_apply(new: dict) -> dict:
             autostart.apply(bool(new["windows_autostart"]))
         except Exception as e:
             log.warning("autostart.apply failed: %s", e)
+    # Beta-Logging-Toggle live umsetzen — User soll keine App-Restart brauchen
+    # um den Log-Detailgrad zu aendern.
+    if "beta_logging" in new:
+        try:
+            apply_beta_logging(bool(new["beta_logging"]))
+        except Exception as e:
+            log.warning("apply_beta_logging failed: %s", e)
     return settings_view(cfg)
 
 
@@ -339,6 +384,11 @@ class AppState:
     # wenn True; bei False wird STATE.wasm_pos geloescht + an alle UIs der
     # "tracking_off"-Hinweis broadcastet.
     tracking_enabled: bool = True
+    # Ambient-Sounds (Schritte/Propeller/Jet/Heli) muten — pro User. Default
+    # an. Wird im Browser-UI im Audio-Mix angewendet (Backend selbst macht
+    # kein Audio); hier nur State + Persistenz, broadcast an alle UIs damit
+    # Toolbar/EFB den Toggle-Zustand spiegeln.
+    ambient_enabled: bool = True
     # Wenn bei diesem Start eine neuere Version laeuft als beim letzten
     # Beenden, halten wir die alte Version-String hier — die UI bekommt
     # sie als "update_completed"-Toast eingeblendet ("Auf v0.1.1 aktualisiert").
@@ -886,17 +936,6 @@ class SimReader:
                         abs(cur_lat - ac_lat_w) > EPS
                         or abs(cur_lon - ac_lon_w) > EPS
                     )
-                # Fallback: MSFS 2024 pinnt USER_CURRENT nicht in jedem
-                # Frame atomar auf den Avatar — wenn cur≈ac, aber Avatar-
-                # Position separat (USER_AVATAR direkt) sich von Aircraft
-                # unterscheidet, sind wir trotzdem im Walker.
-                if not on_foot:
-                    have_av = abs(av_lat_w) > 0.001 and abs(av_lon_w) > 0.001
-                    if have_ac and have_av:
-                        on_foot = (
-                            abs(av_lat_w - ac_lat_w) > EPS
-                            or abs(av_lon_w - ac_lon_w) > EPS
-                        )
 
                 # Position kohaerent zum Flag waehlen.
                 if on_foot:
@@ -951,12 +990,14 @@ class SimReader:
         # die Default-Position erkennen.
         ac_for_menu_check = (aircraft_pos.get("lat", 0.0), aircraft_pos.get("lon", 0.0)) \
             if aircraft_pos else (plane_lat, plane_lon)
-        # Whitelist-basiert: aktiv nur bei eindeutig bekannten Flug-States
-        # ODER Walker-State. Plus Positions-Check als zusaetzliche Sicherung
-        # (MSFS-Default-Position ≈ lat 0, lon 90 bedeutet "kein Flug aktiv",
-        # auch wenn cam_state zufaellig einen Flug-Wert hat).
+        # Position ist authoritative — MSFS 2024 cam_state-Werte sind nicht
+        # zuverlaessig (cam=34 z.B. taucht im Cockpit auf, ist aber nicht in
+        # einer Whitelist). Wenn die Position echt ist (nicht MSFS-Default),
+        # ist der Spieler im Sim. Nur bei explizitem Menue-cam (32 Hauptmenue)
+        # oder Default-Pos zaehlt es als Menue.
+        MENU_CAMERA_STATES = {12, 32}  # 32 = Hauptmenue, 12 = Worldmap
         in_menu = (
-            cam not in FLIGHT_CAMERA_STATES
+            cam in MENU_CAMERA_STATES
             or _is_menu_position(ac_for_menu_check[0], ac_for_menu_check[1])
             or _is_menu_position(lat, lon)
         )
@@ -1055,15 +1096,50 @@ def debug_status_payload() -> dict:
     }
 
 
-def _make_response(status: HTTPStatus, headers_list, body: bytes) -> Response:
-    """Baue einen websockets.Response mit Standard-Encoding. Body muss bytes sein.
-    CORS-Header werden globalen Requests zugefuegt — das MSFS-In-Sim-Panel laeuft
-    auf 'coui://html_ui' und muss uns erreichen koennen."""
+def _is_allowed_origin(origin: str | None) -> bool:
+    """Whitelist fuer CORS / WS-Upgrade. Vorher hatten wir ACAO=*, das laesst
+    JEDE Webseite die der User besucht via fetch() auf den localhost-Server
+    zugreifen — CSRF auf Settings, Mic-Hijack, /debug-Leak. Erlaubt sind nur:
+      - eigene Browser-UI auf 127.0.0.1 / localhost (variabler Port)
+      - MSFS Coherent GT InGame-Panel ('coui://html_ui', oft Origin=null)
+      - file:// (z.B. wenn jemand das Overlay lokal als HTML-Datei oeffnet)
+    Alles andere wird abgelehnt — das Backend ist NICHT fuer Drittseiten da."""
+    if origin is None or origin == "" or origin.lower() == "null":
+        # Coherent GT meldet typ. Origin: null — und nur das wollen wir
+        # zulassen. Ein 'fetch()' aus einer fremden Website kommt zwar oft
+        # mit konkretem Origin, aber Edge-Cases (sandboxed iframes etc.)
+        # koennen auch null senden. Risiko in Kauf genommen, weil es ohne
+        # null-Akzeptanz das InGame-Panel killen wuerde.
+        return True
+    o = origin.lower()
+    if o.startswith("coui://"):
+        return True
+    if o.startswith("file://"):
+        return True
+    if o.startswith("http://127.0.0.1") or o.startswith("http://localhost"):
+        return True
+    return False
+
+
+def _make_response(status: HTTPStatus, headers_list, body: bytes,
+                   *, origin: str | None = None) -> Response:
+    """Baue einen websockets.Response mit Standard-Encoding. Body muss bytes
+    sein. CORS-Header sind whitelist-basiert (siehe _is_allowed_origin) —
+    fremde Origins bekommen KEIN ACAO und der Browser blockt das Lesen der
+    Response, auch wenn die Bytes noch zurueckgehen."""
     hdrs = list(headers_list)
-    # Wenn nicht schon vom Caller gesetzt, offen fuer alle Origins.
     names = {k.lower() for k, _ in hdrs}
     if "access-control-allow-origin" not in names:
-        hdrs.append(("Access-Control-Allow-Origin", "*"))
+        if _is_allowed_origin(origin):
+            # Echo zurueck, damit credentials/CORS-spec-konform — *Wildcard
+            # fliegt raus. Bei origin=None setzen wir 127.0.0.1 als Default
+            # (eigene UI), damit gleichaltrige Same-Origin-Requests problemlos
+            # laufen.
+            hdrs.append((
+                "Access-Control-Allow-Origin",
+                origin if origin else "http://127.0.0.1",
+            ))
+            hdrs.append(("Vary", "Origin"))
     if "access-control-allow-methods" not in names:
         hdrs.append(("Access-Control-Allow-Methods", "GET, POST, OPTIONS"))
     if "access-control-allow-headers" not in names:
@@ -1074,6 +1150,97 @@ def _make_response(status: HTTPStatus, headers_list, body: bytes) -> Response:
         headers=Headers(hdrs),
         body=body,
     )
+
+
+def lang_dir() -> pathlib.Path:
+    """Ordner fuer nutzereigene Sprachdateien: <data_dir>/lang/<code>.json.
+    Liegt bewusst NICHT in web/ — das wird bei gefrorenen Builds nach
+    %TEMP%\\_MEIxxxx entpackt und waere nach jedem Start weg."""
+    return data_dir() / "lang"
+
+
+def _is_lang_code(code: str) -> bool:
+    """'de', 'nl', 'pt-br': zwei Buchstaben, optional '-' + 2-3 alphanumerisch.
+    Haelt Unsinn und Pfad-Tricks aus dem Dateinamen vom Sprach-Dropdown fern."""
+    main, sep, region = code.partition("-")
+    if len(main) != 2 or not (main.isascii() and main.isalpha()):
+        return False
+    if not sep:
+        return True
+    return 2 <= len(region) <= 3 and region.isascii() and region.isalnum()
+
+
+_LANG_README = """VoiceWalker — eigene Sprachdateien
+==================================
+
+Jede Datei hier ist eine Sprache: <code>.json, z. B. nl.json, fr.json, pt-br.json.
+Der Dateiname ist der Sprachcode und taucht so im Sprach-Dropdown auf.
+
+Format: ein flaches JSON-Objekt, Key -> Text.
+
+    {
+      "header.online": "online",
+      "license.activate": "Activeren"
+    }
+
+- Eine Vorlage mit allen Texten bekommst du in den Einstellungen ueber
+  "Sprachdatei exportieren".
+- Du musst nicht alles uebersetzen. Fehlende Keys fallen automatisch auf
+  Englisch zurueck.
+- Heisst die Datei wie eine eingebaute Sprache (de/en/nl), werden nur die
+  darin enthaltenen Texte ueberschrieben — praktisch fuer Korrekturen.
+- Platzhalter in geschweiften Klammern muessen erhalten bleiben, z. B. {n}
+  in "{n} peers". Ebenso HTML-Schnipsel wie <strong>.
+
+Nach dem Bearbeiten die App neu starten (oder die Seite neu laden).
+
+Uebersetzung fertig? Schick die Datei gern an info@gott3d.de, dann kommt sie
+in die naechste Version.
+"""
+
+
+def _ensure_lang_readme(d: pathlib.Path) -> None:
+    """LIESMICH einmalig anlegen — nie ueberschreiben, der Nutzer koennte
+    eigene Notizen darin haben."""
+    try:
+        f = d / "LIESMICH.txt"
+        if not f.exists():
+            f.write_text(_LANG_README, encoding="utf-8")
+    except Exception as e:
+        log.debug("lang readme skipped: %s", e)
+
+
+def read_lang_packs() -> dict:
+    """Alle gueltigen <code>.json aus dem lang-Ordner einlesen.
+    Defekte oder falsch benannte Dateien werden geloggt und uebersprungen —
+    eine kaputte Datei darf die App nicht am Start hindern."""
+    packs: dict = {}
+    d = lang_dir()
+    try:
+        if not d.is_dir():
+            return packs
+        for f in sorted(d.glob("*.json")):
+            code = f.stem.strip().lower()
+            if not _is_lang_code(code):
+                log.warning("lang: %s uebersprungen — '%s' ist kein Sprachcode",
+                            f.name, code)
+                continue
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+            except Exception as e:
+                log.warning("lang: %s nicht lesbar (%s)", f.name, e)
+                continue
+            if not isinstance(data, dict):
+                log.warning("lang: %s ist kein JSON-Objekt", f.name)
+                continue
+            strings = {k: v for k, v in data.items() if isinstance(v, str)}
+            dropped = len(data) - len(strings)
+            packs[code] = strings
+            log.info("lang: %s geladen — %d Texte%s", f.name, len(strings),
+                     (", %d Nicht-Text-Werte ignoriert" % dropped) if dropped else "")
+    except Exception as e:
+        log.warning("lang: Ordner nicht lesbar: %s", e)
+    return packs
 
 
 async def http_handler(connection, request):
@@ -1087,8 +1254,21 @@ async def http_handler(connection, request):
       - sonst         → statische Datei aus WEB_DIR
     """
     path = request.path
+    # Origin aus Request-Headern fuer CORS-Whitelist (s. _is_allowed_origin).
+    # Bei websockets v13 sind Headers ein Multi-Dict-aehnliches Objekt.
+    try:
+        _origin = request.headers.get("Origin")
+    except Exception:
+        _origin = None
 
     if path == "/ui":
+        # WS-Upgrade: Origin-Check kommt im ws_handler nach Connect — hier
+        # lassen wir nur durch wenn die Whitelist greift, sonst Forbidden.
+        if not _is_allowed_origin(_origin):
+            log.warning("WS-Connect von fremder Origin abgelehnt: %r", _origin)
+            return _make_response(
+                HTTPStatus.FORBIDDEN, [], b"forbidden", origin=_origin,
+            )
         return None
 
     # /wasm-pos und /walker-probe Endpoints wurden entfernt — das waren
@@ -1122,7 +1302,14 @@ async def http_handler(connection, request):
     # /debug/status und /debug/log dann 404, niemand kann Backend-State pollen.
     if path.startswith("/debug/status"):
         if not DEBUG_BUILD:
-            return _make_response(HTTPStatus.NOT_FOUND, [], b"")
+            return _make_response(HTTPStatus.NOT_FOUND, [], b"", origin=_origin)
+        # Origin-Hardening: /debug/status leaked vorher (mit ACAO=*) State an
+        # JEDE Webseite die der User besucht. Jetzt nur eigene UI + Coherent.
+        if not _is_allowed_origin(_origin):
+            log.warning("/debug/status von fremder Origin abgelehnt: %r", _origin)
+            return _make_response(
+                HTTPStatus.FORBIDDEN, [], b"forbidden", origin=_origin,
+            )
         try:
             body = json.dumps(debug_status_payload(), default=str).encode("utf-8")
             return _make_response(
@@ -1132,11 +1319,13 @@ async def http_handler(connection, request):
                     ("Cache-Control", "no-store"),
                 ],
                 body,
+                origin=_origin,
             )
         except Exception as e:
             record_error("debug_status", e)
             return _make_response(
-                HTTPStatus.INTERNAL_SERVER_ERROR, [], str(e).encode("utf-8")
+                HTTPStatus.INTERNAL_SERVER_ERROR, [], str(e).encode("utf-8"),
+                origin=_origin,
             )
 
     # /debug/log — Panel-Logs aus panel.js landen hier und werden ins
@@ -1178,6 +1367,43 @@ async def http_handler(connection, request):
             HTTPStatus.OK,
             [("Content-Type", "text/plain"), ("Cache-Control", "no-store")],
             b"ok",
+        )
+
+    # /api/lang — nutzereigene Sprachpakete aus <data_dir>/lang/.
+    # Kein DEBUG_BUILD-Gate und kein Origin-Gate: das sind reine UI-Texte,
+    # kein Backend-State. Wird von der Web-UI und vom MSFS-Panel geladen.
+    if path.split("?", 1)[0].rstrip("/") in ("/api/lang", "/api/lang/open"):
+        _p = path.split("?", 1)[0].rstrip("/")
+
+        if _p == "/api/lang/open":
+            # Ordner im Explorer zeigen — Einstiegspunkt fuer Uebersetzer.
+            try:
+                d = lang_dir()
+                d.mkdir(parents=True, exist_ok=True)
+                _ensure_lang_readme(d)
+                try:
+                    os.startfile(str(d))          # nur Windows, App ist Windows-only
+                except AttributeError:
+                    pass                          # anderes OS: Ordner ist trotzdem da
+                return _make_response(
+                    HTTPStatus.OK,
+                    [("Content-Type", "text/plain"), ("Cache-Control", "no-store")],
+                    str(d).encode("utf-8"), origin=_origin,
+                )
+            except Exception as e:
+                log.warning("lang: Ordner konnte nicht geoeffnet werden: %s", e)
+                return _make_response(
+                    HTTPStatus.INTERNAL_SERVER_ERROR, [],
+                    str(e).encode("utf-8"), origin=_origin,
+                )
+
+        body = json.dumps(read_lang_packs(), ensure_ascii=False).encode("utf-8")
+        return _make_response(
+            HTTPStatus.OK,
+            [("Content-Type", "application/json; charset=utf-8"),
+             ("Content-Length", str(len(body))),
+             ("Cache-Control", "no-store")],
+            body, origin=_origin,
         )
 
     clean = path.split("?", 1)[0].split("#", 1)[0]
@@ -1333,6 +1559,12 @@ async def ws_handler(ws):
             "type": "tracking_state",
             "enabled": STATE.tracking_enabled,
         }))
+        # Ambient-Mute-Zustand initial mitsenden (analog tracking_state) —
+        # Toolbar/EFB rendern damit den richtigen Toggle-Zustand vom Start an.
+        await ws.send(json.dumps({
+            "type": "ambient_state",
+            "enabled": STATE.ambient_enabled,
+        }))
         # License-State sofort mitsenden, damit UI weiss ob Pro freigeschaltet
         # ist (z.B. fuer Private-Rooms-Button-Sichtbarkeit).
         await ws.send(json.dumps(_license_state_msg()))
@@ -1436,6 +1668,18 @@ async def ws_handler(ws):
                             # Panel-Overlay: leere Peer-Liste + Tracking-off-Hinweis
                             STATE.overlay_cache = None
                             asyncio.create_task(broadcast({"type": "tracking_off"}))
+                elif t == "set_ambient":
+                    new_val = bool(m.get("enabled", True))
+                    if new_val != STATE.ambient_enabled:
+                        STATE.ambient_enabled = new_val
+                        cfg = load_config()
+                        cfg["ambient_enabled"] = new_val
+                        save_config(cfg)
+                        log.info("ambient_enabled set to %s (persisted)", new_val)
+                        asyncio.create_task(broadcast({
+                            "type": "ambient_state",
+                            "enabled": new_val,
+                        }))
                 elif t == "panel_action":
                     # MSFS-Panel-Buttons.
                     #   "toggle-tracking"   → Backend-State (config.json)
@@ -1458,6 +1702,17 @@ async def ws_handler(ws):
                         if not new_val:
                             STATE.overlay_cache = None
                             asyncio.create_task(broadcast({"type": "tracking_off"}))
+                    elif action == "toggle-ambient":
+                        new_val = not STATE.ambient_enabled
+                        STATE.ambient_enabled = new_val
+                        cfg = load_config()
+                        cfg["ambient_enabled"] = new_val
+                        save_config(cfg)
+                        log.info("panel: ambient_enabled toggled to %s", new_val)
+                        asyncio.create_task(broadcast({
+                            "type": "ambient_state",
+                            "enabled": new_val,
+                        }))
                     elif action == "ptt-bind-start" and PTT is not None:
                         try: PTT.start_binding()
                         except Exception as e: log.error("ptt bind start: %s", e)
@@ -1599,12 +1854,62 @@ async def _on_update_found(_state):
 
 
 async def broadcast_sim(reader: SimReader):
+    # Diff-Gate: bei stehendem Flieger sendet der Sim immer denselben Snap.
+    # Jeder Send triggert in 3 UIs einen Render-Pass — also nur senden wenn
+    # sich was Sichtbares geaendert hat (Pos >= 5 m ODER Heading >= 2 deg)
+    # ODER 1 s seit letztem Send (Heartbeat fuer UI-State-Sync).
+    last_sent: dict | None = None
+    last_sent_t: float = 0.0
+    HEARTBEAT_S = 1.0
+    POS_DELTA_M = 5.0
+    HDG_DELTA_DEG = 2.0
+    R_EARTH = 6371000.0
     try:
         while True:
             try:
                 snap = reader.snapshot()
                 if snap and SUBSCRIBERS:
-                    await broadcast({"type": "sim", "data": snap})
+                    now = asyncio.get_event_loop().time()
+                    should_send = True
+                    if last_sent is not None:
+                        try:
+                            import math
+                            lat1 = float(last_sent.get("lat", 0))
+                            lon1 = float(last_sent.get("lon", 0))
+                            lat2 = float(snap.get("lat", 0))
+                            lon2 = float(snap.get("lon", 0))
+                            d_lat = math.radians(lat2 - lat1)
+                            d_lon = math.radians(lon2 - lon1)
+                            a = (math.sin(d_lat / 2) ** 2
+                                 + math.cos(math.radians(lat1))
+                                 * math.cos(math.radians(lat2))
+                                 * math.sin(d_lon / 2) ** 2)
+                            d_m = 2 * R_EARTH * math.asin(min(1.0, math.sqrt(a)))
+                            d_hdg = abs(
+                                float(snap.get("heading_deg", 0))
+                                - float(last_sent.get("heading_deg", 0))
+                            )
+                            if d_hdg > 180:
+                                d_hdg = 360 - d_hdg
+                            d_t = now - last_sent_t
+                            # Mode-Switch (on_foot, in_menu, demo) immer durchlassen
+                            mode_changed = (
+                                bool(snap.get("on_foot")) != bool(last_sent.get("on_foot"))
+                                or bool(snap.get("in_menu")) != bool(last_sent.get("in_menu"))
+                                or bool(snap.get("demo")) != bool(last_sent.get("demo"))
+                            )
+                            should_send = (
+                                mode_changed
+                                or d_m >= POS_DELTA_M
+                                or d_hdg >= HDG_DELTA_DEG
+                                or d_t >= HEARTBEAT_S
+                            )
+                        except Exception:
+                            should_send = True
+                    if should_send:
+                        await broadcast({"type": "sim", "data": snap})
+                        last_sent = snap
+                        last_sent_t = now
             except Exception as e:
                 record_error("broadcast_sim", e)
             await asyncio.sleep(1.0 / TICK_HZ)
@@ -1807,7 +2112,12 @@ async def main():
     # User-Config (z.B. Tracking-Schalter) aus config.json laden
     _cfg = load_config()
     STATE.tracking_enabled = bool(_cfg.get("tracking_enabled", True))
-    log.info("config loaded: tracking_enabled=%s", STATE.tracking_enabled)
+    STATE.ambient_enabled  = bool(_cfg.get("ambient_enabled", True))
+    log.info("config loaded: tracking_enabled=%s ambient_enabled=%s",
+             STATE.tracking_enabled, STATE.ambient_enabled)
+    # Beta-Logging anwenden BEVOR der WebSocket-Server / SimReader hochfaehrt,
+    # damit deren Init-Logs schon im richtigen Detailgrad landen.
+    apply_beta_logging(bool(_cfg.get("beta_logging", True)))
 
     # Post-Update-Erkennung: lief beim letzten Start eine andere (kleinere)
     # Version, dann zeigen wir der UI einen "auf vX.Y aktualisiert"-Toast.
@@ -1959,6 +2269,20 @@ async def main():
     # Globale Reference, damit der HTTP-Endpoint /_/highlight pystray.notify
     # beim Doppelstart-Ping aufrufen kann (siehe http_handler oben).
     globals()["_TRAY_ICON_REF"] = tray_icon
+    # Welcome-Toast: User soll sehen, dass die App jetzt im Hintergrund
+    # laeuft, auch ohne sichtbares Fenster. Klassische Tray-App-UX.
+    # Nicht beim allerersten Start (first_run_done=false), weil dann eh
+    # gleich das Welcome-Panel hochkommt — sonst doppelter Hinweis.
+    if tray_icon is None:
+        log.info("welcome-toast skipped: no tray icon")
+    elif not load_config().get("first_run_done"):
+        log.info("welcome-toast skipped: first-run (welcome panel takes over)")
+    else:
+        try:
+            tray.notify_started()
+            log.info("welcome-toast scheduled (1.5s delay)")
+        except Exception as _e:
+            log.debug("tray.notify_started failed: %s", _e)
 
     # MSFS-Lifecycle-Watcher: wenn der User MSFS schliesst, soll VoiceWalker
     # sich auch beenden statt verwaist im Hintergrund weiterzulaufen.
@@ -1969,6 +2293,31 @@ async def main():
     msfs_lifecycle.watch_and_quit(
         on_msfs_gone=lambda: _loop.call_soon_threadsafe(server.close),
     )
+
+    # MSFS-exe.xml Self-Heal: bei jedem Start prueft die App, ob alle
+    # gefundenen MSFS-Installs die VoiceWalker-Auto-Launch-Eintraege haben
+    # und der Pfad zur aktuellen EXE stimmt. Falls nicht: silently nachziehen.
+    # Damit User nach MSFS-Update / VoiceWalker-Reinstall / Pfad-Aenderung
+    # kein manuelles Repair mehr braucht. Nur im frozen Build aktiv (sonst
+    # wuerden wir Dev-Source-Pfade in echte exe.xml-Dateien schreiben).
+    if getattr(sys, "frozen", False):
+        try:
+            import installer as _vw_installer
+            _exe_path = Path(sys.executable).resolve()
+            sims = _vw_installer.detect_msfs_installs()
+            for sim in sims:
+                try:
+                    action = _vw_installer.upsert_exe_xml(
+                        sim["exe_xml"], _vw_installer.APP_NAME, _exe_path,
+                    )
+                    if action != "unchanged":
+                        log.info("exe.xml self-heal (%s): %s",
+                                 sim["label"], action)
+                except Exception as e:
+                    log.warning("exe.xml self-heal (%s) fehlgeschlagen: %s",
+                                sim["label"], e)
+        except Exception as e:
+            log.warning("exe.xml self-heal init fehlgeschlagen: %s", e)
 
     # Browser-Tab im Hintergrund vorbooten (versteckt). Damit das Sim-Panel
     # und EFB sofort die echten Audio-Geraete-Listen sehen — die Discovery
@@ -2012,6 +2361,19 @@ async def main():
 
 
 if __name__ == "__main__":
+    # --webview-window URL → Pywebview-Subprocess-Modus (siehe webview_window.py).
+    # Wenn die EXE mit diesem Argument gestartet wird, faehrt KEIN Backend-Stack
+    # hoch — wir hosten nur das App-Fenster fuer einen bereits laufenden Backend-
+    # Prozess. Spawn kommt aus tray.show_ui(). Das Subprocess-Pattern erspart
+    # einen Asyncio-in-Worker-Refactor von main.py, weil pywebview den Main-
+    # Thread (COM-Init) braucht und der Backend-Loop hier den Main-Thread hat.
+    if len(sys.argv) >= 3 and sys.argv[1] == "--webview-window":
+        try:
+            import webview_window
+            sys.exit(webview_window.run(sys.argv[2]))
+        except Exception as _e:
+            sys.stderr.write(f"vw-window crash: {_e}\n")
+            sys.exit(1)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
