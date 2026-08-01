@@ -129,6 +129,10 @@
   fab.type = 'button';
   fab.title = 'Debug-Overlay oeffnen (Strg+Shift+D)';
   fab.textContent = 'DBG';
+  // Von Anfang an unsichtbar. toggle() blendet ihn erst ein, nachdem das
+  // Overlay einmal geoeffnet wurde — ohne das stuende der Knopf im Kopf des
+  // Panels, auch wenn das Overlay selbst zu ist.
+  fab.style.display = 'none';
 
   function attach() {
     function appendBoth() {
@@ -189,13 +193,19 @@
     logEl.scrollTop = logEl.scrollHeight;
   }
 
+  // Der DBG-Knopf im Panel-Kopf bleibt unsichtbar, bis das Overlay einmal
+  // bewusst geoeffnet wurde. Sonst sieht jeder Nutzer eine Debug-Schaltflaeche
+  // in der Kopfzeile — auch wenn das Overlay selbst zu ist.
+  let fabFreigegeben = false;
+
   function toggle(force) {
     const open = force === undefined ? !overlay.classList.contains('open') : !!force;
+    if (open) fabFreigegeben = true;
     overlay.classList.toggle('open', open);
     // Overlay + FAB sind nicht mehr DOM-Geschwister (FAB lebt im .vw-header,
     // Overlay am host) — FAB-Sichtbarkeit deshalb hier explizit toggeln,
     // statt per CSS-Sibling-Selector.
-    fab.style.display = open ? 'none' : '';
+    fab.style.display = (open || !fabFreigegeben) ? 'none' : '';
     if (open) renderLog();
   }
 
@@ -260,7 +270,25 @@
     }
   });
 
-  // Auto-open: im Debug-Build sitzt per Definition ein Dev davor.
-  toggle(true);
-  console.info('[VW Debug] Overlay aktiv. R=Reload, C=Clear, Strg+Shift+D=Toggle');
+  // Frueher ging das Overlay hier automatisch auf, mit der Begruendung, im
+  // Debug-Build sitze ohnehin ein Entwickler davor. Das stimmt nur, solange
+  // die Datei tatsaechlich nur im Debug-Build landet — und genau das ist
+  // schiefgegangen: v0.2.1 hat sie ausgeliefert, und jeder Nutzer bekam beim
+  // Oeffnen des Panels das VW-DEBUG-Fenster ueber die Oberflaeche gelegt.
+  //
+  // Deshalb bleibt es jetzt zu und wird ueber Strg+Shift+D geholt. Wer es
+  // beim Start offen haben will, setzt einmalig im Panel-Kontext
+  // localStorage['vw.debug_overlay'] = '1'.
+  let autoOpen = false;
+  try {
+    autoOpen = window.localStorage &&
+               window.localStorage.getItem('vw.debug_overlay') === '1';
+  } catch (e) { /* Coherent GT ohne localStorage — dann eben zu */ }
+
+  if (autoOpen) {
+    toggle(true);
+    console.info('[VW Debug] Overlay aktiv (vw.debug_overlay=1). R=Reload, C=Clear, Strg+Shift+D=Toggle');
+  } else {
+    console.info('[VW Debug] geladen, Overlay zu. Strg+Shift+D oeffnet es.');
+  }
 })();

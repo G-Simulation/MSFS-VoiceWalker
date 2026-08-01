@@ -1003,6 +1003,20 @@
           Object.assign(state.ui, m.ui);
         }
         applyWalkerAutoZoom();
+      } else if (m.type === 'license_state') {
+        // Der Pro-Status kam bisher ausschliesslich ueber overlay_state, also
+        // aus dem Desktop-Fenster. Ist das zu — der Normalfall waehrend man
+        // fliegt — blieb das Panel dauerhaft auf "Free" stehen, obwohl eine
+        // gueltige Lizenz hinterlegt war.
+        //
+        // Das Backend schickt license_state ohnehin an jeden Client, direkt
+        // beim Verbinden und bei jeder Aenderung. Das ist die verlaessliche
+        // Quelle, weil sie nicht davon abhaengt, ob noch ein zweites Fenster
+        // offen ist.
+        if (!state.ui) state.ui = {};
+        state.ui.isPro = !!m.is_pro;
+        renderUI();
+        renderSetupTab();
       } else if (m.type === 'tracking_off') {
         state.trackingOff = true;
         state.peers.clear();
@@ -1454,11 +1468,18 @@
     setupTabs();
     setupSetupTab();
     // Sprach-Dropdown (Custom) initial befuellen + auf aktive Sprache setzen.
+    //
+    // Die Liste kam frueher aus einem fest verdrahteten Array mit de und en.
+    // Niederlaendisch war damit zwar uebersetzt, liess sich im Panel aber
+    // nicht auswaehlen. Jetzt kommt sie aus i18n.supported() — damit taucht
+    // jede Sprache auf, die im Woerterbuch steht, einschliesslich der
+    // nutzereigenen Sprachpakete aus <data_dir>/lang/.
     if (window.i18n) {
-      renderVwSelect('vw-lang', [
-        { value: 'de', label: 'Deutsch' },
-        { value: 'en', label: 'English' },
-      ], window.i18n.getLang());
+      const SPRACHNAMEN = { de: 'Deutsch', en: 'English', nl: 'Nederlands' };
+      const codes = (window.i18n.supported && window.i18n.supported()) || ['de', 'en'];
+      renderVwSelect('vw-lang', codes.map(function (c) {
+        return { value: c, label: SPRACHNAMEN[c] || c.toUpperCase() };
+      }), window.i18n.getLang());
     }
     scheduleRender();
     setTimeout(tryConnect, 300);

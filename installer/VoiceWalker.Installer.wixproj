@@ -303,29 +303,6 @@
     <Message Condition="Exists('$(BuiltMsfsPackage)\manifest.json')"
              Text="==&gt; html_ui/ aus PackageSources ins Paket gespiegelt." Importance="high" />
 
-    <!-- layout.json regenerieren — kritisch wenn fspackagetool nicht lief
-         oder nach Sicherheits-Copys die File-Groessen nicht mehr matchen.
-         MSFS verweigert sonst stillschweigend Files zu laden (insbesondere
-         die .wasm), wenn die Groesse in layout.json nicht zur tatsaechlichen
-         Datei passt. -->
-    <Exec Condition="Exists('$(BuiltMsfsPackage)\manifest.json')"
-          Command="python &quot;$(RepoRoot)\tools\regenerate-layout-json.py&quot; &quot;$(BuiltMsfsPackage)&quot;"
-          WorkingDirectory="$(RepoRoot)" />
-    <Message Condition="Exists('$(BuiltMsfsPackage)\manifest.json')"
-             Text="==&gt; layout.json regeneriert (alle File-Groessen aktualisiert)." Importance="high" />
-
-    <!-- Public-Build: InGamePanel-Debug-Inject aus dem gespiegelten Package
-         strippen. panel.html und panel-efb.html bleiben in PackageSources
-         unveraendert — nur die Kopie im Build-Output wird gefiltert. Dadurch
-         enthaelt die ausgelieferte MSI weder die <script>-Inject-Zeile noch
-         den debug/-Subfolder. Im Debug-Build (VWDebugBuild=true) bleibt
-         alles drin. -->
-    <Exec Condition="'$(VWDebugBuild)' != 'true' And Exists('$(BuiltMsfsPackage)\manifest.json')"
-          Command="python &quot;$(MSBuildProjectDirectory)\strip-debug-inject.py&quot; &quot;$(BuiltMsfsPackage)&quot;"
-          WorkingDirectory="$(RepoRoot)" />
-    <Message Condition="'$(VWDebugBuild)' == 'true' And Exists('$(BuiltMsfsPackage)\manifest.json')"
-             Text="==&gt; Debug-Build: InGamePanel-Debug-Overlay AKTIV (debug/panel-debug.js wird mitgepackt)." Importance="high" />
-
     <!-- Sicherheits-Copy 3: EFB-App-dist deterministisch ins Paket
          spiegeln. fspackagetool macht das normalerweise via die
          efb_apps_voicewalker-AssetGroup, aber wenn er failed (oder die
@@ -344,6 +321,44 @@
           SkipUnchangedFiles="false" />
     <Message Condition="Exists('$(BuiltMsfsPackage)\manifest.json') And Exists('$(EfbAppDistJs)')"
              Text="==&gt; EFB-App-dist ins Paket gespiegelt." Importance="high" />
+
+    <!-- Public-Build: InGamePanel-Debug-Inject aus dem gespiegelten Package
+         strippen. panel.html und panel-efb.html bleiben in PackageSources
+         unveraendert — nur die Kopie im Build-Output wird gefiltert. Dadurch
+         enthaelt die ausgelieferte MSI weder die <script>-Inject-Zeile noch
+         den debug/-Subfolder. Im Debug-Build (VWDebugBuild=true) bleibt
+         alles drin.
+
+         REIHENFOLGE: Der Schritt stand frueher VOR den Sicherheits-Copys.
+         Sein Ergebnis wurde dadurch wieder ueberschrieben — v0.2.1 ist mit
+         debug/panel-debug.js und dem <script>-Tag ausgeliefert worden,
+         obwohl das Skript im Log "stripped 1 Block(s)" meldete. Er muss der
+         LETZTE Schritt sein, der Dateien im Paket anfasst. -->
+    <Exec Condition="'$(VWDebugBuild)' != 'true' And Exists('$(BuiltMsfsPackage)\manifest.json')"
+          Command="python &quot;$(MSBuildProjectDirectory)\strip-debug-inject.py&quot; &quot;$(BuiltMsfsPackage)&quot;"
+          WorkingDirectory="$(RepoRoot)" />
+    <Message Condition="'$(VWDebugBuild)' == 'true' And Exists('$(BuiltMsfsPackage)\manifest.json')"
+             Text="==&gt; Debug-Build: InGamePanel-Debug-Overlay AKTIV (debug/panel-debug.js wird mitgepackt)." Importance="high" />
+
+    <!-- Kontrolle: nach dem Strip darf im Public-Build nichts mehr auf das
+         Debug-Skript verweisen. Lieber hier abbrechen als es noch einmal
+         ausliefern. -->
+    <Exec Condition="'$(VWDebugBuild)' != 'true' And Exists('$(BuiltMsfsPackage)\manifest.json')"
+          Command="python &quot;$(MSBuildProjectDirectory)\verify-no-debug.py&quot; &quot;$(BuiltMsfsPackage)&quot;"
+          WorkingDirectory="$(RepoRoot)" />
+
+    <!-- layout.json regenerieren — kritisch wenn fspackagetool nicht lief
+         oder nach Sicherheits-Copys die File-Groessen nicht mehr matchen.
+         MSFS verweigert sonst stillschweigend Files zu laden (insbesondere
+         die .wasm), wenn die Groesse in layout.json nicht zur tatsaechlichen
+         Datei passt. Laeuft ganz zuletzt, damit auch die vom Strip
+         geaenderten bzw. entfernten Dateien korrekt erfasst sind. -->
+    <Exec Condition="Exists('$(BuiltMsfsPackage)\manifest.json')"
+          Command="python &quot;$(RepoRoot)\tools\regenerate-layout-json.py&quot; &quot;$(BuiltMsfsPackage)&quot;"
+          WorkingDirectory="$(RepoRoot)" />
+    <Message Condition="Exists('$(BuiltMsfsPackage)\manifest.json')"
+             Text="==&gt; layout.json regeneriert (alle File-Groessen aktualisiert)." Importance="high" />
+
     <Message Condition="Exists('$(BuiltMsfsPackage)\manifest.json')"
              Text="==&gt; MSFS-Package fertig: $(BuiltMsfsPackage)" Importance="high" />
   </Target>

@@ -414,6 +414,55 @@ def _spawn_edge_fallback(url: str) -> Optional[subprocess.Popen]:
         return None
 
 
+def _raise_existing_window(pid: int) -> bool:
+    """Holt ein bereits laufendes App-Fenster nach vorn.
+
+    Ohne das tat show_ui() genau nichts, sobald der Fensterprozess schon lief
+    — also in dem Fall, in dem der Nutzer den Knopf ueberhaupt erst drueckt:
+    Fenster ist offen, liegt aber hinter MSFS oder ist minimiert. Der Knopf
+    "im Browser einrichten" im In-Game-Panel blieb dadurch wirkungslos.
+
+    Windows laesst einen Hintergrundprozess nicht in jedem Fall den Vordergrund
+    an sich reissen. Steht MSFS im exklusiven Vollbild, blinkt der Eintrag in
+    der Taskleiste unter Umstaenden nur, statt dass das Fenster hochkommt —
+    mehr gibt die API dann nicht her.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        SW_RESTORE = 9
+        treffer: list[int] = []
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(
+            wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+        def _besuche(hwnd, _lparam):
+            fenster_pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(fenster_pid))
+            if fenster_pid.value == pid and user32.IsWindowVisible(hwnd):
+                treffer.append(hwnd)
+            return True
+
+        user32.EnumWindows(WNDENUMPROC(_besuche), 0)
+        if not treffer:
+            log.debug("tray: kein sichtbares Fenster zu pid=%d gefunden", pid)
+            return False
+
+        hwnd = treffer[0]
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, SW_RESTORE)
+        user32.SetForegroundWindow(hwnd)
+        log.info("tray: vorhandenes Fenster nach vorn geholt (pid=%d)", pid)
+        return True
+    except Exception as e:
+        log.debug("tray: Fenster-nach-vorn fehlgeschlagen: %s", e)
+        return False
+
+
 def show_ui() -> bool:
     """Tray-Klick: sichtbares App-Fenster oeffnen.
 
@@ -433,7 +482,13 @@ def show_ui() -> bool:
         return False
 
     if _app_proc is not None and _app_proc.poll() is None:
-        log.info("tray: app-Fenster laeuft bereits (pid=%d)", _app_proc.pid)
+        # Fenster laeuft schon — dann ist "oeffnen" gleichbedeutend mit "nach
+        # vorn holen". Frueher passierte hier gar nichts, weshalb der Knopf
+        # "im Browser einrichten" im In-Game-Panel wirkungslos blieb, sobald
+        # das Fenster einmal offen war und hinter MSFS lag.
+        log.info("tray: app-Fenster laeuft bereits (pid=%d) — hole es nach vorn",
+                 _app_proc.pid)
+        _raise_existing_window(_app_proc.pid)
         return True
 
     url = f"http://127.0.0.1:{_active_port}/"
