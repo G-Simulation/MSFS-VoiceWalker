@@ -94,3 +94,7 @@ packaging/.assets.stamp
 .machine_id
 # Nutzereigene Sprachdateien (<data_dir>/lang/*.json) — gehoeren dem Nutzer.
 /lang/
+
+# WASM-Zwischenbau: das Ergebnis wird nach
+# msfs-project/PackageSources/modules/ kopiert und nur dort versioniert.
+MSFS/Release/
