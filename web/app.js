@@ -1021,12 +1021,32 @@ function generateRoomId(name) {
   return slug ? `${slug}.${code}` : code;
 }
 
-/** Der Name, wenn einer vergeben wurde — sonst der Code selbst. */
-function roomDisplayName(id) {
-  const s = String(id || '');
-  const i = s.lastIndexOf('.');
-  if (i > 0) return s.slice(0, i);
-  return s.length > 32 ? s.slice(0, 30) + '…' : s;
+/**
+ * Kurzform fuer Pill und Panel-Badge, wo nur wenig Platz ist.
+ *
+ *   mit Namen   fly-in-frankfurt.echo-xray-hotel-zulu-victor-mike → fly-in-frankfurt
+ *   ohne Namen  hotel-quebec-papa-sierra-golf-mike                → HQPSGM
+ *
+ * Ohne Namen waere ein abgeschnittener Code wertlos ("hotel-quebec-papa-sier…").
+ * Die Anfangsbuchstaben der Funkalphabet-Woerter sind dagegen genau das, wofuer
+ * die Woerter stehen — kurz und trotzdem eindeutig.
+ *
+ * Selbst gewaehlte Passphrasen werden nicht abgekuerzt: dafuer muessen es
+ * exakt ROOM_CODE_WORDS Woerter sein, die alle aus dem Alphabet stammen.
+ */
+function roomShortLabel(id) {
+  const s = String(id || '').trim();
+  if (!s) return '';
+  const punkt = s.lastIndexOf('.');
+  if (punkt > 0) {
+    const name = s.slice(0, punkt);
+    return name.length > 24 ? name.slice(0, 22) + '…' : name;
+  }
+  const worte = s.split('-').filter(Boolean);
+  if (worte.length === ROOM_CODE_WORDS && worte.every(w => ICAO_WORDS.includes(w))) {
+    return worte.map(w => w[0].toUpperCase()).join('');
+  }
+  return s.length > 24 ? s.slice(0, 22) + '…' : s;
 }
 
 async function copyToClipboard(text) {
@@ -1168,7 +1188,7 @@ function renderPrivateRoomUi() {
     const id = state.privateRoom.passphrase;
     if (pillIcon)  pillIcon.textContent  = '🔒';
     if (pillLabel) pillLabel.textContent = T('mesh.private.room', {
-      id: roomDisplayName(id),
+      id: roomShortLabel(id),
     });
     if (actionBtn) {
       actionBtn.textContent = T('mesh.private.leave');

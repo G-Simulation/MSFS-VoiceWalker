@@ -116,7 +116,7 @@
       '<strong>VW DEBUG</strong>' +
       '<button id="vw-dbg-reload" title="Panel neu laden (R)">RELOAD</button>' +
       '<button id="vw-dbg-clear" title="Log leeren (C)">CLEAR</button>' +
-      '<button id="vw-dbg-close" title="Schliessen (Strg+Shift+D)">X</button>' +
+      '<button id="vw-dbg-close" title="Schließen (Strg+Shift+D)">X</button>' +
     '</div>' +
     '<div class="vw-dbg-log" id="vw-dbg-log"></div>' +
     '<div class="vw-dbg-hints">R = Reload  |  C = Clear  |  Strg+Shift+D = Toggle</div>';

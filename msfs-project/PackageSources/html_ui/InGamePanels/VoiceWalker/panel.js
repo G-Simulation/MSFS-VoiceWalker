@@ -72,6 +72,42 @@
     return values[targetIdx];
   }
 
+  // Muss zu roomShortLabel() in web/app.js passen — beide zeigen denselben
+  // Raum an, nur an verschiedenen Stellen.
+  const ICAO_WORDS = [
+    'alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel',
+    'india', 'juliett', 'kilo', 'lima', 'mike', 'november', 'oscar', 'papa',
+    'quebec', 'romeo', 'sierra', 'tango', 'uniform', 'victor', 'whiskey',
+    'xray', 'yankee', 'zulu',
+  ];
+  const ROOM_CODE_WORDS = 6;
+
+  /**
+   * Kurzform des Raum-Codes fuer Badge und Pro-Tab, wo wenig Platz ist.
+   *
+   *   mit Namen   fly-in-frankfurt.echo-xray-hotel-zulu-victor-mike → fly-in-frankfurt
+   *   ohne Namen  hotel-quebec-papa-sierra-golf-mike                → HQPSGM
+   *
+   * Vorher wurde stumpf nach 18 bzw. 24 Zeichen abgeschnitten — damit stand im
+   * Panel "fly-in-frankfu..." oder ein sinnloses Stueck Code.
+   */
+  function roomShortLabel(id) {
+    const s = String(id || '').trim();
+    if (!s) return '';
+    const punkt = s.lastIndexOf('.');
+    if (punkt > 0) {
+      const name = s.slice(0, punkt);
+      return name.length > 24 ? name.slice(0, 22) + '...' : name;
+    }
+    const worte = s.split('-').filter(Boolean);
+    if (worte.length === ROOM_CODE_WORDS && worte.every(function (w) {
+      return ICAO_WORDS.indexOf(w) !== -1;
+    })) {
+      return worte.map(function (w) { return w[0].toUpperCase(); }).join('');
+    }
+    return s.length > 24 ? s.slice(0, 22) + '...' : s;
+  }
+
   function fmtRange(m) {
     // Walker (on_foot ODER kein mySim) → IMMER m/km. Cockpit → IMMER NM,
     // auch bei kleinen Werten (mehr Nachkommastellen statt m-Switch).
@@ -630,10 +666,7 @@
     const rl = $('vw-room-label');
     if (state.ui && state.ui.privateRoom) {
       if (rb) rb.classList.add('visible');
-      if (rl) {
-        const pr = state.ui.privateRoom;
-        rl.textContent = pr.length > 24 ? pr.slice(0, 22) + '...' : pr;
-      }
+      if (rl) rl.textContent = roomShortLabel(state.ui.privateRoom);
     } else {
       if (rb) rb.classList.remove('visible');
     }
@@ -1403,8 +1436,7 @@
     if (room) {
       const T = (k) => (window.i18n ? window.i18n.t(k) : k);
       if (ui.privateRoom) {
-        const pr = String(ui.privateRoom);
-        room.textContent = T('panel.private.room_prefix') + ': ' + (pr.length > 18 ? pr.slice(0, 16) + '...' : pr);
+        room.textContent = T('panel.private.room_prefix') + ': ' + roomShortLabel(ui.privateRoom);
       } else {
         room.textContent = T('panel.private.empty');
       }

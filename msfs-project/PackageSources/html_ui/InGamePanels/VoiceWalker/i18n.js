@@ -72,7 +72,7 @@
 
       'settings.title':        'Einstellungen',
       'settings.subtitle':     'Werden in config.json gespeichert.',
-      'settings.close':        'Schliessen',
+      'settings.close':        'Schließen',
       'settings.done':         'Fertig',
       'settings.autostart':    'Auch ohne MSFS mit Windows starten',
       'settings.autostart.desc': 'Mit MSFS startet VoiceWalker sowieso automatisch. Diese Option lässt die App zusätzlich nach jedem Windows-Login im Tray laufen — sinnvoll z. B. für Tests ohne Sim.',
