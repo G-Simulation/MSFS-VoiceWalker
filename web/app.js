@@ -941,12 +941,12 @@ let _eventRangesActive = false;
 // landen im selben Mesh und hoeren sich gegenseitig. Der erzeugte Zufallsteil
 // schliesst das aus: 12 Zeichen aus einem 30er-Alphabet sind rund 59 Bit.
 //
-// Aufbau:  [name.]wort-wort-wort-wort-wort
+// Aufbau:  [name.]wort-wort-wort-wort-wort-wort
 //
-//   ohne Namen:  alpha-bravo-charlie-delta-echo
-//   mit Namen:   fly-in-frankfurt.papa-tango-zulu-mike-oscar
+//   ohne Namen:  alpha-bravo-charlie-delta-echo-golf
+//   mit Namen:   fly-in-frankfurt.papa-tango-zulu-mike-oscar-lima
 //
-// Der Code besteht aus fuenf Woertern des ICAO-Alphabets. Das ist genau das,
+// Der Code besteht aus sechs Woertern des ICAO-Alphabets. Das ist genau das,
 // was Piloten ohnehin buchstabieren — er laesst sich ueber Funk, Discord oder
 // Telefon durchgeben, ohne dass jemand nach "war das ein I oder ein L?" fragt.
 //
@@ -958,11 +958,18 @@ let _eventRangesActive = false;
 // Ein Lizenzschluessel sieht mit ABCDE-12345-FGHIJ-67890 voellig anders aus,
 // niemand tippt also das eine ins Feld fuer das andere.
 //
-// Zur Groessenordnung: fuenf aus 26 Woertern sind 26^5 = 11,9 Millionen
-// Kombinationen, rund 23,5 Bit. Fuer zwei zufaellig gleiche Codes braucht es
-// mehrere tausend gleichzeitig bestehende Raeume — und wenn ein Name vergeben
-// ist, muesste der auch noch uebereinstimmen. Frei gewaehlte Passphrasen wie
-// "test" kollidieren um Groessenordnungen leichter, genau darum geht es hier.
+// Zur Groessenordnung: sechs aus 26 Woertern sind 26^6 = 309 Millionen
+// Kombinationen, rund 28,2 Bit. Die Wahrscheinlichkeit, dass sich zwei von
+// n gleichzeitig offenen Raeumen denselben Code teilen (Geburtstagsproblem):
+//
+//     500 Raeume →  0,04 %      2.000 Raeume → 0,6 %
+//  10.000 Raeume → 14,9 %
+//
+// Fuer den absehbaren Umfang also unkritisch; wird das Feature einmal in
+// dieser Groessenordnung genutzt, gehoert ein siebtes Wort dazu (ROOM_CODE_WORDS).
+// Ist ein Name vergeben, muesste der ausserdem uebereinstimmen. Frei gewaehlte
+// Passphrasen wie "test" kollidieren um Groessenordnungen leichter, genau
+// darum geht es hier.
 //
 // Selbst gewaehlte Passphrasen bleiben moeglich, damit bestehende Raeume und
 // Event-Links weiter funktionieren.
@@ -973,7 +980,7 @@ const ICAO_WORDS = [
   'quebec', 'romeo', 'sierra', 'tango', 'uniform', 'victor', 'whiskey',
   'xray', 'yankee', 'zulu',
 ];
-const ROOM_CODE_WORDS = 5;
+const ROOM_CODE_WORDS = 6;
 
 function randomIndex(max) {
   // Rejection Sampling: 256 ist kein Vielfaches von 30, ein blankes Modulo

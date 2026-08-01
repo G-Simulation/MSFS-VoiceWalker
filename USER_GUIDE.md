@@ -278,12 +278,12 @@ demselben Code landen weltweit im selben Mesh, egal wo sie fliegen.
 2. Optional einen **Raumnamen** eintragen
 3. **"Raum erstellen"** klicken
 
-Du bekommst einen Code aus fünf Wörtern des Funkalphabets und bist sofort
+Du bekommst einen Code aus sechs Wörtern des Funkalphabets und bist sofort
 drin:
 
 ```
-ohne Namen   hotel-quebec-hotel-papa-sierra
-mit Namen    fly-in-frankfurt.echo-xray-hotel-zulu-victor
+ohne Namen   hotel-quebec-hotel-papa-sierra-golf
+mit Namen    fly-in-frankfurt.echo-xray-hotel-zulu-victor-mike
 ```
 
 Der Code lässt sich am Funk oder im Discord durchgeben, ohne dass jemand

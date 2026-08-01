@@ -73,8 +73,8 @@ bei.
 
 1. **Du als Veranstalter**: Web-UI → Bereich **Piloten** → "Privater Raum…"
    → Raumnamen eintragen (optional) → **"Raum erstellen"**. Du bekommst einen
-   Code aus fünf Wörtern des Funkalphabets und bist sofort drin:
-   `fly-in-frankfurt.echo-xray-hotel-zulu-victor`.
+   Code aus sechs Wörtern des Funkalphabets und bist sofort drin:
+   `fly-in-frankfurt.echo-xray-hotel-zulu-victor-mike`.
 2. **Code verteilen**: **Kopieren** legt ihn in die Zwischenablage, **Einladen**
    öffnet dein Mailprogramm mit einer fertigen Einladung samt Anleitung. Am
    Funk oder im Voice-Channel lässt er sich direkt vorlesen.
