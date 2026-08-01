@@ -4,7 +4,7 @@ REM   VoiceWalker — Release Script
 REM
 REM   Aufruf:  release-alpha.bat [version]
 REM            release-alpha.bat            -> nimmt DEFAULT_VERSION
-REM            release-alpha.bat 0.2.2      -> Tag v0.2.2
+REM            release-alpha.bat 0.2.3      -> Tag v0.2.3
 REM
 REM   Was es macht:
 REM     1) prueft dass der Working Tree sauber ist
@@ -31,7 +31,7 @@ REM ============================================================
 setlocal ENABLEDELAYEDEXPANSION
 cd /d "%~dp0"
 
-set "DEFAULT_VERSION=0.2.2"
+set "DEFAULT_VERSION=0.2.3"
 set "VERSION=%~1"
 if "%VERSION%"=="" set "VERSION=%DEFAULT_VERSION%"
 set "TAG=v%VERSION%"
@@ -109,7 +109,7 @@ echo [5/6] Tag %TAG%
 git rev-parse -q --verify "refs/tags/%TAG%" >nul
 if not errorlevel 1 (
     echo [ERROR] Tag %TAG% existiert bereits. Waehle eine neue Version:
-    echo           release-alpha.bat 0.2.2
+    echo           release-alpha.bat 0.2.3
     goto :fail
 )
 git tag -a %TAG% -m "Release %TAG%"

@@ -44,7 +44,7 @@ except Exception:
 # -----------------------------------------------------------------------------
 # Konfiguration
 # -----------------------------------------------------------------------------
-APP_VERSION          = "0.2.2"            # aktuelle Version — bei Release bumpen
+APP_VERSION          = "0.2.3"            # aktuelle Version — bei Release bumpen
 GITHUB_REPO          = "G-Simulation/MSFS-VoiceWalker"
 # Bewusst die Release-LISTE, nicht /releases/latest: dieser Endpunkt blendet
 # Pre-Releases aus. Waehrend der Alpha ist aber jedes Release eines, weshalb
