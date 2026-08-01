@@ -5,3 +5,11 @@ pystray>=0.19.5
 Pillow>=10.0.0
 pynput>=1.8.0
 sounddevice>=0.4.6
+# pywebview = embedded App-Window via Microsoft Edge WebView2.
+# Loest den Edge-deinstalliert-Fall (eigener Browser) UND den Browser-Tab-
+# Visibility-Bug (Mic-Permission auto-granted via Env-Var). Subprocess-
+# Pattern: voicewalker.exe --webview-window URL spawnt einen pywebview-
+# Container-Prozess; main.py-Backend bleibt unangetastet (kein Asyncio-
+# Threading-Refactor). pywebview zieht clr_loader/pythonnet als Transitiv-
+# Dependencies — die muessen im PyInstaller-Spec als hidden imports stehen.
+pywebview>=5.0

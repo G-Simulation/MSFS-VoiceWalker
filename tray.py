@@ -22,17 +22,22 @@ import logging
 import os
 import pathlib
 import subprocess
+import sys
 import threading
 import webbrowser
 from typing import Callable, Optional
+
+import webview_runtime
 
 log = logging.getLogger("tray")
 
 ICON_TITLE = "VoiceWalker"
 ICON_NAME  = "voicewalker"
 
-# Edge auf jedem Windows-System vorhanden. Falls nicht (sehr selten):
-# Audio-Discovery-Headless faellt aus, Tray-Klick faellt auf Default-Browser.
+# Edge auf jedem Windows-System vorhanden. Wird heute fuer die Audio-
+# Discovery (start_ui_hidden) genutzt UND als Fallback fuer das App-Fenster,
+# wenn der pywebview-Subprocess aus irgendeinem Grund nicht startet (z.B.
+# WebView2-Runtime fehlt und Bootstrapper auch nicht).
 EDGE_PATHS = [
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
     r"C:\Program Files\Microsoft Edge\Application\msedge.exe",
@@ -67,6 +72,179 @@ _app_proc:      Optional[subprocess.Popen] = None
 # dass die App im Hintergrund weiterlaeuft (Standard-Verhalten von Apps
 # die ins Tray minimieren). Wird in setup_tray() gesetzt.
 _tray_icon: Optional[object] = None
+
+
+def _detect_lang() -> str:
+    """Mini-i18n: Sprache fuer Tray-Notifications. Heuristik:
+      1. VOICEWALKER_LANG env var (Override fuer Tests)
+      2. System-Locale → 'de' wenn beginnt mit 'de_', sonst 'en'
+    Web-UI hat ihr eigenes i18n (localStorage 'vw.lang') — Tray laeuft im
+    Backend, da kommt das nicht ran. Wir bleiben absichtlich simpel."""
+    env = os.environ.get("VOICEWALKER_LANG", "").strip().lower()
+    if env in ("de", "en"):
+        return env
+    try:
+        import locale as _loc
+        lang = (_loc.getlocale()[0] or "").lower()
+        if lang.startswith("de"):
+            return "de"
+    except Exception:
+        pass
+    return "en"
+
+
+APP_USER_MODEL_ID = "GSimulations.VoiceWalker"
+
+
+def _icon_path_for_toast() -> Optional[str]:
+    """Pfad zur app-icon.ico fuer den Modern-Toast (XML <image>) und den
+    Registry-Eintrag (IconUri). Frozen → neben sys.executable, Dev →
+    relativ zum Repo-Root."""
+    candidates: list[pathlib.Path] = []
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(pathlib.Path(meipass) / "packaging" / "app-icon.ico")
+        candidates.append(pathlib.Path(sys.executable).parent / "packaging" / "app-icon.ico")
+    else:
+        candidates.append(pathlib.Path(__file__).parent / "packaging" / "app-icon.ico")
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+    return None
+
+
+def _set_app_user_model_id() -> None:
+    """Setzt die AppUserModelID + Registry-Eintrag fuer den Prozess.
+
+    Beides ist noetig fuer Win10/11 Toast-Delivery:
+      1. SetCurrentProcessExplicitAppUserModelID (per-Process Win32-Call) —
+         markiert den laufenden Prozess als von dieser App-ID gehoerend.
+      2. HKCU\\Software\\Classes\\AppUserModelId\\<id> mit DisplayName +
+         IconUri — Action-Center zeigt den Toast nur an, wenn die App-ID
+         dort registriert ist (sonst wird der Toast still gedroppt).
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes  # type: ignore[import-not-found]
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            APP_USER_MODEL_ID
+        )
+        log.info("AppUserModelID set: %s", APP_USER_MODEL_ID)
+    except Exception as e:
+        log.debug("SetCurrentProcessExplicitAppUserModelID failed: %s", e)
+    # Registry-Eintrag: Action-Center braucht DisplayName + IconUri damit
+    # der Toast nicht als "unregistered app" gefiltert wird.
+    try:
+        import winreg  # type: ignore[import-not-found]
+        icon = _icon_path_for_toast()
+        with winreg.CreateKey(
+            winreg.HKEY_CURRENT_USER,
+            rf"Software\Classes\AppUserModelId\{APP_USER_MODEL_ID}",
+        ) as key:
+            winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, "VoiceWalker")
+            if icon:
+                winreg.SetValueEx(key, "IconUri", 0, winreg.REG_SZ, icon)
+        log.info("AppUserModelID registry: DisplayName + IconUri (%s)",
+                 "with icon" if icon else "no icon")
+    except Exception as e:
+        log.warning("AppUserModelID registry write failed: %s", e)
+
+
+def _xml_escape(s: str) -> str:
+    return (s.replace("&", "&amp;")
+             .replace("<", "&lt;")
+             .replace(">", "&gt;")
+             .replace("\"", "&quot;")
+             .replace("'", "&apos;"))
+
+
+def _show_modern_toast(title: str, message: str) -> bool:
+    """Modern Windows Toast via PowerShell + WinRT API. Funktioniert auf
+    Win10/11 zuverlaessig (im Gegensatz zu pystray's Balloon-Tip-API, die
+    seit Win10 vom Action-Center oft gefiltert wird). Latenz ~0.5-1 s wegen
+    PowerShell-Start — fuer einen Welcome-Toast OK, fuer Echtzeit nicht.
+
+    Liefert True wenn der Toast erfolgreich getriggert wurde, False bei
+    Fehler — Caller kann dann auf pystray.notify als Fallback gehen."""
+    if sys.platform != "win32":
+        return False
+    title_x = _xml_escape(title)
+    msg_x = _xml_escape(message)
+    ps_script = (
+        "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType=WindowsRuntime] | Out-Null; "
+        "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType=WindowsRuntime] | Out-Null; "
+        f"$tpl='<toast><visual><binding template=\"ToastGeneric\"><text>{title_x}</text><text>{msg_x}</text></binding></visual></toast>'; "
+        "$xml = New-Object Windows.Data.Xml.Dom.XmlDocument; "
+        "$xml.LoadXml($tpl); "
+        "$toast = New-Object Windows.UI.Notifications.ToastNotification $xml; "
+        f"[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{APP_USER_MODEL_ID}').Show($toast)"
+    )
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+            creationflags=flags,
+            capture_output=True,
+            timeout=5.0,
+        )
+        if result.returncode != 0:
+            err = result.stderr.decode("utf-8", errors="replace").strip()
+            log.warning("modern toast: ps failed (rc=%d): %s", result.returncode, err[:200])
+            return False
+        return True
+    except Exception as e:
+        log.warning("modern toast: ps crashed: %s", e)
+        return False
+
+
+def notify(de: str, en: str, title: str = "VoiceWalker") -> None:
+    """Standard-Windows-Toast. Versucht zuerst Modern Toast (Win10/11
+    Action-Center-kompatibel via PowerShell+WinRT), faellt auf pystray's
+    Balloon-Tip zurueck wenn der Modern-Pfad scheitert (z.B. PowerShell
+    blockiert, WinRT-Init-Fehler). Sprache aus System-Locale."""
+    msg = de if _detect_lang() == "de" else en
+    log.info("tray.notify: lang=%s -> trying modern toast", _detect_lang())
+    if _show_modern_toast(title, msg):
+        log.info("tray.notify: modern toast sent")
+        return
+    # Fallback: pystray-Balloon-Tip
+    if _tray_icon is None:
+        log.debug("tray.notify: no icon for fallback")
+        return
+    log.info("tray.notify: falling back to pystray balloon-tip")
+    try:
+        _tray_icon.notify(msg, title)
+        log.info("tray.notify: pystray balloon-tip sent")
+    except Exception as e:
+        log.warning("tray.notify pystray-fallback failed: %s", e)
+
+
+def notify_started() -> None:
+    """Welcome-Toast direkt nach App-Start: User soll sehen, dass
+    VoiceWalker laeuft, auch wenn keine UI sichtbar ist (Tray-only-App-
+    Pattern). Klassische Windows-UX fuer Hintergrund-Apps.
+
+    Verzoegerung 1.5 s: pystray.run_detached() startet den Tray-Thread,
+    aber das Icon wird erst nach ~0.5-1 s im SysTray sichtbar und kann
+    erst dann notify() empfangen. Sofortiges notify direkt nach
+    setup_tray() feuert ins Leere. Wir delegieren in einen eigenen
+    Daemon-Thread, der schlaeft und dann den Toast schickt — der
+    Backend-Bootstrap blockiert nicht."""
+    import time as _t
+
+    def _delayed():
+        _t.sleep(1.5)
+        log.debug("tray.notify_started: showing welcome toast")
+        notify(
+            de="VoiceWalker läuft im Hintergrund.\nKlick aufs Tray-Icon zum Öffnen.",
+            en="VoiceWalker is running in the background.\nClick the tray icon to open.",
+        )
+
+    threading.Thread(
+        target=_delayed, daemon=True, name="vw-welcome-toast",
+    ).start()
 
 
 def _screen_center(width: int, height: int) -> tuple:
@@ -180,46 +358,104 @@ def start_ui_hidden() -> bool:
         return False
 
 
+def _spawn_pywebview_window(url: str) -> Optional[subprocess.Popen]:
+    """Startet voicewalker.exe --webview-window URL als Subprocess. Das ist
+    der primaere Pfad fuer das App-Fenster — laeuft in einem WebView2-
+    Container, der unabhaengig von einer Edge-Browser-Installation ist.
+
+    Im Frozen-Build ist sys.executable die VoiceWalker-EXE selbst und der
+    Argument-Switch in main.py:__main__ routet zu webview_window.run().
+    Im Dev-Modus (sys.executable == python.exe) starten wir python mit dem
+    main.py-Pfad als Argument."""
+    if not webview_runtime.is_installed():
+        log.info("tray: WebView2-Runtime fehlt, versuche Bootstrapper")
+        if not webview_runtime.ensure_installed():
+            log.warning("tray: WebView2-Runtime nicht installierbar")
+            return None
+
+    # Frozen → sys.executable ist die VoiceWalker.exe.
+    # Dev    → wir muessen "python main.py --webview-window URL" rufen.
+    if getattr(sys, "frozen", False):
+        cmd = [sys.executable, "--webview-window", url]
+    else:
+        main_py = pathlib.Path(__file__).parent / "main.py"
+        cmd = [sys.executable, str(main_py), "--webview-window", url]
+
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        proc = subprocess.Popen(cmd, creationflags=flags, close_fds=True)
+        log.info("tray: pywebview-Fenster gestartet (pid=%d)", proc.pid)
+        return proc
+    except Exception as e:
+        log.warning("tray: pywebview-Subprocess-Start fehlgeschlagen: %s", e)
+        return None
+
+
+def _spawn_edge_fallback(url: str) -> Optional[subprocess.Popen]:
+    """Fallback wenn pywebview nicht laeuft (kein WebView2, kein Bootstrapper,
+    PyInstaller-Frozen-Bug etc.): Edge --app wie frueher. Wenn auch Edge fehlt
+    → Default-Browser-Tab."""
+    edge = _edge_path()
+    if not edge:
+        return None
+    args = [
+        edge,
+        f"--app={url}",
+        "--window-size=1100,800",
+        f"--user-data-dir={_edge_user_data_dir('app')}",
+    ]
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        proc = subprocess.Popen(args, creationflags=flags, close_fds=True)
+        log.info("tray: edge-fallback-Fenster geoeffnet (pid=%d)", proc.pid)
+        return proc
+    except Exception as e:
+        log.warning("tray: Edge-Fallback-Start fehlgeschlagen: %s", e)
+        return None
+
+
 def show_ui() -> bool:
-    """Tray-Klick: sichtbares Edge --app Fenster oeffnen.
+    """Tray-Klick: sichtbares App-Fenster oeffnen.
 
-    Wenn schon offen (proc lebt), tut nichts — Edge wuerde dasselbe Profil
-    erkennen und das bestehende Fenster nach vorne holen. Wenn nicht offen:
-    neuen Prozess starten, eigenes Profil "edge-app" damit's nicht mit
-    headless-Profil kollidiert.
+    Reihenfolge:
+      1. pywebview-Subprocess (eigene EXE, WebView2-Container) — primaer.
+         Funktioniert auch ohne Edge-Browser-Installation. Auto-Mic-Permission
+         via Browser-Flag. Wenn WebView2-Runtime fehlt, ruft sich der
+         Bootstrapper selbst auf (silent install).
+      2. Edge --app — Fallback fuer den seltenen Fall dass pywebview nicht
+         hochkommt (z.B. PyInstaller-Bundle-Fehler im Frozen-Build).
+      3. Default-Browser-Tab — letzter Ausweg.
 
-    Bei Edge-nicht-gefunden Fallback auf Default-Browser via webbrowser.open.
-    """
+    Wenn das Fenster bereits laeuft (proc lebt): tut nichts."""
     global _app_proc
     if _active_port is None:
         log.debug("tray.show_ui: kein active_port")
         return False
 
-    url = f"http://127.0.0.1:{_active_port}/"
-    edge = _edge_path()
-    if edge:
-        if _app_proc is not None and _app_proc.poll() is None:
-            log.info("tray: app-Fenster laeuft bereits (pid=%d)", _app_proc.pid)
-            return True
-        args = [
-            edge,
-            f"--app={url}",
-            "--window-size=1100,800",
-            f"--user-data-dir={_edge_user_data_dir('app')}",
-        ]
-        try:
-            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            _app_proc = subprocess.Popen(args, creationflags=flags, close_fds=True)
-            log.info("tray: app-Fenster geoeffnet (pid=%d)", _app_proc.pid)
-            _watch_app_close(_app_proc)
-            return True
-        except Exception as e:
-            log.warning("tray: Edge --app-Start fehlgeschlagen: %s", e)
+    if _app_proc is not None and _app_proc.poll() is None:
+        log.info("tray: app-Fenster laeuft bereits (pid=%d)", _app_proc.pid)
+        return True
 
-    # Fallback: Default-Browser
+    url = f"http://127.0.0.1:{_active_port}/"
+
+    # 1. Primaerer Pfad: eigene EXE im Pywebview-Modus.
+    proc = _spawn_pywebview_window(url)
+    if proc is not None:
+        _app_proc = proc
+        _watch_app_close(_app_proc)
+        return True
+
+    # 2. Fallback: Edge --app (heutige Logik)
+    proc = _spawn_edge_fallback(url)
+    if proc is not None:
+        _app_proc = proc
+        _watch_app_close(_app_proc)
+        return True
+
+    # 3. Letzter Ausweg: Default-Browser-Tab
     try:
         webbrowser.open(url)
-        log.info("tray: ui geoeffnet via webbrowser.open (fallback, kein Edge)")
+        log.info("tray: ui geoeffnet via webbrowser.open (kein WebView2, kein Edge)")
         return True
     except Exception as e:
         log.warning("tray.show_ui: webbrowser.open failed: %s", e)
@@ -365,6 +601,9 @@ def setup_tray(port: int, on_quit: Callable[[], None]) -> Optional[object]:
     """
     global _active_port
     _active_port = port
+    # MUSS vor pystray-Init: ohne AppUserModelID droppt Win10/11 unsere Toasts
+    # stillschweigend (Notification-Center filtert App-IDs ohne Registry-Eintrag).
+    _set_app_user_model_id()
     try:
         import pystray
     except ImportError as e:
