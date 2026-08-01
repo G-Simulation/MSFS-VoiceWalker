@@ -20,8 +20,10 @@ Abhaengig nur von urllib (stdlib) — keine zusaetzlichen Packages.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -246,6 +248,33 @@ def _download_blocking(url: str, target: Path) -> None:
             f.write(chunk)
 
 
+# Im GitHub-Release-Body kann eine Zeile stehen wie:
+#     SHA256: 3a7bd8...   (oder SHA-256:, sha256:, mit oder ohne Bindestrich)
+# Convention: alles in einer Zeile, hex 64 chars. Wir parsen tolerant.
+_SHA256_RE = re.compile(
+    r"(?im)^\s*SHA[-\s]?256\s*[:=]\s*([a-fA-F0-9]{64})\b"
+)
+
+
+def _extract_expected_sha256(body: str) -> str | None:
+    """Parsed den Release-Body nach 'SHA256: <hex>'. None wenn nicht
+    vorhanden — der Aufrufer entscheidet ob das ein Fehler ist."""
+    if not body:
+        return None
+    m = _SHA256_RE.search(body)
+    return m.group(1).lower() if m else None
+
+
+def _compute_sha256_blocking(path: Path) -> str:
+    """Streaming-SHA256 fuer beliebig grosse Files (~100 MB MSI ist kein
+    Problem). Synchron — der Aufrufer muss to_thread() nutzen."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def _write_restart_helper(msi_path: Path, exe_path: str) -> Path:
     """Schreibt eine kleine .bat in %TEMP%, die:
        1) auf das Beenden von msiexec.exe wartet (Polling, ~1 s Tick)
@@ -306,6 +335,50 @@ async def download_and_install(silent: bool = False) -> bool:
         STATE.installing = False
         log.error("updater: %s", STATE.error)
         return False
+
+    # Integritaets-Check der heruntergeladenen MSI gegen einen erwarteten
+    # SHA256 aus dem Release-Body. HTTPS schuetzt nur den Transport; wenn der
+    # GitHub-Account oder ein Maintainer-Token kompromittiert wird, koennte
+    # ein boeswillig hochgeladenes Asset trotzdem ueber TLS sauber bei uns
+    # ankommen. Der SHA256 muss zusaetzlich im Release-Body stehen — der
+    # Angreifer braucht also gleichzeitig Schreibzugriff auf Body UND Asset.
+    #
+    # Convention im Release-Body (eine eigene Zeile, irgendwo im Body):
+    #     SHA256: 3a7bd8c19f...   (64 hex chars, case-insensitive)
+    #
+    # Verhalten:
+    #   - Hash im Body + match  → ok, weiter
+    #   - Hash im Body + mismatch → ABBRUCH, MSI loeschen, log.error
+    #   - Kein Hash im Body  → log.warning, weiter (legacy releases ohne
+    #     Hash bleiben installierbar; Migrations-Modus)
+    expected_sha = _extract_expected_sha256(STATE.release_notes or "")
+    if expected_sha:
+        try:
+            actual_sha = await asyncio.to_thread(_compute_sha256_blocking, target)
+        except Exception as e:
+            STATE.error = f"SHA256-Berechnung fehlgeschlagen: {e}"
+            STATE.installing = False
+            log.error("updater: %s", STATE.error)
+            try: target.unlink()
+            except Exception: pass
+            return False
+        if actual_sha.lower() != expected_sha.lower():
+            STATE.error = (
+                f"SHA256-Mismatch: erwartet {expected_sha[:12]}…, "
+                f"berechnet {actual_sha[:12]}… — Installation abgebrochen"
+            )
+            STATE.installing = False
+            log.error("updater: %s", STATE.error)
+            try: target.unlink()
+            except Exception: pass
+            return False
+        log.info("updater: SHA256 ok (%s)", expected_sha[:12] + "…")
+    else:
+        log.warning(
+            "updater: kein SHA256 im Release-Body — Integritaetspruefung "
+            "uebersprungen (legacy release). Setze 'SHA256: <hex>' in den "
+            "Release-Body ein damit zukuenftige Updates verifiziert werden."
+        )
 
     # Restart-Helper schreiben — laeuft NACH msiexec und startet die neue App
     helper_path = None
