@@ -63,9 +63,31 @@ _IPV4 = re.compile(
     r"(?:\.(?:25[0-5]|2[0-4]\d|1?\d{1,2})){3}\b"
 )
 
-# IPv6 — vereinfacht. Loopback ::1 wird unten textuell ausgeklammert.
+# IPv6. Loopback ::1 wird unten textuell ausgeklammert.
+#
+# Die frueher hier stehende Fassung (2-7 Doppelpunkte, beliebige Gruppenzahl)
+# war in beide Richtungen falsch:
+#   * Sie traf Uhrzeiten. "14:57:53" sind drei Hex-Gruppen mit Doppelpunkten
+#     — jeder Zeitstempel im Log wurde durch <IP> ersetzt, womit hochgeladene
+#     Logs fuer die Fehlersuche praktisch wertlos waren.
+#   * Sie traf komprimierte Adressen nur zum Teil. Aus "fe80::1ff:fe23:4567"
+#     wurde "fe80::<IP>", der Praefix blieb stehen.
+#
+# Eine echte IPv6-Adresse ist entweder die Vollform mit acht Gruppen (sieben
+# Doppelpunkten) oder enthaelt "::". Beides trifft auf eine Uhrzeit nicht zu.
+# Die Lookarounds verhindern Treffer mitten in laengeren Tokens (etwa dem
+# C++-Scope-Operator in Stack-Traces).
+_H = r"[A-Fa-f0-9]{1,4}"
 _IPV6 = re.compile(
-    r"\b(?:[A-Fa-f0-9]{1,4}:){2,7}[A-Fa-f0-9]{1,4}\b"
+    r"(?<![0-9A-Za-z:.])"
+    r"(?:"
+    rf"(?:{_H}:){{7}}{_H}"                    # Vollform: acht Gruppen
+    rf"|(?:{_H}:){{1,7}}:(?:{_H}:){{0,6}}{_H}"  # komprimiert, mit Rest dahinter
+    rf"|(?:{_H}:){{1,7}}:"                    # komprimiert, endet auf ::
+    rf"|::(?:{_H}:){{0,6}}{_H}"               # beginnt mit ::
+    r"|::"                                    # nur ::
+    r")"
+    r"(?![0-9A-Za-z:.])"
 )
 
 # E-Mail (RFC nicht voll, aber gut genug fuers Log)

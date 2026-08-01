@@ -149,6 +149,71 @@ def recent_log_entries(limit: int = 100) -> list[dict]:
     return items[-limit:]
 
 
+class WebsocketsNoiseFilter(logging.Filter):
+    """Stuft zwei harmlose Meldungen der websockets-Lib auf DEBUG herunter.
+
+    'connection rejected (200 OK)' faellt bei jeder normalen HTTP-Anfrage an:
+    unser WebSocket-Server bedient ueber process_request auch die Web-UI, und
+    jede geladene Datei erzeugt so eine Zeile.
+
+    'opening handshake failed' entsteht, wenn jemand eine TCP-Verbindung
+    oeffnet und ohne ein einziges Byte wieder schliesst — WebView2 macht das
+    zum Vorwaermen der Verbindung, Portscanner ebenso. Die Lib loggt das als
+    ERROR mit vollem Traceback, und damit feuert der AutoFeedbackHandler und
+    schickt das Log an Discord, obwohl nichts kaputt ist.
+
+    Heruntergestuft statt weggeworfen: wer mit --debug startet, sieht die
+    Meldungen weiterhin. Und heruntergestuft wird nur der jeweils harmlose
+    Fall — ein Handshake, der aus einem anderen Grund scheitert, und eine
+    abgelehnte Anfrage mit 4xx/5xx bleiben ERROR bzw. INFO.
+
+    Haengt an den Handlern, nicht am Logger: Logger-Filter greifen nur fuer
+    Records, die direkt auf diesem Logger entstehen, nicht fuer solche, die
+    von Kind-Loggern hochgereicht werden.
+    """
+
+    @staticmethod
+    def _leere_verbindung(exc_info) -> bool:
+        """True, wenn der Handshake daran scheiterte, dass die Gegenstelle
+        nichts gesendet hat. websockets verpackt das als InvalidMessage mit
+        einem EOFError in der Ursachenkette."""
+        exc = exc_info[1] if isinstance(exc_info, tuple) and len(exc_info) > 1 else None
+        gesehen = set()
+        while exc is not None and id(exc) not in gesehen:
+            if isinstance(exc, EOFError):
+                return True
+            gesehen.add(id(exc))
+            exc = exc.__cause__ or exc.__context__
+        return False
+
+    @staticmethod
+    def _abstufen(record: logging.LogRecord) -> None:
+        record.levelno = logging.DEBUG
+        record.levelname = "DEBUG"
+        record.exc_info = None
+        record.exc_text = None
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not record.name.startswith("websockets"):
+            return True
+        msg = str(record.msg)
+
+        if msg == "opening handshake failed":
+            if self._leere_verbindung(record.exc_info):
+                self._abstufen(record)
+            return True
+
+        if msg.startswith("connection rejected"):
+            # args = (status_value, status_phrase) — nur Erfolg/Redirect
+            # runterstufen, 4xx und 5xx sollen sichtbar bleiben.
+            status = record.args[0] if record.args else None
+            if isinstance(status, int) and 200 <= status < 400:
+                self._abstufen(record)
+            return True
+
+        return True
+
+
 def setup_logging() -> logging.Logger:
     """Einmalige Konfiguration aller Handler. Idempotent."""
     root = logging.getLogger()
@@ -213,6 +278,13 @@ def setup_logging() -> logging.Logger:
         )
 
     sys.excepthook = excepthook
+
+    # Rauschfilter der websockets-Lib auf alle Handler legen — insbesondere
+    # auf den AutoFeedbackHandler, damit harmlose leere TCP-Verbindungen
+    # keinen Fehlerbericht mehr ausloesen.
+    ws_filter = WebsocketsNoiseFilter()
+    for h in root.handlers:
+        h.addFilter(ws_filter)
 
     # asyncio-Tasks: wir setzen den Handler im main.py nach loop-Start
 
