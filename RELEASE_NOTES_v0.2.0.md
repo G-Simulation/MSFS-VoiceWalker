@@ -56,11 +56,16 @@ Hand installiert werden. Ab v0.2.0 läuft es dann von selbst.
 
 ## Prüfsumme
 
-Der Updater verifiziert das heruntergeladene Setup gegen den hier angegebenen
-Hash. Diese Zeile muss vor Veröffentlichung mit dem echten Wert des
-hochgeladenen Artefakts gefüllt werden:
+Der Updater verifiziert das heruntergeladene Setup gegen diesen Hash. Er gilt
+für `VoiceWalker-Setup.msi` aus diesem Release:
 
-    SHA256: <hier den echten SHA256 des Setups eintragen>
+    SHA256: b8df1b0712ef397dee1b8df24cca34f370ee2c0fdc2079d64eabf8dc85ba976c
 
-Ohne die Zeile installiert der Updater trotzdem, protokolliert aber eine
-Warnung, dass die Integritätsprüfung übersprungen wurde.
+Nachrechnen unter Windows:
+
+    certutil -hashfile VoiceWalker-Setup.msi SHA256
+
+Das Setup ist **nicht signiert**. Windows SmartScreen meldet deshalb einen
+unbekannten Herausgeber — über „Weitere Informationen“ → „Trotzdem ausführen“
+lässt sich die Installation fortsetzen. Der Hash oben ist die Möglichkeit,
+die Datei vorher zu prüfen.
