@@ -268,8 +268,23 @@
     const canvas = $('radar');
     const wrap   = $('vw-radar-wrap');
     if (!canvas || !wrap) return;
-    const w = Math.max(120, wrap.clientWidth  || 340);
-    const h = Math.max(120, wrap.clientHeight || 340);
+
+    // Solange das Panel nicht sichtbar ist — im EFB-Tablet also bis es
+    // aufgeklappt wird — liefert clientWidth eine 0. Frueher stand hier
+    // `wrap.clientWidth || 340`: aus "noch nicht messbar" wurde damit "ist
+    // 340 breit", und dieser Wert landete in _cssW. Ab da griff die
+    // Gleichheitspruefung unten, die Nachmessung der Boot-Phase war nach
+    // zwei Sekunden vorbei, und das Radar blieb schmal, bis ein Tabwechsel
+    // resizeCanvas() erneut aufrief.
+    //
+    // Jetzt wird gar nichts uebernommen, wenn nicht gemessen werden kann.
+    // Der naechste Tick misst neu.
+    const roh_w = wrap.clientWidth;
+    const roh_h = wrap.clientHeight;
+    if (!roh_w || !roh_h) return;
+
+    const w = Math.max(120, roh_w);
+    const h = Math.max(120, roh_h);
     if (_cssW === w && _cssH === h) return;
     _cssW = w; _cssH = h;
     const dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -290,15 +305,16 @@
       if (_wrap) {
         VW.resizeObserver = new ResizeObserver(resizeCanvas);
         VW.resizeObserver.observe(_wrap);
-      } else {
-        VW.resizeTimer = setInterval(resizeCanvas, 500);
       }
-    } catch (_) {
-      VW.resizeTimer = setInterval(resizeCanvas, 500);
-    }
-  } else {
-    VW.resizeTimer = setInterval(resizeCanvas, 500);
+    } catch (_) { /* faellt auf den Timer unten zurueck */ }
   }
+  // Der 500-ms-Tick laeuft jetzt IMMER mit, nicht nur wenn ResizeObserver
+  // fehlt. Im EFB-Tablet wird das Panel aus dem Verborgenen eingeblendet;
+  // ob Coherent GT dabei zuverlaessig ein Resize meldet, ist nicht garantiert
+  // — und wenn nicht, blieb das Radar in der falschen Groesse stehen.
+  // resizeCanvas() steigt sofort aus, wenn sich nichts geaendert hat, der
+  // Tick kostet also praktisch nichts.
+  VW.resizeTimer = setInterval(resizeCanvas, 500);
   // Boot-Phase: in den ersten ~2 Sekunden alle 16 ms (60 fps) resizen,
   // damit der Canvas dem Layout-Settle direkt folgt statt erst beim
   // 500-ms-Tick auf "richtige Groesse" zu springen. Kostet quasi nichts
