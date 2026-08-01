@@ -175,7 +175,7 @@ operation:
 - **Endpoints:** `…/wp-json/gsim-events/v1/license/validate` (check only)
   and `…/license/activate` (unlocking on this device), both under
   `https://www.gsimulations.de`
-- **Hoster:** IONOS SE, Elgendorfer Str. 57, 56410 Montabaur, Germany
+- **Hoster:** STRATO AG, Pascalstraße 10, 10587 Berlin, Germany
 - **Data transmitted:** license key, IP address, user-agent. On
   **activation** additionally a device identifier (random UUID, see
   section 3.1) and a device name — the latter being your computer's

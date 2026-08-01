@@ -179,7 +179,7 @@ zwingend erforderlich ist:
 - **Endpunkte:** `…/wp-json/gsim-events/v1/license/validate` (reine Prüfung)
   und `…/license/activate` (Freischaltung auf diesem Gerät), beide unter
   `https://www.gsimulations.de`
-- **Hoster:** IONOS SE, Elgendorfer Str. 57, 56410 Montabaur, Deutschland
+- **Hoster:** STRATO AG, Pascalstraße 10, 10587 Berlin, Deutschland
 - **Übertragene Daten:** Lizenzschlüssel, IP-Adresse, User-Agent. Bei der
   **Aktivierung** zusätzlich eine Geräte-Kennung (zufällige UUID, siehe
   Abschnitt 3.1) sowie ein Gerätename — dieser ist der **Hostname Ihres
