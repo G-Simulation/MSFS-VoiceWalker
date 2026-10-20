@@ -2,23 +2,32 @@
 
 Validates license keys against either:
   1. DEV mode — accepts any key starting with ``DEV-PRO-`` as Pro for 30 days,
-     ``DEV-FREE`` as Free. Used when the backend is not reachable AND no cache
-     is available, to keep local development unblocked.
-  2. Gsim-Events backend — our own WordPress plugin endpoint at
-     /wp-json/gsim-events/v1/license/validate. The endpoint talks to LMFWC
-     internally (same WordPress process), so NO consumer credentials are
-     transmitted from the client anymore — only the user license key.
+     ``DEV-FREE`` as Free. Nur in Debug-Builds (build_config.DEBUG_BUILD).
+  2. GSimulations-Lizenz-Plugin auf gsimulations.de —
+     POST /wp-json/gsim/v1/aktivieren mit key, product="voicewalker",
+     machine_id und machine_label. Keine Consumer-Credentials im Client.
+     Das Plugin prueft den Schluessel im License Manager, traegt das Geraet
+     ein (Geraete-Limit = timesActivatedMax, gleiche Tabelle wie frueher
+     gsim-events) und schickt einen signierten Offline-Schluessel (VW1-…)
+     zurueck. Der wird hier mit Ed25519 gegen den eingebauten oeffentlichen
+     Schluessel geprueft (Produkt, Ablauf, Shop-Schluessel, Geraet) — ohne
+     gueltige Signatur gilt die Antwort nicht.
 
-Validation result is cached in ``license_cache.json`` next to the exe with an
-``expires_at`` timestamp. If the backend is unreachable the cache is used for
-up to ``GRACE_SECONDS`` (7 days).
+Validation result (inkl. signiertem Schluessel) is cached in
+``license_cache.json`` with an ``expires_at`` timestamp. Beim Laden wird der
+Cache offline neu geprueft. If the backend is unreachable the cache is used
+for up to ``GRACE_SECONDS`` (7 days), nie ueber das signierte Ablaufdatum.
 
 Public API:
   validate(key, config_dir) -> dict  (sync, may do HTTP)
   load_cache(config_dir) -> dict | None
+  deactivate(key, config_dir) -> dict
 """
 from __future__ import annotations
 
+import base64
+import datetime
+import hashlib
 import json
 import logging
 import os
@@ -46,13 +55,35 @@ GRACE_SECONDS     = 7 * 24 * 3600          # offline grace
 DEV_PRO_SECONDS   = 30 * 24 * 3600         # dev keys last 30 days each validate
 HTTP_TIMEOUT      = 6.0
 
-# Our own plugin endpoints — keine Credentials noetig.
-# /activate setzt timesActivatedMax echt durch (Device-Tracking), /validate
-# bleibt als Fallback fuer Server-Versionen ohne /activate (Migrations-Phase).
-DEFAULT_ACTIVATE_URL = "https://www.gsimulations.de/wp-json/gsim-events/v1/license/activate"
-DEFAULT_VALIDATE_URL = "https://www.gsimulations.de/wp-json/gsim-events/v1/license/validate"
-# Backwards-compat-Alias — alter Code nutzte DEFAULT_API_URL.
-DEFAULT_API_URL      = DEFAULT_VALIDATE_URL
+# Lizenz-Plugin "GSimulations Lizenz-Aktivierung" (gsimulations-lizenz) — keine Credentials noetig.
+DEFAULT_ACTIVATE_URL   = "https://www.gsimulations.de/wp-json/gsim/v1/aktivieren"
+DEFAULT_DEACTIVATE_URL = "https://www.gsimulations.de/wp-json/gsim/v1/deaktivieren"
+# Backwards-compat-Alias — main.py loggt DEFAULT_API_URL.
+DEFAULT_API_URL        = DEFAULT_ACTIVATE_URL
+DEFAULT_VALIDATE_URL   = DEFAULT_ACTIVATE_URL
+PRODUCT                = "voicewalker"
+KEY_PREFIX             = "VW1"
+# Oeffentlicher Schluessel (32 Byte, hex) — passt zum privaten Schluessel im WordPress-Plugin
+# (gleicher G-Simulation-Schluessel wie GJarvis/GLighter/GReport).
+PUBLIC_KEY_HEX         = "e59303bd55fed27e39801ac948a5ae2168ae1f1e3a0dda74e71318e97e047488"
+_LIFETIME              = "9999-12-31"         # Plugin: Lizenz ohne Ablaufdatum
+
+# Texte fuer die Oberflaeche (UI zeigt "Kein Pro: <reason>").
+MESSAGES = {
+    "empty":     "Bitte Schlüssel eintragen.",
+    "invalid":   "Der Schlüssel ist ungültig.",
+    "disabled":  "Dieser Schlüssel ist gesperrt.",
+    "product":   "Das ist ein Schlüssel für ein anderes Produkt.",
+    "expired":   "Der Schlüssel ist abgelaufen.",
+    "machine":   "Geräte-Kennung ungültig – bitte VoiceWalker neu starten.",
+    "signature": "Die Antwort des Lizenzservers konnte nicht geprüft werden.",
+    "offline":   "Der Lizenzserver ist nicht erreichbar – bitte Internetverbindung prüfen und nochmal versuchen.",
+    "server":    "Der Lizenzserver ist gerade nicht bereit. Bitte später nochmal versuchen.",
+    "zu_oft":    "Zu viele Versuche – bitte in einer Stunde nochmal.",
+    "cache":     "Gespeicherte Lizenz ungültig – bitte online neu prüfen.",
+}
+# Endgueltige Antworten (Cache wird ueberschrieben); alles andere gilt als voruebergehend (Offline-Grace).
+_FINAL_ERRORS = ("empty", "invalid", "disabled", "product", "expired", "machine", "limit")
 
 
 def _machine_id_path(config_dir: pathlib.Path) -> pathlib.Path:
@@ -100,14 +131,30 @@ def _cache_path(config_dir: pathlib.Path) -> pathlib.Path:
     return config_dir / CACHE_FILENAME
 
 
+def _cache_path(config_dir: pathlib.Path) -> pathlib.Path:
+    return config_dir / CACHE_FILENAME
+
+
 def load_cache(config_dir: pathlib.Path) -> dict | None:
+    """Cache laden und offline neu pruefen. Ein Pro-Eintrag ohne gueltigen
+    signierten Schluessel (manipuliert, anderes Geraet, altes Format) kommt
+    als is_pro=False mit expires_at=0 zurueck — main.py validiert dann online."""
     try:
         p = _cache_path(config_dir)
-        if p.is_file():
-            return json.loads(p.read_text(encoding="utf-8"))
+        if not p.is_file():
+            return None
+        cached = json.loads(p.read_text(encoding="utf-8"))
     except Exception as e:
         log.warning("license cache load failed: %s", e)
-    return None
+        return None
+    if not isinstance(cached, dict):
+        return None
+    if not cached.get("is_pro"):
+        return cached
+    ok = _cache_ok(cached, cached.get("key") or "", _load_or_create_machine_id(config_dir), time.time())
+    if ok:
+        return ok
+    return {**cached, "is_pro": False, "reason": MESSAGES["cache"], "expires_at": 0}
 
 
 def _save_cache(config_dir: pathlib.Path, data: dict) -> None:
@@ -151,12 +198,13 @@ def _post_json(url: str, body: dict) -> tuple[int, dict | None]:
     req = urllib.request.Request(url, data=payload, method="POST")
     req.add_header("Content-Type", "application/json")
     req.add_header("Accept", "application/json")
+    req.add_header("User-Agent", "GSimulations-voicewalker")
     try:
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
             txt = resp.read().decode("utf-8", errors="ignore")
             return resp.getcode(), (json.loads(txt) if txt else None)
     except urllib.error.HTTPError as e:
-        # 4xx/5xx — Body kann trotzdem JSON sein (z.B. "limit_reached").
+        # 4xx/5xx — Body kann trotzdem JSON sein (z.B. 429 "zu_oft").
         try:
             txt = e.read().decode("utf-8", errors="ignore")
             return e.code, (json.loads(txt) if txt else None)
@@ -164,91 +212,199 @@ def _post_json(url: str, body: dict) -> tuple[int, dict | None]:
             return e.code, None
 
 
-def _build_result(data: dict, key: str, mode: str) -> dict:
-    """Server-Response in unser Cache-Format konvertieren."""
-    now = time.time()
-    is_pro  = bool(data.get("is_pro"))
-    reason  = str(data.get("reason") or ("ok" if is_pro else "invalid"))
-    act_max = int(data.get("timesActivatedMax") or 0)
-    act_now = int(data.get("timesActivated") or 0)
-    exp_raw = data.get("expires_at")
-    license_expires = 0.0
+def _limit_message(data: dict) -> str:
+    used, mx = int(data.get("used") or 0), int(data.get("max") or 0)
+    names = [str(d.get("label") or "").strip() for d in (data.get("devices") or []) if isinstance(d, dict)]
+    names = [n for n in names if n]
+    txt = f"Geräte-Limit erreicht: Der Schlüssel ist schon auf {used} von {mx} Geräten aktiviert"
+    if names:
+        txt += " (" + ", ".join(names[:5]) + ")"
+    return txt + ". Bitte VoiceWalker dort abmelden oder deinstallieren und nochmal versuchen."
+
+
+def _activate(key: str, machine_id: str, machine_label: str, url: str) -> dict:
+    """Beim Plugin aktivieren. Ergebnis: {ok: True, signed, until, order, license_expires}
+    oder {ok: False, error, ...}. Connection-Fehler → Exception (caller: Cache)."""
+    code, data = _post_json(url, {
+        "key": key, "product": PRODUCT, "machine_id": machine_id, "machine_label": machine_label,
+    })
+    if not isinstance(data, dict) or "ok" not in data:
+        return {"ok": False, "error": "zu_oft" if code == 429 else "server", "http": code}
+    if not data.get("ok"):
+        err = str(data.get("error") or "invalid")
+        if err not in _FINAL_ERRORS + ("zu_oft", "server"):
+            err = "server"
+        return {**data, "ok": False, "error": err, "http": code}
+    signed = str(data.get("key") or "")
+    v = _verify_signed(signed, key, machine_id)
+    if not v.get("ok"):
+        # Nicht vertrauenswuerdig (oder sofort abgelaufen) — nichts uebernehmen.
+        return {"ok": False, "error": "signature" if v["error"] == "signature" else "expired"}
+    return {**v, "signed": signed}
+
+
+# ---------- Ed25519 (RFC 8032, Abschnitt 6) ----------
+_p = 2 ** 255 - 19
+_L = 2 ** 252 + 27742317777372353535851937790883648493
+_d = -121665 * pow(121666, _p - 2, _p) % _p
+_I = pow(2, (_p - 1) // 4, _p)
+
+
+def _inv(x):
+    return pow(x, _p - 2, _p)
+
+
+def _xrecover(y):
+    xx = (y * y - 1) * _inv(_d * y * y + 1)
+    x = pow(xx, (_p + 3) // 8, _p)
+    if (x * x - xx) % _p != 0:
+        x = (x * _I) % _p
+    if x % 2 != 0:
+        x = _p - x
+    return x
+
+
+_By = 4 * _inv(5) % _p
+_B = (_xrecover(_By), _By, 1, _xrecover(_By) * _By % _p)   # erweiterte Koordinaten (X, Y, Z, T)
+
+
+def _add(P, Q):
+    A = (P[1] - P[0]) * (Q[1] - Q[0]) % _p
+    B = (P[1] + P[0]) * (Q[1] + Q[0]) % _p
+    C = 2 * P[3] * Q[3] * _d % _p
+    D = 2 * P[2] * Q[2] % _p
+    E, F, G, H = B - A, D - C, D + C, B + A
+    return (E * F % _p, G * H % _p, F * G % _p, E * H % _p)
+
+
+def _mul(s, P):
+    Q = (0, 1, 1, 0)
+    while s > 0:
+        if s & 1:
+            Q = _add(Q, P)
+        P = _add(P, P)
+        s >>= 1
+    return Q
+
+
+def _eq(P, Q):
+    return (P[0] * Q[2] - Q[0] * P[2]) % _p == 0 and (P[1] * Q[2] - Q[1] * P[2]) % _p == 0
+
+
+def _compress(P):
+    zi = _inv(P[2]); x = P[0] * zi % _p; y = P[1] * zi % _p
+    return int.to_bytes(y | ((x & 1) << 255), 32, "little")
+
+
+def _decompress(s):
+    if len(s) != 32:
+        return None
+    y = int.from_bytes(s, "little"); sign = y >> 255; y &= (1 << 255) - 1
+    if y >= _p:
+        return None
+    xx = (y * y - 1) * _inv(_d * y * y + 1) % _p
+    x = pow(xx, (_p + 3) // 8, _p)
+    if (x * x - xx) % _p != 0:
+        x = x * _I % _p
+    if (x * x - xx) % _p != 0:
+        return None
+    if (x & 1) != sign:
+        x = _p - x
+    return (x, y, 1, x * y % _p)
+
+
+def _h(m):
+    return int.from_bytes(hashlib.sha512(m).digest(), "little")
+
+
+def ed25519_verify(pub, msg, sig):
+    if len(sig) != 64:
+        return False
+    A = _decompress(pub); R = _decompress(sig[:32])
+    if A is None or R is None:
+        return False
+    s = int.from_bytes(sig[32:], "little")
+    if s >= _L:
+        return False
+    k = _h(sig[:32] + pub + msg) % _L
+    return _eq(_mul(s, _B), _add(R, _mul(k, A)))
+
+
+# ---------- Signierter Schluessel (VW1-…) ----------
+def _decode_signed(signed: str):
+    """(body, sig, daten) oder ValueError. Format wie GJarvis/GLighter: 1 Byte Version,
+    2 Byte Laenge, JSON {"p","e","n","i","w","m"} + 64 Byte Ed25519-Signatur."""
+    raw = "".join(ch for ch in str(signed or "").upper() if ch.isalnum())
+    if not raw.startswith(KEY_PREFIX):
+        raise ValueError("format")
+    raw = raw[len(KEY_PREFIX):]
     try:
-        if exp_raw:
-            import datetime as _dt
-            dt = _dt.datetime.fromisoformat(str(exp_raw).replace("Z", "+00:00"))
-            license_expires = dt.timestamp()
+        b = base64.b32decode(raw + "=" * (-len(raw) % 8))
     except Exception:
-        pass
-    cache_until = now + GRACE_SECONDS
-    if license_expires:
-        cache_until = min(cache_until, license_expires)
-    out = {
-        "is_pro":             is_pro,
-        "key":                key,
-        "reason":             reason,
-        "mode":               mode,
-        "validated_at":       now,
-        # expires_at = Cache-Gueltigkeit fuer Offline-Grace. UI zeigt dagegen
-        # license_expires an (0 = lifetime).
-        "expires_at":         cache_until,
-        "license_expires":    license_expires,
-        "timesActivated":     act_now,
-        "timesActivatedMax":  act_max,
-    }
-    # Bei limit_reached liefert der Server eine Liste der registrierten
-    # Devices — UI rendert "Du hast den Key auf folgenden Geraeten aktiviert".
-    if isinstance(data.get("devices"), list):
-        out["devices"] = data["devices"]
-    return out
+        raise ValueError("format")
+    if len(b) < 3 + 64 or b[0] != 1:
+        raise ValueError("format")
+    n = int.from_bytes(b[1:3], "big")
+    if len(b) != 3 + n + 64:
+        raise ValueError("format")
+    body, sig = b[:3 + n], b[3 + n:]
+    try:
+        data = json.loads(body[3:].decode("utf-8"))
+    except Exception:
+        raise ValueError("format")
+    if not isinstance(data, dict):
+        raise ValueError("format")
+    return body, sig, data
 
 
-def _gsim_activate(key: str, machine_id: str, machine_label: str,
-                    activate_url: str, validate_url: str) -> dict:
-    """Bevorzugt /activate (durchsetzbares Device-Tracking).
-    Fallback auf /validate wenn der Server /activate noch nicht hat (404)
-    oder mit Method-Not-Allowed antwortet — Migrations-Phase, bis das
-    gsim-events Plugin auf gsimulations.de auf die neue Version reaktiviert
-    ist. Ist /validate auch tot oder Connection-Fehler: Exception → caller
-    faellt auf Cache zurueck."""
-    body = {
-        "key":           key,
-        "machine_id":    machine_id,
-        "machine_label": machine_label,
-    }
-    code, data = _post_json(activate_url, body)
-    # 404 / 405 / 501 → Endpoint existiert noch nicht, Legacy-Pfad versuchen.
-    if code in (404, 405, 501):
-        log.info("license: /activate nicht verfuegbar (http %d) — nutze /validate-Fallback", code)
-        code2, data2 = _post_json(validate_url, {"key": key})
-        if data2 is None:
-            return {
-                "is_pro": False, "key": key,
-                "reason": f"http {code2} (validate fallback)",
-                "mode": "backend", "validated_at": time.time(),
-                "expires_at": 0, "license_expires": 0.0,
-            }
-        return _build_result(data2, key, mode="backend-legacy")
-
-    if data is None:
-        return {
-            "is_pro": False, "key": key, "reason": f"http {code}",
-            "mode": "backend", "validated_at": time.time(),
-            "expires_at": 0, "license_expires": 0.0,
-        }
-    return _build_result(data, key, mode="backend")
+def _machine_hash(machine_id: str) -> str:
+    return hashlib.sha256(machine_id.encode("utf-8")).hexdigest()[:16]
 
 
-# Backwards-compat: alter Name bleibt callable falls jemand extern import'd.
-def _gsim_validate(key: str, api_url: str) -> dict:
-    code, data = _post_json(api_url, {"key": key})
-    if data is None:
-        return {
-            "is_pro": False, "key": key, "reason": f"http {code}",
-            "mode": "backend", "validated_at": time.time(),
-            "expires_at": 0, "license_expires": 0.0,
-        }
-    return _build_result(data, key, mode="backend")
+def _verify_signed(signed: str, key: str, machine_id: str, today: datetime.date | None = None) -> dict:
+    """Prueft den signierten Schluessel offline. Ergebnis:
+    {ok: True, until, order, license_expires} oder {ok: False, error: signature|expired, until?}."""
+    try:
+        body, sig, data = _decode_signed(signed)
+        pub = bytes.fromhex(PUBLIC_KEY_HEX)
+    except ValueError:
+        return {"ok": False, "error": "signature"}
+    if not ed25519_verify(pub, body, sig):
+        return {"ok": False, "error": "signature"}
+    # Gebunden an Produkt, Shop-Schluessel (letzte 5 Zeichen wie im Plugin) und dieses Geraet.
+    if data.get("p") != PRODUCT:
+        return {"ok": False, "error": "signature"}
+    if str(data.get("w") or "").upper() != (key or "").strip().upper()[-5:]:
+        return {"ok": False, "error": "signature"}
+    if str(data.get("m") or "") != _machine_hash(machine_id):
+        return {"ok": False, "error": "signature"}
+    try:
+        until = datetime.date.fromisoformat(str(data.get("e")))
+    except ValueError:
+        return {"ok": False, "error": "signature"}
+    today = today or datetime.date.today()
+    if until < today:
+        return {"ok": False, "error": "expired", "until": until.isoformat()}
+    if until.isoformat() == _LIFETIME:
+        lic_exp = 0.0                                                        # 0 = dauerhaft
+    else:                                                                    # gueltig bis Ende des Tages
+        lic_exp = datetime.datetime.combine(until + datetime.timedelta(days=1), datetime.time()).timestamp()
+    return {"ok": True, "until": until.isoformat(), "order": str(data.get("n") or ""), "license_expires": lic_exp}
+
+
+def _cache_ok(cached: dict | None, key: str, machine_id: str, now: float) -> dict | None:
+    """Gecachtes Pro-Ergebnis nach erneuter Offline-Pruefung, sonst None."""
+    if not cached or not cached.get("is_pro") or cached.get("key") != key:
+        return None
+    if cached.get("mode") == "dev":
+        return cached if _DEBUG_BUILD else None
+    v = _verify_signed(cached.get("signed_key") or "", key, machine_id)
+    if not v.get("ok"):
+        return None
+    exp = float(cached.get("expires_at") or 0)
+    if v["license_expires"]:
+        exp = min(exp, v["license_expires"])                                 # nie ueber das signierte Ablaufdatum
+    return {**cached, "expires_at": exp, "license_expires": v["license_expires"]}
 
 
 def _purge_legacy_lmfwc_url() -> None:
@@ -294,20 +450,16 @@ def _reload_env_from_secrets(config_dir: pathlib.Path) -> None:
 def validate(key: str, config_dir: pathlib.Path) -> dict:
     """Validate (eigentlich activate) a license key.
     Returns dict with at least: is_pro, key, reason, mode, validated_at,
-    expires_at. Bei limit_reached zusaetzlich 'devices' (Liste der bereits
-    registrierten Geraete)."""
+    expires_at, license_expires. Bei Geraete-Limit zusaetzlich 'devices',
+    'timesActivated', 'timesActivatedMax'. 'error' = Fehlercode."""
     now = time.time()
     if _DEBUG_BUILD:
-        # Nur in Dev-Builds: env-Datei nachladen + LICENSE_API_URL-Override
-        # erlaubt. Im Public-Build laeuft alles strikt gegen die Defaults.
+        # Nur in Dev-Builds: env-Datei nachladen + URL-Override erlaubt. Die
+        # Antwort muss trotzdem korrekt signiert sein.
         _reload_env_from_secrets(config_dir)
         _purge_legacy_lmfwc_url()
-        # Override-Konvention: LICENSE_API_URL setzt /validate, neu
-        # LICENSE_ACTIVATE_URL setzt /activate. Beide unabhaengig overridable.
-        validate_url = os.environ.get("LICENSE_API_URL", "").strip() or DEFAULT_VALIDATE_URL
         activate_url = os.environ.get("LICENSE_ACTIVATE_URL", "").strip() or DEFAULT_ACTIVATE_URL
     else:
-        validate_url = DEFAULT_VALIDATE_URL
         activate_url = DEFAULT_ACTIVATE_URL
 
     # Dev-keys (DEV-PRO-* / DEV-FREE) umgehen den Backend-Call — nur in Dev-
@@ -329,32 +481,65 @@ def validate(key: str, config_dir: pathlib.Path) -> dict:
 
     machine_id    = _load_or_create_machine_id(config_dir)
     machine_label = _machine_label()
+    shop_key      = key.strip()
 
     try:
-        result = _gsim_activate(key, machine_id, machine_label,
-                                activate_url, validate_url)
-        # machine_id im Cache mit ablegen — falls wir spaeter mal
-        # /deactivate beim Uninstall callen wollen.
-        result["machine_id"] = machine_id
-        _save_cache(config_dir, result)
-        return result
+        r = _activate(shop_key, machine_id, machine_label, activate_url)
     except Exception as e:
         log.warning("license backend unreachable (%s); trying cache", e)
-        cached = load_cache(config_dir)
-        if cached and cached.get("key") == key and cached.get("expires_at", 0) > now:
-            cached = {**cached, "reason": f"offline grace ({cached.get('reason', '?')})"}
-            return cached
-        return {
-            "is_pro": False, "key": key,
-            "reason": f"backend unreachable: {e}",
-            "mode": "backend", "validated_at": now, "expires_at": 0,
+        r = {"ok": False, "error": "offline", "detail": str(e)}
+
+    if r.get("ok"):
+        cache_until = now + GRACE_SECONDS
+        if r["license_expires"]:
+            cache_until = min(cache_until, r["license_expires"])
+        result = {
+            "is_pro":          True,
+            "key":             key,
+            "reason":          "ok",
+            "mode":            "backend",
+            "validated_at":    now,
+            # expires_at = Cache-Gueltigkeit fuer Offline-Grace. UI zeigt dagegen
+            # license_expires an (0 = lifetime).
+            "expires_at":      cache_until,
+            "license_expires": r["license_expires"],
+            "signed_key":      r["signed"],
+            "order":           r.get("order", ""),
+            "machine_id":      machine_id,
         }
+        _save_cache(config_dir, result)
+        return result
+
+    err = r.get("error") or "server"
+    if err in _FINAL_ERRORS:
+        result = {
+            "is_pro": False, "key": key, "error": err,
+            "reason": _limit_message(r) if err == "limit" else MESSAGES.get(err, err),
+            "mode": "backend", "validated_at": now, "expires_at": 0, "license_expires": 0.0,
+            "machine_id": machine_id,
+        }
+        if err == "limit":
+            result["timesActivated"]    = int(r.get("used") or 0)
+            result["timesActivatedMax"] = int(r.get("max") or 0)
+            result["devices"]           = r.get("devices") or []
+        _save_cache(config_dir, result)
+        return result
+
+    # Voruebergehend (offline / server / zu_oft / signature): letztes Ergebnis weiter nutzen.
+    cached = _cache_ok(load_cache(config_dir), key, machine_id, now)
+    if cached and cached.get("expires_at", 0) > now:
+        return {**cached, "reason": f"offline grace ({cached.get('reason', '?')})"}
+    return {
+        "is_pro": False, "key": key, "error": err,
+        "reason": MESSAGES.get(err, err),
+        "mode": "backend", "validated_at": now, "expires_at": 0,
+    }
 
 
 def deactivate(key: str, config_dir: pathlib.Path) -> dict:
     """Slot freigeben — best-effort. Wird vom MSI-Uninstaller (oder manuell)
     aufgerufen damit der User auf einem neuen PC reinstallieren kann ohne im
-    timesActivatedMax-Cap zu landen.
+    Geraete-Limit zu landen.
 
     Returns: {success: bool, reason: str}. Best-effort — Fehler werden geloggt
     aber nicht propagiert; ein Uninstall darf am Backend-Outage nicht
@@ -364,18 +549,18 @@ def deactivate(key: str, config_dir: pathlib.Path) -> dict:
     machine_id = _load_or_create_machine_id(config_dir)
     if _DEBUG_BUILD:
         _reload_env_from_secrets(config_dir)
-        url = os.environ.get("LICENSE_DEACTIVATE_URL", "").strip() or \
-              DEFAULT_ACTIVATE_URL.rsplit("/", 1)[0] + "/deactivate"
+        url = os.environ.get("LICENSE_DEACTIVATE_URL", "").strip() or DEFAULT_DEACTIVATE_URL
     else:
-        url = DEFAULT_ACTIVATE_URL.rsplit("/", 1)[0] + "/deactivate"
+        url = DEFAULT_DEACTIVATE_URL
     try:
-        code, data = _post_json(url, {"key": key, "machine_id": machine_id})
+        code, data = _post_json(url, {"key": key.strip(), "product": PRODUCT, "machine_id": machine_id})
     except Exception as e:
         log.warning("license deactivate unreachable: %s", e)
         return {"success": False, "reason": f"unreachable: {e}"}
-    if data is None:
+    if not isinstance(data, dict):
         return {"success": False, "reason": f"http {code}"}
+    ok = bool(data.get("ok"))
     return {
-        "success": bool(data.get("success")),
-        "reason":  str(data.get("reason") or ""),
+        "success": ok,
+        "reason":  "deactivated" if ok else str(data.get("error") or f"http {code}"),
     }
